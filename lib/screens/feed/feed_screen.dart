@@ -14,6 +14,7 @@ import 'package:Ratedly/widgets/guidelines_popup.dart';
 import 'package:Ratedly/widgets/feedmessages.dart';
 import 'package:Ratedly/services/ads.dart';
 import 'package:Ratedly/utils/theme_provider.dart';
+import 'package:Ratedly/screens/Profile_page/profile_page.dart';
 
 // Define color schemes for both themes at top level
 class _ColorSet {
@@ -263,7 +264,9 @@ class _FeedScreenState extends State<FeedScreen> {
           _userCache[userMap['uid']] = userMap;
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      print('Error bulk fetching users: $e');
+    }
   }
 
   void _updatePostVisibility(int page, List<Map<String, dynamic>> posts) {
@@ -335,10 +338,14 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   // Method to open comments with transparent overlay
+// In FeedScreen class, update the _openComments method:
+// In FeedScreen class, update the _openComments method to use less barrier opacity:
   void _openComments(BuildContext context, Map<String, dynamic> post) {
     final postId = post['postId']?.toString() ?? '';
     final isVideo = post['isVideo'] == true;
     final postImage = post['postUrl']?.toString() ?? '';
+
+    print('🎬 FEEDSCREEN: Opening transparent comments for post $postId');
 
     showModalBottomSheet(
       context: context,
@@ -352,7 +359,9 @@ class _FeedScreenState extends State<FeedScreen> {
         postId: postId,
         postImage: postImage,
         isVideo: isVideo,
-        onClose: () {},
+        onClose: () {
+          print('🎬 FEEDSCREEN: CommentsBottomSheet closed');
+        },
         // The videoController will be passed from PostCard
       ),
     );
@@ -692,6 +701,153 @@ class _FeedScreenState extends State<FeedScreen> {
     return postId == _currentPlayingPostId;
   }
 
+  // =============================
+  // Skeleton Loading Widgets
+  // =============================
+
+  Widget _buildFeedSkeleton(_ColorSet colors) {
+    return PageView.builder(
+      scrollDirection: Axis.vertical,
+      itemCount: 3,
+      itemBuilder: (ctx, index) {
+        return _buildPostSkeleton(colors);
+      },
+    );
+  }
+
+  Widget _buildPostSkeleton(_ColorSet colors) {
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      color: colors.backgroundColor,
+      child: Stack(
+        children: [
+          // Media content skeleton (full screen)
+          Container(
+            color: colors.skeletonColor,
+            width: double.infinity,
+            height: double.infinity,
+          ),
+
+          // Right side action buttons skeleton
+          Positioned(
+            bottom: 220,
+            right: 16,
+            child: Column(
+              children: [
+                // User avatar skeleton
+                CircleAvatar(
+                  radius: 21,
+                  backgroundColor: colors.skeletonColor,
+                ),
+                const SizedBox(height: 20),
+                // Comment button skeleton
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: colors.skeletonColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Share button skeleton
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: colors.skeletonColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Bottom overlay skeleton
+          Positioned(
+            bottom: 60,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Rating section skeleton
+                  Container(
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: colors.skeletonColor,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Username and rating summary
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              height: 18,
+                              width: 120,
+                              decoration: BoxDecoration(
+                                color: colors.skeletonColor,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Container(
+                              height: 14,
+                              width: 80,
+                              decoration: BoxDecoration(
+                                color: colors.skeletonColor.withOpacity(0.7),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        height: 32,
+                        width: 120,
+                        decoration: BoxDecoration(
+                          color: colors.skeletonColor,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Description skeleton
+                  Container(
+                    height: 16,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: colors.skeletonColor.withOpacity(0.8),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    height: 16,
+                    width: 200,
+                    decoration: BoxDecoration(
+                      color: colors.skeletonColor.withOpacity(0.6),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
@@ -702,23 +858,14 @@ class _FeedScreenState extends State<FeedScreen> {
       backgroundColor: colors.backgroundColor,
       body: Stack(
         children: [
-          // Main feed content - ALWAYS show feed body
-          _buildFeedBody(colors),
+          // Main feed content
+          _isLoading ? _buildFeedSkeleton(colors) : _buildFeedBody(colors),
 
-          // Overlay tabs at the top - ALWAYS VISIBLE
+          // Overlay tabs at the top
           if (width <= webScreenSize) _buildOverlayTabs(colors),
 
-          // Overlay message button at top right - ALWAYS VISIBLE
+          // Overlay message button at top right
           if (width <= webScreenSize) _buildOverlayMessageButton(colors),
-
-          // Show loading indicator over the content if still loading
-          if (_isLoading)
-            Container(
-              color: colors.backgroundColor.withOpacity(0.7),
-              child: Center(
-                child: CircularProgressIndicator(color: colors.textColor),
-              ),
-            ),
         ],
       ),
     );
@@ -734,78 +881,43 @@ class _FeedScreenState extends State<FeedScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // For You tab with text label
-            _buildTabItem(1, 'For You', colors),
+            _buildOverlayTab('For You', 1, colors),
             const SizedBox(width: 40),
-            // Following tab with text label
-            _buildTabItem(0, 'Following', colors),
+            _buildOverlayTab('Following', 0, colors),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildTabItem(int index, String label, _ColorSet colors) {
-    return GestureDetector(
-      behavior: HitTestBehavior
-          .translucent, // This ensures the entire area is tappable
-      onTap: () {
-        _switchTab(index);
-        _showInterstitialAd();
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-            vertical: 8, horizontal: 16), // Added padding for larger tap area
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-                fontSize: 16,
-                fontFamily: 'Inter',
-              ),
-            ),
-            const SizedBox(height: 4),
-            Container(
-              height: 2,
-              width: 60,
-              decoration: BoxDecoration(
-                color:
-                    _selectedTab == index ? Colors.white : Colors.transparent,
-                borderRadius: BorderRadius.circular(1),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOverlayTab(int index, _ColorSet colors) {
+  Widget _buildOverlayTab(String text, int index, _ColorSet colors) {
     return GestureDetector(
       onTap: () {
         _switchTab(index);
         _showInterstitialAd();
       },
-      child: Container(
-        height: 24,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              height: 2,
-              width: 60,
-              decoration: BoxDecoration(
-                color:
-                    _selectedTab == index ? Colors.white : Colors.transparent,
-                borderRadius: BorderRadius.circular(1),
-              ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            text,
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 18,
+              fontFamily: 'Inter',
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 4),
+          Container(
+            height: 2,
+            width: 60,
+            decoration: BoxDecoration(
+              color: _selectedTab == index ? Colors.white : Colors.transparent,
+              borderRadius: BorderRadius.circular(1),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -822,6 +934,7 @@ class _FeedScreenState extends State<FeedScreen> {
             final count = snapshot.data ?? 0;
             final formattedCount = _formatMessageCount(count);
 
+            // Replace the inner part of StreamBuilder with this (icon only, no circle)
             return Stack(
               clipBehavior: Clip.none,
               alignment: Alignment.center,
@@ -836,7 +949,7 @@ class _FeedScreenState extends State<FeedScreen> {
                     ),
                     icon: Icon(
                       Icons.message,
-                      color: colors.iconColor,
+                      color: colors.iconColor, // use your theme color
                       size: 24,
                     ),
                     onPressed: _navigateToMessages,
@@ -852,15 +965,15 @@ class _FeedScreenState extends State<FeedScreen> {
                         minWidth: 20,
                         minHeight: 20,
                       ),
-                      decoration: BoxDecoration(
-                        color: colors.cardColor,
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
                         shape: BoxShape.circle,
                       ),
                       child: Center(
                         child: Text(
                           formattedCount,
-                          style: TextStyle(
-                            color: colors.textColor,
+                          style: const TextStyle(
+                            color: Colors.white,
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
                           ),
@@ -885,10 +998,6 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   Widget _buildFollowingFeed(_ColorSet colors) {
-    // Show empty state or loading within the feed
-    if (_isLoading && _followingPosts.isEmpty) {
-      return _buildLoadingFeed(colors);
-    }
     if (!_isLoading && _followingIds.isEmpty) {
       return _buildNoFollowingMessage(colors);
     }
@@ -897,18 +1006,8 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   Widget _buildForYouFeed(_ColorSet colors) {
-    // Show loading state if no posts yet
-    if (_isLoading && _forYouPosts.isEmpty) {
-      return _buildLoadingFeed(colors);
-    }
     return _buildPostsPageView(
         _forYouPosts, _forYouPageController, colors, true);
-  }
-
-  Widget _buildLoadingFeed(_ColorSet colors) {
-    return Center(
-      child: CircularProgressIndicator(color: colors.textColor),
-    );
   }
 
   Widget _buildNoFollowingMessage(_ColorSet colors) {
