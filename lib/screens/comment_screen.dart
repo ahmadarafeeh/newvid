@@ -154,7 +154,6 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
 
   void _onReplyFocusChange() {
     if (_replyFocusNode.hasFocus) {
-      // Scroll to bottom when keyboard appears
       Future.delayed(const Duration(milliseconds: 300), () {
         if (_scrollController.hasClients) {
           _scrollController.animateTo(
@@ -380,150 +379,124 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
     final safeUsername = user.username ?? 'Someone';
     final safePhotoUrl = user.photoUrl ?? '';
 
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withOpacity(0.8),
-            Colors.black.withOpacity(0.6),
-            Colors.black.withOpacity(0.4),
-            Colors.transparent,
-          ],
-          stops: const [0.0, 0.3, 0.7, 1.0],
-        ),
-      ),
-      child: Column(
-        children: [
-          // Drag handle bar - indicates swipe to close
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.6),
-                  borderRadius: BorderRadius.circular(2),
-                ),
+    return Column(
+      children: [
+        // Drag handle bar - indicates swipe to close
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
           ),
+        ),
 
-          // Header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Comments',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+        // Header
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Comments',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
                 ),
-                IconButton(
-                  icon: Icon(Icons.close, color: Colors.white),
-                  onPressed: () {
-                    FocusScope.of(context).unfocus();
-                    Navigator.of(context).pop();
-                  },
-                ),
-              ],
-            ),
+              ),
+              IconButton(
+                icon: Icon(Icons.close, color: Colors.white),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
           ),
+        ),
 
-          // Comments list - MORE TRANSPARENT
-          Expanded(
-            child: _isLoadingComments
-                ? Center(
-                    child: CircularProgressIndicator(
-                      color: Colors.white,
-                      backgroundColor: Colors.white.withOpacity(0.2),
-                    ),
-                  )
-                : _comments.isEmpty
-                    ? Center(
-                        child: Text(
-                          'No comments yet, be the first to comment!',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      )
-                    : Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 8),
-                        child: ListView.builder(
-                          controller: _scrollController,
-                          key: PageStorageKey('comments_${widget.postId}'),
-                          itemCount: _comments.length,
-                          itemBuilder: (ctx, index) {
-                            final row = _comments[index];
-                            final snap =
-                                SupabaseSnap(row['id']?.toString() ?? '', row);
-                            return Container(
-                              margin: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.black
-                                    .withOpacity(0.3), // More transparent
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: Colors.white.withOpacity(0.1),
-                                  width: 0.5,
-                                ),
-                              ),
-                              child: CommentCard(
-                                snap: snap,
-                                currentUserId: user.uid,
-                                postId: widget.postId,
-                                onReply: () => startReply(
-                                    snap.id, snap['name']?.toString() ?? ''),
-                                onNestedReply: (commentId, username) =>
-                                    startReply(commentId, username),
-                                initialRepliesToShow:
-                                    _expandedReplies[snap.id] ?? 2,
-                                onRepliesExpanded: (newCount) {
-                                  _expandedReplies[snap.id] = newCount;
-                                },
-                                isReplying: isReplying,
-                                isLiked: _commentLikes[snap.id] ?? false,
-                                likeCount: _commentLikeCounts[snap.id] ?? 0,
-                                onLikeChanged: _updateCommentLike,
-                              ),
-                            );
-                          },
+        // Comments list
+        Expanded(
+          child: _isLoadingComments
+              ? Center(
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    backgroundColor: Colors.white.withOpacity(0.2),
+                  ),
+                )
+              : _comments.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No comments yet, be the first to comment!',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
-          ),
+                    )
+                  : Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 8),
+                      child: ListView.builder(
+                        controller: _scrollController,
+                        key: PageStorageKey('comments_${widget.postId}'),
+                        itemCount: _comments.length,
+                        itemBuilder: (ctx, index) {
+                          final row = _comments[index];
+                          final snap =
+                              SupabaseSnap(row['id']?.toString() ?? '', row);
+                          return Container(
+                            margin: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.7),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: CommentCard(
+                              snap: snap,
+                              currentUserId: user.uid,
+                              postId: widget.postId,
+                              onReply: () => startReply(
+                                  snap.id, snap['name']?.toString() ?? ''),
+                              onNestedReply: (commentId, username) =>
+                                  startReply(commentId, username),
+                              initialRepliesToShow:
+                                  _expandedReplies[snap.id] ?? 2,
+                              onRepliesExpanded: (newCount) {
+                                _expandedReplies[snap.id] = newCount;
+                              },
+                              isReplying: isReplying,
+                              isLiked: _commentLikes[snap.id] ?? false,
+                              likeCount: _commentLikeCounts[snap.id] ?? 0,
+                              onLikeChanged: _updateCommentLike,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+        ),
 
-          // Bottom input bar - with keyboard padding
-          _buildBottomInputBar(colors, safeUsername, safePhotoUrl),
-        ],
-      ),
+        // Bottom input bar
+        _buildBottomInputBar(colors, safeUsername, safePhotoUrl),
+      ],
     );
   }
 
   Widget _buildBottomInputBar(
       _ColorSet colors, String safeUsername, String safePhotoUrl) {
-    final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      padding: EdgeInsets.only(
+    return Container(
+      padding: const EdgeInsets.only(
         left: 16,
         right: 8,
         top: 12,
-        bottom: 20 + bottomPadding, // Add keyboard padding
+        bottom: 20,
       ),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.5), // More transparent
+        color: Colors.black.withOpacity(0.85),
         borderRadius: const BorderRadius.only(
           topLeft: Radius.circular(20),
           topRight: Radius.circular(20),
@@ -587,23 +560,20 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
                           counterStyle:
                               TextStyle(color: Colors.white.withOpacity(0.6)),
                           filled: true,
-                          fillColor: Colors.white
-                              .withOpacity(0.08), // More transparent
+                          fillColor: Colors.white.withOpacity(0.1),
                           contentPadding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 12),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(20),
                             borderSide: BorderSide(
-                              color: Colors.white
-                                  .withOpacity(0.2), // Lighter border
+                              color: Colors.white.withOpacity(0.3),
                               width: 1,
                             ),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(20),
                             borderSide: BorderSide(
-                              color: Colors.white
-                                  .withOpacity(0.4), // Lighter border
+                              color: Colors.white.withOpacity(0.6),
                               width: 1.5,
                             ),
                           ),
@@ -641,13 +611,9 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
                                 vertical: 10, horizontal: 16),
                             decoration: BoxDecoration(
                               color: _containsBannedWords
-                                  ? Colors.white.withOpacity(0.1)
-                                  : Colors.white.withOpacity(0.9),
+                                  ? Colors.white.withOpacity(0.2)
+                                  : Colors.white,
                               borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: Colors.white.withOpacity(0.3),
-                                width: 1,
-                              ),
                             ),
                             child: Text(
                               'Post',
@@ -685,40 +651,78 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
     }
 
     return Scaffold(
-      resizeToAvoidBottomInset:
-          true, // KEY: Allow resizing when keyboard appears
+      resizeToAvoidBottomInset: false,
       backgroundColor: Colors.transparent,
-      body: GestureDetector(
-        onTap: () {
-          // Close comments when tapping on transparent areas
-          FocusScope.of(context).unfocus();
-          Navigator.of(context).pop();
-        },
-        child: Container(
-          height: MediaQuery.of(context).size.height,
-          child: Column(
-            children: [
-              // Top area - tap to close
-              Expanded(
-                flex: 2,
-                child: GestureDetector(
-                  onTap: () {
-                    FocusScope.of(context).unfocus();
+      body: Container(
+        height: MediaQuery.of(context).size.height,
+        child: Column(
+          children: [
+            // Comments Panel - Top 50% - TRANSPARENT
+            Container(
+              height: MediaQuery.of(context).size.height * 0.5,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withOpacity(0.9),
+                    Colors.black.withOpacity(0.7),
+                  ],
+                ),
+                borderRadius: const BorderRadius.only(
+                  bottomLeft: Radius.circular(20),
+                  bottomRight: Radius.circular(20),
+                ),
+              ),
+              child: _buildCommentsContent(colors, user),
+            ),
+
+            // Media Area - Bottom 50% - Fully interactive and visible
+            Expanded(
+              child: GestureDetector(
+                onTap: () {
+                  // Close comments when tapping on media area
+                  Navigator.of(context).pop();
+                },
+                onDoubleTap: () {
+                  // Allow double tap for liking or other actions
+                },
+                onVerticalDragUpdate: (details) {
+                  // Allow swiping down to close
+                  if (details.delta.dy > 0) {
                     Navigator.of(context).pop();
-                  },
-                  child: Container(
-                    color: Colors.transparent,
+                  }
+                },
+                child: Container(
+                  color: Colors.transparent,
+                  // This entire area is see-through and shows the media behind
+                  child: Stack(
+                    children: [
+                      // Media is visible through this transparent container
+                      Container(),
+
+                      // Swipe indicator bar at the top of media area
+                      Positioned(
+                        top: 8,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: Container(
+                            width: 60,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.5),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-
-              // Comments Panel - Bottom area
-              Container(
-                height: MediaQuery.of(context).size.height * 0.7,
-                child: _buildCommentsContent(colors, user),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
