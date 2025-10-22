@@ -748,34 +748,41 @@ class _FeedMessagesState extends State<FeedMessages>
     );
   }
 
-  Widget _buildEmptyStateSkeleton(_FeedMessagesColorSet colors) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(
-          Icons.chat_bubble_outline,
-          size: 64,
-          color: colors.textColor.withOpacity(0.3),
+  // UPDATED: Build a friendly empty state message without the button
+  Widget _buildEmptyStateMessage(_FeedMessagesColorSet colors) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.chat_bubble_outline,
+              size: 80,
+              color: colors.textColor.withOpacity(0.4),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'No messages yet',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w500,
+                color: colors.textColor.withOpacity(0.8),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Start a conversation with someone!\nYour messages will appear here.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 16,
+                color: colors.textColor.withOpacity(0.6),
+                height: 1.4,
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 16),
-        Container(
-          height: 20,
-          width: 150,
-          decoration: BoxDecoration(
-            color: colors.cardColor.withOpacity(0.5),
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          height: 16,
-          width: 200,
-          decoration: BoxDecoration(
-            color: colors.cardColor.withOpacity(0.4),
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -821,9 +828,7 @@ class _FeedMessagesState extends State<FeedMessages>
     final hasSuggestions = _showSuggestions && _suggestedUsers.isNotEmpty;
 
     if (!hasChats && !hasSuggestions) {
-      return Center(
-        child: _buildEmptyStateSkeleton(colors),
-      );
+      return _buildEmptyStateMessage(colors);
     }
 
     final totalItemCount = _existingChats.length +
