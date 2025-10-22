@@ -502,156 +502,159 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
 
   Widget _buildBottomInputBar(
       _ColorSet colors, String safeUsername, String safePhotoUrl) {
-    final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
-
-    return Container(
+    return Padding(
       padding: EdgeInsets.only(
-        left: 16,
-        right: 8,
-        top: 12,
-        bottom: 12 + bottomPadding, // Proper keyboard padding
+        bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.8),
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.only(
+          left: 16,
+          right: 8,
+          top: 12,
+          bottom: 12,
         ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_containsBannedWords)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8.0),
-              child: Text(
-                'Warning: Using such words will get you banned!',
-                style: TextStyle(
-                  color: Colors.red,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          if (_isPostingComment)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8.0),
-              child: LinearProgressIndicator(
-                color: Colors.white,
-                backgroundColor: Colors.white.withOpacity(0.2),
-              ),
-            ),
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: Colors.white.withOpacity(0.9),
-                backgroundImage:
-                    (safePhotoUrl.isNotEmpty && safePhotoUrl != "default")
-                        ? NetworkImage(safePhotoUrl)
-                        : null,
-                child: (safePhotoUrl.isEmpty || safePhotoUrl == "default")
-                    ? Icon(Icons.account_circle, size: 36, color: Colors.grey)
-                    : null,
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 12, right: 8),
-                  child: ValueListenableBuilder<String?>(
-                    valueListenable: replyingToUsernameNotifier,
-                    builder: (context, replyingToUsername, _) {
-                      return TextField(
-                        focusNode: _replyFocusNode,
-                        controller: commentEditingController,
-                        style: TextStyle(color: Colors.white),
-                        enabled: !_isPostingComment,
-                        maxLength: 250,
-                        decoration: InputDecoration(
-                          hintText: replyingToUsername != null
-                              ? 'Replying to @$replyingToUsername'
-                              : 'Comment as $safeUsername',
-                          hintStyle:
-                              TextStyle(color: Colors.white.withOpacity(0.8)),
-                          border: InputBorder.none,
-                          counterStyle:
-                              TextStyle(color: Colors.white.withOpacity(0.6)),
-                          filled: true,
-                          fillColor: Colors.white.withOpacity(0.1),
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 12),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(20),
-                            borderSide: BorderSide(
-                              color: Colors.white.withOpacity(0.2),
-                              width: 1,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(20),
-                            borderSide: BorderSide(
-                              color: Colors.white.withOpacity(0.4),
-                              width: 1.5,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.8),
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(20),
+            topRight: Radius.circular(20),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_containsBannedWords)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8.0),
+                child: Text(
+                  'Warning: Using such words will get you banned!',
+                  style: TextStyle(
+                    color: Colors.red,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
-              _isPostingComment
-                  ? Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      ),
-                    )
-                  : Consumer<UserProvider>(
-                      builder: (context, userProvider, _) {
-                        final user = userProvider.user;
-                        if (user == null) {
-                          return const SizedBox.shrink();
-                        }
-                        return InkWell(
-                          onTap: _containsBannedWords
-                              ? null
-                              : () => postComment(
-                                  user.uid, safeUsername, safePhotoUrl),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 10, horizontal: 16),
-                            decoration: BoxDecoration(
-                              color: _containsBannedWords
-                                  ? Colors.white.withOpacity(0.1)
-                                  : Colors.white.withOpacity(0.9),
+            if (_isPostingComment)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8.0),
+                child: LinearProgressIndicator(
+                  color: Colors.white,
+                  backgroundColor: Colors.white.withOpacity(0.2),
+                ),
+              ),
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: Colors.white.withOpacity(0.9),
+                  backgroundImage:
+                      (safePhotoUrl.isNotEmpty && safePhotoUrl != "default")
+                          ? NetworkImage(safePhotoUrl)
+                          : null,
+                  child: (safePhotoUrl.isEmpty || safePhotoUrl == "default")
+                      ? Icon(Icons.account_circle, size: 36, color: Colors.grey)
+                      : null,
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 12, right: 8),
+                    child: ValueListenableBuilder<String?>(
+                      valueListenable: replyingToUsernameNotifier,
+                      builder: (context, replyingToUsername, _) {
+                        return TextField(
+                          focusNode: _replyFocusNode,
+                          controller: commentEditingController,
+                          style: TextStyle(color: Colors.white),
+                          enabled: !_isPostingComment,
+                          maxLength: 250,
+                          decoration: InputDecoration(
+                            hintText: replyingToUsername != null
+                                ? 'Replying to @$replyingToUsername'
+                                : 'Comment as $safeUsername',
+                            hintStyle:
+                                TextStyle(color: Colors.white.withOpacity(0.8)),
+                            border: InputBorder.none,
+                            counterStyle:
+                                TextStyle(color: Colors.white.withOpacity(0.6)),
+                            filled: true,
+                            fillColor: Colors.white.withOpacity(0.1),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 12),
+                            enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: Colors.white.withOpacity(0.3),
+                              borderSide: BorderSide(
+                                color: Colors.white.withOpacity(0.2),
                                 width: 1,
                               ),
                             ),
-                            child: Text(
-                              'Post',
-                              style: TextStyle(
-                                color: _containsBannedWords
-                                    ? Colors.white.withOpacity(0.4)
-                                    : Colors.black,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(20),
+                              borderSide: BorderSide(
+                                color: Colors.white.withOpacity(0.4),
+                                width: 1.5,
                               ),
                             ),
                           ),
                         );
                       },
                     ),
-            ],
-          ),
-        ],
+                  ),
+                ),
+                _isPostingComment
+                    ? Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        ),
+                      )
+                    : Consumer<UserProvider>(
+                        builder: (context, userProvider, _) {
+                          final user = userProvider.user;
+                          if (user == null) {
+                            return const SizedBox.shrink();
+                          }
+                          return InkWell(
+                            onTap: _containsBannedWords
+                                ? null
+                                : () => postComment(
+                                    user.uid, safeUsername, safePhotoUrl),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 10, horizontal: 16),
+                              decoration: BoxDecoration(
+                                color: _containsBannedWords
+                                    ? Colors.white.withOpacity(0.1)
+                                    : Colors.white.withOpacity(0.9),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: Colors.white.withOpacity(0.3),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Text(
+                                'Post',
+                                style: TextStyle(
+                                  color: _containsBannedWords
+                                      ? Colors.white.withOpacity(0.4)
+                                      : Colors.black,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -671,7 +674,7 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
     }
 
     return Scaffold(
-      resizeToAvoidBottomInset: true, // Ensure this is true
+      resizeToAvoidBottomInset: false, // CHANGED TO FALSE
       backgroundColor: Colors.transparent,
       body: GestureDetector(
         onTap: () {
@@ -681,11 +684,14 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
         },
         child: Container(
           height: MediaQuery.of(context).size.height,
-          child: Column(
+          child: Stack(
             children: [
               // Top area - tap to close
-              Expanded(
-                flex: 2,
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: MediaQuery.of(context).size.height * 0.3,
                 child: GestureDetector(
                   onTap: () {
                     FocusScope.of(context).unfocus();
@@ -698,9 +704,14 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
               ),
 
               // Comments Panel - Bottom area
-              Container(
-                height: MediaQuery.of(context).size.height * 0.7,
-                child: _buildCommentsContent(colors, user),
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  height: MediaQuery.of(context).size.height * 0.7,
+                  child: _buildCommentsContent(colors, user),
+                ),
               ),
             ],
           ),
