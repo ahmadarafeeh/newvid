@@ -63,7 +63,6 @@ class SupabaseSnap {
 }
 
 /// TikTok/Reels Style Comments Bottom Sheet with Transparent Background
-/// TikTok/Reels Style Comments Bottom Sheet with Transparent Background
 class CommentsBottomSheet extends StatefulWidget {
   final String postId;
   final String postImage;
@@ -155,6 +154,7 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
 
   void _onReplyFocusChange() {
     if (_replyFocusNode.hasFocus) {
+      // Scroll to bottom when keyboard appears
       Future.delayed(const Duration(milliseconds: 300), () {
         if (_scrollController.hasClients) {
           _scrollController.animateTo(
@@ -428,7 +428,10 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
                 ),
                 IconButton(
                   icon: Icon(Icons.close, color: Colors.white),
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: () {
+                    FocusScope.of(context).unfocus();
+                    Navigator.of(context).pop();
+                  },
                 ),
               ],
             ),
@@ -493,8 +496,6 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
                                 isLiked: _commentLikes[snap.id] ?? false,
                                 likeCount: _commentLikeCounts[snap.id] ?? 0,
                                 onLikeChanged: _updateCommentLike,
-                                // Force transparent styling for comments sheet
-                                forcedTransparent: true,
                               ),
                             );
                           },
@@ -502,7 +503,7 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
                       ),
           ),
 
-          // Bottom input bar - MORE TRANSPARENT
+          // Bottom input bar - with keyboard padding
           _buildBottomInputBar(colors, safeUsername, safePhotoUrl),
         ],
       ),
@@ -511,12 +512,15 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
 
   Widget _buildBottomInputBar(
       _ColorSet colors, String safeUsername, String safePhotoUrl) {
-    return Container(
-      padding: const EdgeInsets.only(
+    final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: EdgeInsets.only(
         left: 16,
         right: 8,
         top: 12,
-        bottom: 20,
+        bottom: 20 + bottomPadding, // Add keyboard padding
       ),
       decoration: BoxDecoration(
         color: Colors.black.withOpacity(0.5), // More transparent
@@ -681,33 +685,37 @@ class CommentsBottomSheetState extends State<CommentsBottomSheet> {
     }
 
     return Scaffold(
-      resizeToAvoidBottomInset: false,
+      resizeToAvoidBottomInset:
+          true, // KEY: Allow resizing when keyboard appears
       backgroundColor: Colors.transparent,
       body: GestureDetector(
         onTap: () {
           // Close comments when tapping on transparent areas
+          FocusScope.of(context).unfocus();
           Navigator.of(context).pop();
         },
         child: Container(
           height: MediaQuery.of(context).size.height,
-          child: Stack(
+          child: Column(
             children: [
-              // Full screen transparent overlay
-              Container(
-                color: Colors.black.withOpacity(0.3),
+              // Top area - tap to close
+              Expanded(
+                flex: 2,
+                child: GestureDetector(
+                  onTap: () {
+                    FocusScope.of(context).unfocus();
+                    Navigator.of(context).pop();
+                  },
+                  child: Container(
+                    color: Colors.transparent,
+                  ),
+                ),
               ),
 
-              // Comments Panel - Draggable from bottom
-              DraggableScrollableSheet(
-                initialChildSize: 0.7,
-                minChildSize: 0.3,
-                maxChildSize: 0.9,
-                builder: (context, scrollController) {
-                  _scrollController.addListener(() {
-                    // Sync the drag controller with our scroll controller
-                  });
-                  return _buildCommentsContent(colors, user);
-                },
+              // Comments Panel - Bottom area
+              Container(
+                height: MediaQuery.of(context).size.height * 0.7,
+                child: _buildCommentsContent(colors, user),
               ),
             ],
           ),
