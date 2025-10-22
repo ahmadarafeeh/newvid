@@ -125,23 +125,15 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
   Widget _buildOnboardingSkeleton(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
-    final skeletonColor = isDarkMode
-        ? const Color(0xFF333333).withOpacity(0.6)
-        : Colors.grey[300]!.withOpacity(0.6);
+    final progressColor = isDarkMode ? Colors.white70 : Colors.grey[700]!;
     final backgroundColor =
         isDarkMode ? const Color(0xFF121212) : Colors.grey[100]!;
 
     return Scaffold(
       backgroundColor: backgroundColor,
       body: Center(
-        child: Container(
-          width: 200,
-          height: 200,
-          decoration: BoxDecoration(
-            color: skeletonColor,
-            borderRadius: BorderRadius.circular(20),
-          ),
-        ),
+        child: CircularProgressIndicator(
+            color: progressColor), // Circular instead of square
       ),
     );
   }
