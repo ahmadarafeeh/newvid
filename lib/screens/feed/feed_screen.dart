@@ -735,39 +735,48 @@ class _FeedScreenState extends State<FeedScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             // For You tab with text label
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'For You',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 16,
-                    fontFamily: 'Inter',
-                  ),
-                ),
-                const SizedBox(height: 4),
-                _buildOverlayTab(1, colors),
-              ],
-            ),
+            _buildTabItem(1, 'For You', colors),
             const SizedBox(width: 40),
             // Following tab with text label
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Following',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 16,
-                    fontFamily: 'Inter',
-                  ),
-                ),
-                const SizedBox(height: 4),
-                _buildOverlayTab(0, colors),
-              ],
+            _buildTabItem(0, 'Following', colors),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabItem(int index, String label, _ColorSet colors) {
+    return GestureDetector(
+      behavior: HitTestBehavior
+          .translucent, // This ensures the entire area is tappable
+      onTap: () {
+        _switchTab(index);
+        _showInterstitialAd();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            vertical: 8, horizontal: 16), // Added padding for larger tap area
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+                fontFamily: 'Inter',
+              ),
+            ),
+            const SizedBox(height: 4),
+            Container(
+              height: 2,
+              width: 60,
+              decoration: BoxDecoration(
+                color:
+                    _selectedTab == index ? Colors.white : Colors.transparent,
+                borderRadius: BorderRadius.circular(1),
+              ),
             ),
           ],
         ),
