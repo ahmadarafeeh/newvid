@@ -17,6 +17,8 @@ import 'dart:ui';
 
 // Add this import for SupabasePostsMethods
 import 'package:Ratedly/resources/supabase_posts_methods.dart';
+// Add import for RatingListScreen
+import 'package:Ratedly/widgets/rating_list_screen_postcard.dart';
 
 // Video Manager to ensure only one video plays at a time
 class VideoManager {
@@ -478,7 +480,7 @@ class _PostCardState extends State<PostCard>
     _postChannel.subscribe();
   }
 
-  // Fetch initial ratings
+  // Fetch initial ratings - same as ImageViewScreen
   Future<void> _fetchInitialRatings() async {
     setState(() => _isLoadingRatings = true);
 
@@ -551,7 +553,7 @@ class _PostCardState extends State<PostCard>
     }
   }
 
-  // Handle realtime rating updates
+  // Handle realtime rating updates - same as ImageViewScreen
   void _handleRatingUpdate(PostgresChangePayload payload) {
     final newRecord = payload.newRecord;
     final oldRecord = payload.oldRecord;
@@ -647,22 +649,20 @@ class _PostCardState extends State<PostCard>
     }
   }
 
-  // Rating submission handler
+  // Rating submission handler - same as ImageViewScreen
   void _handleRatingSubmitted(double rating) async {
     final user = Provider.of<UserProvider>(context, listen: false).user;
-
     if (user == null) {
       setState(() => _isRating = false);
       return;
     }
 
-    // OPTIMISTIC UPDATE
     setState(() {
       _isRating = true;
       _userRating = rating;
       _showSlider = false;
 
-      // Optimistic update
+      // Optimistic update - same logic as ImageViewScreen
       if (_totalRatingsCount > 0) {
         final newTotal = _averageRating * _totalRatingsCount;
         if (_userRating != null) {
@@ -678,7 +678,6 @@ class _PostCardState extends State<PostCard>
       }
     });
 
-    // API CALL
     try {
       final success = await _postsMethods.ratePost(
         widget.snap['postId'],
@@ -695,9 +694,7 @@ class _PostCardState extends State<PostCard>
       }
     } finally {
       if (mounted) {
-        setState(() {
-          _isRating = false;
-        });
+        setState(() => _isRating = false);
       }
     }
   }
@@ -1250,6 +1247,7 @@ class _PostCardState extends State<PostCard>
     });
   }
 
+  // Updated to use RatingListScreen instead of FastRatingListScreen - same as ImageViewScreen
   void _navigateToRatingList() {
     if (_isVideo && _isVideoInitialized && _isVideoPlaying) {
       _pauseVideo();
@@ -1257,7 +1255,7 @@ class _PostCardState extends State<PostCard>
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => FastRatingListScreen(
+        builder: (context) => RatingListScreen(
           postId: widget.snap['postId'],
         ),
       ),
@@ -1278,318 +1276,6 @@ class _PostCardState extends State<PostCard>
         currentUserId: user.uid,
         postId: widget.snap['postId'],
       ),
-    );
-  }
-}
-
-class FastRatingListScreen extends StatefulWidget {
-  final String postId;
-
-  const FastRatingListScreen({
-    super.key,
-    required this.postId,
-  });
-
-  @override
-  State<FastRatingListScreen> createState() => _FastRatingListScreenState();
-}
-
-class _FastRatingListScreenState extends State<FastRatingListScreen> {
-  late final RealtimeChannel _ratingsChannel;
-  List<Map<String, dynamic>> _ratings = [];
-  int _page = 0;
-  final int _limit = 20;
-  bool _hasMore = true;
-  bool _isLoading = false;
-  bool _isLoadingMore = false;
-  final ScrollController _scrollController = ScrollController();
-
-  final Map<String, Map<String, dynamic>> _userCache = {};
-  final _supabase = Supabase.instance.client;
-
-  _ColorSet _getColors(ThemeProvider themeProvider) {
-    final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
-    return isDarkMode ? _DarkColors() : _LightColors();
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _setupRealtime();
-    _fetchInitialRatings();
-
-    _scrollController.addListener(() {
-      if (_scrollController.position.pixels ==
-          _scrollController.position.maxScrollExtent) {
-        _loadMoreRatings();
-      }
-    });
-  }
-
-  void _setupRealtime() {
-    _ratingsChannel = _supabase.channel('post_ratings_${widget.postId}');
-
-    _ratingsChannel
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'post_rating',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'postid',
-            value: widget.postId,
-          ),
-          callback: (payload) {
-            _handleRealtimeUpdate(payload);
-          },
-        )
-        .subscribe();
-  }
-
-  Future<void> _fetchInitialRatings() async {
-    if (_isLoading) return;
-    setState(() => _isLoading = true);
-
-    try {
-      final response = await _supabase
-          .from('post_rating')
-          .select()
-          .eq('postid', widget.postId)
-          .order('timestamp', ascending: false)
-          .range(0, _limit - 1);
-
-      if (mounted) {
-        _ratings = List<Map<String, dynamic>>.from(response);
-
-        await _bulkFetchUsers();
-
-        setState(() {
-          _isLoading = false;
-          _page = 1;
-          _hasMore = _ratings.length == _limit;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _bulkFetchUsers() async {
-    final Set<String> userIds = {};
-
-    for (final rating in _ratings) {
-      final userId = rating['userid'] as String? ?? '';
-      if (userId.isNotEmpty && !_userCache.containsKey(userId)) {
-        userIds.add(userId);
-      }
-    }
-
-    if (userIds.isEmpty) return;
-
-    try {
-      final response = await _supabase
-          .from('users')
-          .select('uid, username, photoUrl')
-          .inFilter('uid', userIds.toList());
-
-      if (response.isNotEmpty) {
-        for (final user in response) {
-          final userMap = Map<String, dynamic>.from(user);
-          _userCache[userMap['uid']] = userMap;
-        }
-        setState(() {});
-      }
-    } catch (e) {
-      // Error handled silently
-    }
-  }
-
-  Future<void> _loadMoreRatings() async {
-    if (!_hasMore || _isLoadingMore) return;
-
-    setState(() => _isLoadingMore = true);
-
-    try {
-      final response = await _supabase
-          .from('post_rating')
-          .select()
-          .eq('postid', widget.postId)
-          .order('timestamp', ascending: false)
-          .range(_page * _limit, (_page * _limit) + _limit - 1);
-
-      if (mounted) {
-        final newRatings = List<Map<String, dynamic>>.from(response);
-
-        await _bulkFetchUsers();
-
-        setState(() {
-          _ratings.addAll(newRatings);
-          _isLoadingMore = false;
-          _page++;
-          _hasMore = newRatings.length == _limit;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoadingMore = false);
-      }
-    }
-  }
-
-  void _handleRealtimeUpdate(PostgresChangePayload payload) {
-    final newRecord = payload.newRecord;
-    final oldRecord = payload.oldRecord;
-    final eventType = payload.eventType;
-
-    setState(() {
-      switch (eventType) {
-        case PostgresChangeEvent.insert:
-          if (newRecord != null) {
-            _ratings.insert(0, newRecord);
-          }
-          break;
-        case PostgresChangeEvent.update:
-          if (oldRecord != null && newRecord != null) {
-            final index = _ratings.indexWhere(
-              (r) => r['userid'] == oldRecord['userid'],
-            );
-            if (index != -1) _ratings[index] = newRecord;
-          }
-          break;
-        case PostgresChangeEvent.delete:
-          if (oldRecord != null) {
-            _ratings.removeWhere(
-              (r) => r['userid'] == oldRecord['userid'],
-            );
-          }
-          break;
-        default:
-          break;
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _ratingsChannel.unsubscribe();
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  Widget _buildRatingItem(Map<String, dynamic> rating, _ColorSet colors) {
-    final userId = rating['userid'] as String? ?? '';
-    final userRating = (rating['rating'] as num?)?.toDouble() ?? 0.0;
-    final timestampStr = rating['timestamp'] as String?;
-    final timestamp = timestampStr != null
-        ? DateTime.tryParse(timestampStr) ?? DateTime.now()
-        : DateTime.now();
-    final timeText = timeago.format(timestamp);
-
-    final userData = _userCache[userId] ?? {};
-    final photoUrl = userData['photoUrl'] as String? ?? '';
-    final username = userData['username'] as String? ?? 'Deleted user';
-
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.cardColor,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: ListTile(
-        leading: CircleAvatar(
-          radius: 21,
-          backgroundImage: (photoUrl.isNotEmpty && photoUrl != 'default')
-              ? NetworkImage(photoUrl)
-              : null,
-          child: (photoUrl.isEmpty || photoUrl == 'default')
-              ? Icon(Icons.account_circle, size: 42, color: colors.iconColor)
-              : null,
-        ),
-        title: Text(
-          username,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: colors.textColor,
-          ),
-        ),
-        subtitle: Text(
-          timeText,
-          style: TextStyle(color: colors.textColor.withOpacity(0.6)),
-        ),
-        trailing: Chip(
-          label: Text(
-            userRating.toStringAsFixed(1),
-            style: TextStyle(color: colors.textColor),
-          ),
-          backgroundColor: colors.cardColor,
-        ),
-        onTap: username == 'Deleted user'
-            ? null
-            : () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ProfileScreen(uid: userId),
-                  ),
-                ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final themeProvider = Provider.of<ThemeProvider>(context);
-    final colors = _getColors(themeProvider);
-
-    return Scaffold(
-      backgroundColor: colors.backgroundColor,
-      appBar: AppBar(
-        title: Text('Ratings', style: TextStyle(color: colors.textColor)),
-        backgroundColor: colors.backgroundColor,
-        iconTheme: IconThemeData(color: colors.textColor),
-      ),
-      body: _isLoading && _ratings.isEmpty
-          ? Center(
-              child: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: colors.skeletonColor,
-                  shape: BoxShape.circle,
-                ),
-              ),
-            )
-          : _ratings.isEmpty
-              ? Center(
-                  child: Text('No ratings yet',
-                      style: TextStyle(color: colors.textColor)))
-              : ListView.separated(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _ratings.length + (_hasMore ? 1 : 0),
-                  separatorBuilder: (context, index) =>
-                      Divider(color: colors.cardColor),
-                  itemBuilder: (context, index) {
-                    if (index < _ratings.length) {
-                      return _buildRatingItem(_ratings[index], colors);
-                    } else {
-                      return Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: _isLoadingMore
-                              ? Container(
-                                  width: 30,
-                                  height: 30,
-                                  decoration: BoxDecoration(
-                                    color: colors.skeletonColor,
-                                    shape: BoxShape.circle,
-                                  ),
-                                )
-                              : const SizedBox(),
-                        ),
-                      );
-                    }
-                  },
-                ),
     );
   }
 }
