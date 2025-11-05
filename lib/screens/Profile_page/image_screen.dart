@@ -125,12 +125,13 @@ class ImageViewScreen extends StatefulWidget {
 }
 
 class _ImageViewScreenState extends State<ImageViewScreen> {
-  int commentLen = 0;
+  // UPDATED: Changed from commentLen to _commentCount for consistency
+  late int _commentCount;
   bool _isBlocked = false;
   bool _viewRecorded = false;
   final SupabasePostsMethods _postsMethods = SupabasePostsMethods();
   bool _showSlider = true;
-  bool _isDeleting = false; // ADDED: Loading state for deletion
+  bool _isDeleting = false;
 
   BannerAd? _bannerAd;
   bool _isAdLoaded = false;
@@ -141,6 +142,10 @@ class _ImageViewScreenState extends State<ImageViewScreen> {
   double? _userRating;
   bool _isLoadingRatings = true;
   late RealtimeChannel _postChannel;
+
+  // ADDED: Comment realtime channels
+  late RealtimeChannel _commentsChannel;
+  late RealtimeChannel _repliesChannel;
 
   // Video player variables
   VideoPlayerController? _videoController;
@@ -180,9 +185,12 @@ class _ImageViewScreenState extends State<ImageViewScreen> {
     super.initState();
 
     _localRatings = [];
+    // UPDATED: Initialize comment count
+    _commentCount = 0;
     _fetchCommentsCount();
     _checkBlockStatus();
     _setupRealtime();
+    _setupCommentsRealtime(); // ADDED: Setup comment realtime
     _fetchInitialRatings();
     _loadBannerAd();
     _recordView();
@@ -190,6 +198,46 @@ class _ImageViewScreenState extends State<ImageViewScreen> {
     if (_isVideo) {
       _initializeVideoPlayer();
     }
+  }
+
+  // ADDED: Setup realtime for comments and replies (same as PostCard)
+  void _setupCommentsRealtime() {
+    // Comments channel
+    _commentsChannel =
+        Supabase.instance.client.channel('comments_${widget.postId}');
+    _commentsChannel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'comments',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'postid',
+        value: widget.postId,
+      ),
+      callback: (payload) {
+        _fetchCommentsCount();
+      },
+    );
+
+    // Replies channel
+    _repliesChannel =
+        Supabase.instance.client.channel('replies_${widget.postId}');
+    _repliesChannel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'replies',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'postid',
+        value: widget.postId,
+      ),
+      callback: (payload) {
+        _fetchCommentsCount();
+      },
+    );
+
+    _commentsChannel.subscribe();
+    _repliesChannel.subscribe();
   }
 
   Future<void> _recordView() async {
@@ -499,6 +547,9 @@ class _ImageViewScreenState extends State<ImageViewScreen> {
     _videoController?.dispose();
     _bannerAd?.dispose();
     _postChannel.unsubscribe();
+    // ADDED: Unsubscribe from comment channels
+    _commentsChannel.unsubscribe();
+    _repliesChannel.unsubscribe();
     super.dispose();
   }
 
@@ -534,65 +585,45 @@ class _ImageViewScreenState extends State<ImageViewScreen> {
     return null;
   }
 
-  dynamic _unwrap(dynamic res) {
-    try {
-      if (res == null) return null;
-      if (res is Map && res.containsKey('data')) return res['data'];
-    } catch (_) {}
-    return res;
-  }
-
+  // ADDED: Helper method to count items (same as PostCard)
   int _countItems(dynamic value) {
     try {
       if (value == null) return 0;
       if (value is List) return value.length;
       if (value is Iterable) return value.length;
-      if (value is Map && value['data'] is List) {
-        return (value['data'] as List).length;
-      }
-      if (value is String) {
-        final decoded = jsonDecode(value);
-        if (decoded is List) return decoded.length;
-        if (decoded is Map && decoded['data'] is List) {
-          return (decoded['data'] as List).length;
-        }
-        return 0;
-      }
       return 0;
     } catch (_) {
       return 0;
     }
   }
 
+  // UPDATED: Comment count method to match PostCard implementation
   Future<void> _fetchCommentsCount() async {
     try {
-      final commentsRes = await Supabase.instance.client
+      final commentsResponse = await Supabase.instance.client
           .from('comments')
           .select('id')
           .eq('postid', widget.postId);
 
-      final repliesRes = await Supabase.instance.client
+      final repliesResponse = await Supabase.instance.client
           .from('replies')
           .select('id')
           .eq('postid', widget.postId);
 
-      final commentsData = _unwrap(commentsRes) ?? commentsRes;
-      final repliesData = _unwrap(repliesRes) ?? repliesRes;
-
-      final int commentsCount = _countItems(commentsData);
-      final int repliesCount = _countItems(repliesData);
+      final int commentsCount = _countItems(commentsResponse);
+      final int repliesCount = _countItems(repliesResponse);
 
       final int totalCount = commentsCount + repliesCount;
 
       if (mounted) {
         setState(() {
-          commentLen = totalCount;
+          _commentCount = totalCount;
         });
       }
     } catch (err) {
       if (mounted) {
         setState(() {
-          commentLen = 0;
+          _commentCount = 0;
         });
       }
     }
@@ -745,6 +776,46 @@ class _ImageViewScreenState extends State<ImageViewScreen> {
           },
         );
       },
+    );
+  }
+
+  // ADDED: Comment button matching PostCard styling
+  Widget _buildCommentButton(_ImageViewColorSet colors) {
+    return Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.center,
+      children: [
+        IconButton(
+          icon: Icon(Icons.comment_outlined, color: colors.iconColor, size: 28),
+          onPressed: () => _navigateToComments(colors),
+        ),
+        if (_commentCount > 0)
+          Positioned(
+            top: -6,
+            left: -6,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              constraints: const BoxConstraints(
+                minWidth: 20,
+                minHeight: 20,
+              ),
+              decoration: BoxDecoration(
+                color: colors.badgeBackgroundColor,
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text(
+                  _commentCount.toString(),
+                  style: TextStyle(
+                    color: colors.badgeTextColor,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -944,6 +1015,7 @@ class _ImageViewScreenState extends State<ImageViewScreen> {
     );
   }
 
+  // UPDATED: Navigate to comments using the proper CommentsBottomSheet
   void _navigateToComments(_ImageViewColorSet colors) {
     showModalBottomSheet(
       context: context,
@@ -953,7 +1025,10 @@ class _ImageViewScreenState extends State<ImageViewScreen> {
         postId: widget.postId,
         postImage: widget.imageUrl,
         isVideo: _isVideo,
-        onClose: () {},
+        onClose: () {
+          // Video will automatically resume if it was playing before
+        },
+        videoController: _videoController,
       ),
     ).then((_) {
       _fetchCommentsCount();
@@ -1165,43 +1240,8 @@ class _ImageViewScreenState extends State<ImageViewScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Row(
                       children: [
-                        Stack(
-                          clipBehavior: Clip.none,
-                          alignment: Alignment.center,
-                          children: [
-                            IconButton(
-                              icon: Icon(Icons.comment_outlined,
-                                  color: colors.iconColor),
-                              onPressed: () => _navigateToComments(colors),
-                            ),
-                            if (commentLen > 0)
-                              Positioned(
-                                top: -6,
-                                left: -6,
-                                child: Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: colors.badgeBackgroundColor,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  constraints: const BoxConstraints(
-                                    minWidth: 20,
-                                    minHeight: 20,
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      commentLen.toString(),
-                                      style: TextStyle(
-                                        color: colors.badgeTextColor,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
+                        // UPDATED: Use the new comment button
+                        _buildCommentButton(colors),
                         IconButton(
                           icon: Icon(Icons.send, color: colors.iconColor),
                           onPressed: () {
@@ -1260,63 +1300,6 @@ class _ImageViewScreenState extends State<ImageViewScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class CommentsBottomSheet extends StatelessWidget {
-  final String postId;
-  final String postImage;
-  final bool isVideo;
-  final VoidCallback onClose;
-
-  const CommentsBottomSheet({
-    Key? key,
-    required this.postId,
-    required this.postImage,
-    required this.isVideo,
-    required this.onClose,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.8,
-      decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
-        ),
-      ),
-      child: Column(
-        children: [
-          Container(
-            padding: EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Text(
-                  'Comments',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Spacer(),
-                IconButton(
-                  icon: Icon(Icons.close),
-                  onPressed: onClose,
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Center(
-              child: Text('Comments feature would be implemented here'),
-            ),
-          ),
-        ],
       ),
     );
   }
