@@ -860,40 +860,42 @@ class _FeedScreenState extends State<FeedScreen> {
         children: [
           _buildFeedBody(colors),
           if (width <= webScreenSize)
-            AnimatedOpacity(
-              opacity: _showOverlay ? 1.0 : 0.0,
-              duration: Duration(milliseconds: 300),
-              child: _buildOverlay(colors),
+            Positioned(
+              // FIXED: Positioned is now direct child of Stack
+              top: MediaQuery.of(context).padding.top + 8,
+              left: 0,
+              right: 0,
+              child: AnimatedOpacity(
+                // FIXED: AnimatedOpacity inside Positioned
+                opacity: _showOverlay ? 1.0 : 0.0,
+                duration: Duration(milliseconds: 300),
+                child: _buildOverlayContent(colors),
+              ),
             ),
         ],
       ),
     );
   }
 
-  // NEW: Combined overlay that includes both tabs and message button
-  Widget _buildOverlay(_ColorSet colors) {
-    return Positioned(
-      top: MediaQuery.of(context).padding.top + 8,
-      left: 0,
-      right: 0,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            // Left side: For You tab
-            _buildTabItem(1, 'For You', colors),
+  // FIXED: This method now returns just the content without Positioned
+  Widget _buildOverlayContent(_ColorSet colors) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // Left side: For You tab
+          _buildTabItem(1, 'For You', colors),
 
-            // Right side: Following tab and Messages button
-            Row(
-              children: [
-                _buildTabItem(0, 'Following', colors),
-                const SizedBox(width: 16),
-                _buildMessageButton(colors),
-              ],
-            ),
-          ],
-        ),
+          // Right side: Following tab and Messages button
+          Row(
+            children: [
+              _buildTabItem(0, 'Following', colors),
+              const SizedBox(width: 16),
+              _buildMessageButton(colors),
+            ],
+          ),
+        ],
       ),
     );
   }
