@@ -31,7 +31,6 @@ dependencies:
   google_mobile_ads: ^6.0.0
   video_player: ^2.8.2
   video_trimmer: ^5.0.0
-  flutter_cache_manager: ^3.3.0
 
 
 dev_dependencies:
