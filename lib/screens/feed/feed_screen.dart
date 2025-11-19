@@ -296,11 +296,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
               _essentialUiReady = true;
               _scheduleRebuild();
 
-              if (kDebugMode) {
-                print(
-                    '🚀 Loaded ${unseenCachedPosts.length} unseen cached posts');
-                print('📱 Media preloaded: $isMediaPreloaded');
-              }
+              if (kDebugMode) {}
             }
 
             _bulkFetchUsers(unseenCachedPosts).then((_) {
@@ -326,25 +322,6 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
         _scheduleRebuild();
       }
     });
-  }
-
-  void _checkCachePerformance() async {
-    if (kDebugMode) {
-      final prefs = await SharedPreferences.getInstance();
-      final cachedData = prefs.getString('cached_for_you_posts_v4');
-      final isMediaPreloaded = await FeedCacheService.isMediaPreloaded();
-
-      print('🔍 CACHE PERFORMANCE CHECK');
-      print('📊 Has cached posts: ${cachedData != null}');
-      print('🖼️ Media preloaded: $isMediaPreloaded');
-      print('👀 Unseen posts loaded: ${_forYouPosts.length}');
-
-      if (cachedData != null) {
-        final data = jsonDecode(cachedData);
-        final posts = data['posts'] as List;
-        print('💾 Total cached posts: ${posts.length}');
-      }
-    }
   }
 
   void _initializeHeavyComponents() {
@@ -445,7 +422,6 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeHeavyComponents();
-      _checkCachePerformance();
     });
   }
 
