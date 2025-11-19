@@ -32,17 +32,8 @@ class FeedCacheService {
 
         // Preload media for cached posts in background
         unawaited(_preloadMediaForPosts(postsToCache));
-
-        if (kDebugMode) {
-          print(
-              '✅ Cached ${postsToCache.length} posts and started media preloading');
-        }
       }
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Error caching posts: $e');
-      }
-    }
+    } catch (e) {}
   }
 
   static Future<void> _preloadMediaForPosts(
@@ -56,24 +47,12 @@ class FeedCacheService {
           try {
             // Preload to cache manager - works for both images and videos
             await DefaultCacheManager().getSingleFile(mediaUrl);
-
-            if (kDebugMode) {
-              print('✅ Preloaded media: $mediaUrl');
-            }
-          } catch (e) {
-            if (kDebugMode) {
-              print('❌ Error preloading media $mediaUrl: $e');
-            }
-          }
+          } catch (e) {}
         }
       }
 
       await prefs.setBool(_mediaPreloadedKey, true);
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Error in media preloading: $e');
-      }
-    }
+    } catch (e) {}
   }
 
   static Future<List<Map<String, dynamic>>?> loadCachedForYouPosts(
@@ -98,27 +77,13 @@ class FeedCacheService {
           }).toList();
 
           if (cachedPosts.isNotEmpty) {
-            if (kDebugMode) {
-              print('✅ Loaded ${cachedPosts.length} cached posts');
-            }
             return cachedPosts;
           }
         } else {
-          if (kDebugMode) {
-            print('🕒 Cache expired or invalid user');
-          }
           await _clearCache();
         }
-      } else {
-        if (kDebugMode) {
-          print('📭 No cached posts found');
-        }
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Error loading cached posts: $e');
-      }
-    }
+      } else {}
+    } catch (e) {}
     return null;
   }
 
@@ -134,15 +99,7 @@ class FeedCacheService {
       await prefs.remove(_mediaPreloadedKey);
 
       await DefaultCacheManager().emptyCache();
-
-      if (kDebugMode) {
-        print('🧹 Cleared all cache');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Error clearing cache: $e');
-      }
-    }
+    } catch (e) {}
   }
 
   static Future<Set<String>> getSeenPosts(String userId) async {
@@ -167,11 +124,7 @@ class FeedCacheService {
       }
 
       await prefs.setStringList('$_seenPostsKey$userId', trimmedSeenPosts);
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Error marking post as seen: $e');
-      }
-    }
+    } catch (e) {}
   }
 
   static Future<void> _clearCache() async {
@@ -179,10 +132,6 @@ class FeedCacheService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_cachedForYouPostsKey);
       await prefs.remove(_mediaPreloadedKey);
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Error clearing cache: $e');
-      }
-    }
+    } catch (e) {}
   }
 }
