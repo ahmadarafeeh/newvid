@@ -157,6 +157,7 @@ class _PostCardState extends State<PostCard>
   VideoPlayerController? _videoController;
   bool _isVideoInitialized = false;
   bool _isVideoLoading = false;
+  bool _isVideoPlaying = false;
   bool _isMuted = false;
 
   bool _isCaptionExpanded = false;
@@ -235,6 +236,9 @@ class _PostCardState extends State<PostCard>
               case 'isCaptionExpanded':
                 _isCaptionExpanded = value as bool;
                 break;
+              case 'isVideoPlaying':
+                _isVideoPlaying = value as bool;
+                break;
             }
           });
           _pendingUpdates.clear();
@@ -263,10 +267,6 @@ class _PostCardState extends State<PostCard>
         url.endsWith('.mkv') ||
         url.contains('video');
   }
-
-  bool get _isVideoPlaying =>
-      _videoController != null &&
-      _videoManager.isCurrentlyPlaying(_videoController!);
 
   _ColorSet _getColors(ThemeProvider themeProvider) {
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
@@ -344,11 +344,23 @@ class _PostCardState extends State<PostCard>
       _videoController = null;
     }
     _isVideoInitialized = false;
+    _isVideoPlaying = false;
     _isVideoLoading = false;
   }
 
   void _videoListener() {
     if (!mounted) return;
+
+    final wasPlaying = _isVideoPlaying;
+    final isNowPlaying = _videoController?.value.isPlaying ?? false;
+
+    if (wasPlaying != isNowPlaying) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        _updateState('isVideoPlaying', isNowPlaying);
+      });
+    }
 
     if (_videoController != null &&
         _videoController!.value.position == _videoController!.value.duration &&
@@ -416,12 +428,24 @@ class _PostCardState extends State<PostCard>
         mounted &&
         widget.isVisible) {
       _videoManager.playVideo(_videoController!, _postId);
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _updateState('isVideoPlaying', true);
+        }
+      });
     }
   }
 
   void _pauseVideo() {
     if (_videoController != null && _isVideoInitialized && mounted) {
       _videoManager.pauseVideo(_videoController!);
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _updateState('isVideoPlaying', false);
+        }
+      });
     }
   }
 
@@ -1171,29 +1195,7 @@ class _PostCardState extends State<PostCard>
                 ),
               ),
             ),
-          if (!_isVideoPlaying && _isVideoInitialized)
-            AnimatedOpacity(
-              opacity: 1.0,
-              duration: Duration(milliseconds: 200),
-              child: Center(
-                child: GestureDetector(
-                  onTap: _playVideo,
-                  child: Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      Icons.play_arrow,
-                      size: 40,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-            ),
+          // REMOVED: The pause button overlay that was always showing
         ],
       ),
     );
@@ -1323,7 +1325,9 @@ class _PostCardState extends State<PostCard>
         postId: widget.snap['postId'],
         postImage: widget.snap['postUrl'],
         isVideo: _isVideo,
-        onClose: () {},
+        onClose: () {
+          // Video will automatically resume if it was playing before
+        },
         videoController: _videoController,
       ),
     ).then((_) {
