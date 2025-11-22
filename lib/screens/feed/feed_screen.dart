@@ -844,14 +844,6 @@ class _FeedScreenState extends State<FeedScreen> {
           // Main feed content - ALWAYS show feed body
           _buildFeedBody(colors),
 
-          // Overlay tabs and message button - CONDITIONALLY VISIBLE based on scroll
-          if (width <= webScreenSize)
-            AnimatedOpacity(
-              opacity: _showOverlay ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 300),
-              child: _buildOverlayTabs(colors),
-            ),
-
           // Show loading indicator over the content if still loading
           if (_isLoading)
             Container(
@@ -860,38 +852,49 @@ class _FeedScreenState extends State<FeedScreen> {
                 child: CircularProgressIndicator(color: colors.textColor),
               ),
             ),
+
+          // Overlay tabs and message button - CONDITIONALLY VISIBLE based on scroll
+          if (width <= webScreenSize) _buildOverlayWithAnimation(colors),
         ],
       ),
     );
   }
 
-  Widget _buildOverlayTabs(_ColorSet colors) {
-    return Positioned(
-      top: MediaQuery.of(context).padding.top + 8,
-      left: 0,
-      right: 0,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            // Empty container to balance the layout
-            const SizedBox(width: 40),
+  Widget _buildOverlayWithAnimation(_ColorSet colors) {
+    return AnimatedOpacity(
+      opacity: _showOverlay ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 300),
+      child: Stack(
+        children: [
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // Empty container to balance the layout
+                  const SizedBox(width: 40),
 
-            // Centered tabs
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _buildTabItem(1, 'For You', colors),
-                const SizedBox(width: 40),
-                _buildTabItem(0, 'Following', colors),
-              ],
+                  // Centered tabs
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildTabItem(1, 'For You', colors),
+                      const SizedBox(width: 40),
+                      _buildTabItem(0, 'Following', colors),
+                    ],
+                  ),
+
+                  // Messages button on the right
+                  _buildMessageButton(colors),
+                ],
+              ),
             ),
-
-            // Messages button on the right - USING EXACT SAME STYLING AS POST_CARD
-            _buildMessageButton(colors),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -934,6 +937,7 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
+  // EXACT SAME MESSAGE BUTTON STYLING AS POST_CARD COMMENT BUTTON
   Widget _buildMessageButton(_ColorSet colors) {
     return GestureDetector(
       onTap: _navigateToMessages,
@@ -953,7 +957,7 @@ class _FeedScreenState extends State<FeedScreen> {
               ),
               if (count > 0)
                 Positioned(
-                  top: -2, // Changed from -6 to -2 to move badge down
+                  top: -2, // Moved down slightly
                   left: -6,
                   child: Container(
                     padding: const EdgeInsets.all(4),
