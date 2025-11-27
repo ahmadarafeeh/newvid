@@ -19,6 +19,18 @@ class SupabaseProfileMethods {
     return res;
   }
 
+  // Helper methods to identify photo types
+  bool _isGooglePhoto(String? url) {
+    if (url == null || url == 'default') return false;
+    return url.contains('googleusercontent.com') ||
+        url.contains('lh3.googleusercontent.com');
+  }
+
+  bool _isFirebasePhoto(String? url) {
+    if (url == null || url == 'default') return false;
+    return url.contains('firebasestorage.googleapis.com');
+  }
+
   // Helper method to check if URL is from Supabase Storage (video)
   bool _isVideoUrl(String url) {
     return url.contains('supabase.co/storage/v1/object/public/videos') ||
@@ -809,10 +821,11 @@ class SupabaseProfileMethods {
       // Delete user document
       await _supabase.from('users').delete().eq('uid', uid);
 
-      // Delete profile image
+      // UPDATED: Delete profile image ONLY if it's a Firebase photo (not Google photo or default)
       if (profilePicUrl != null &&
           profilePicUrl.isNotEmpty &&
-          profilePicUrl != 'default') {
+          profilePicUrl != 'default' &&
+          _isFirebasePhoto(profilePicUrl)) {
         await StorageMethods().deleteImage(profilePicUrl);
       }
 
