@@ -6,8 +6,8 @@ import 'dart:typed_data';
 import 'package:Ratedly/resources/storage_methods.dart';
 import 'package:Ratedly/utils/theme_provider.dart';
 import 'package:provider/provider.dart';
-import 'package:Ratedly/services/firebase_supabase_service.dart'; // Updated import
-import 'package:Ratedly/widgets/verified_username_widget.dart'; // ADDED IMPORT
+import 'package:Ratedly/services/firebase_supabase_service.dart';
+import 'package:Ratedly/widgets/verified_username_widget.dart';
 
 // Define color schemes for both themes at top level
 class _EditProfileColorSet {
@@ -90,6 +90,27 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return isDarkMode ? _EditProfileDarkColors() : _EditProfileLightColors();
   }
 
+  // Helper methods to identify photo types
+  bool _isGooglePhoto(String? url) {
+    if (url == null || url == 'default') return false;
+    return url.contains('googleusercontent.com') || url.contains('lh3.googleusercontent.com');
+  }
+
+  bool _isFirebasePhoto(String? url) {
+    if (url == null || url == 'default') return false;
+    return url.contains('firebasestorage.googleapis.com');
+  }
+
+  Widget _buildDefaultAvatar(_EditProfileColorSet colors) {
+    return Center(
+      child: Icon(
+        Icons.account_circle,
+        size: 96,
+        color: colors.iconColor,
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -141,9 +162,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   void _showEditOptions(_EditProfileColorSet colors) {
-    bool hasPhoto =
-        (_currentPhotoUrl != null && _currentPhotoUrl != 'default') ||
-            _image != null;
+    bool hasGooglePhoto = _isGooglePhoto(_currentPhotoUrl);
+    bool hasFirebasePhoto = _isFirebasePhoto(_currentPhotoUrl);
+    bool hasCustomPhoto = _image != null;
+    bool hasAnyPhoto = hasGooglePhoto || hasFirebasePhoto || hasCustomPhoto;
 
     showModalBottomSheet(
       context: context,
@@ -153,17 +175,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (hasPhoto)
-                ListTile(
-                  leading: Icon(Icons.delete, color: colors.iconColor),
-                  title: Text('Remove Picture',
-                      style: TextStyle(color: colors.textColor)),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _removePhoto();
-                  },
-                ),
-              if (!hasPhoto)
+              if (!hasAnyPhoto || _currentPhotoUrl == 'default')
                 ListTile(
                   leading: Icon(Icons.photo_library, color: colors.iconColor),
                   title: Text('Choose from Gallery',
@@ -171,6 +183,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   onTap: () {
                     Navigator.pop(context);
                     _pickImage(ImageSource.gallery);
+                  },
+                ),
+              if (hasAnyPhoto)
+                ListTile(
+                  leading: Icon(Icons.delete, color: colors.iconColor),
+                  title: Text(
+                    hasGooglePhoto ? 'Remove Google Photo' : 'Remove Picture',
+                    style: TextStyle(color: colors.textColor),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _removePhoto();
                   },
                 ),
             ],
@@ -193,6 +217,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   void _removePhoto() {
+    bool isGooglePhoto = _isGooglePhoto(_currentPhotoUrl);
+    bool isFirebasePhoto = _isFirebasePhoto(_currentPhotoUrl);
+    bool hasCustomPhoto = _image != null;
+    
+    // If it's already default and no new image, don't show remove option
+    if (!isGooglePhoto && !isFirebasePhoto && !hasCustomPhoto && _currentPhotoUrl == 'default') {
+      return;
+    }
+    
+    // REMOVED: The confirmation dialog popup
+    // Directly remove the photo without confirmation
     setState(() {
       _image = null;
       _currentPhotoUrl = 'default';
@@ -244,7 +279,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       String uid = currentUser.uid;
       Map<String, dynamic> updatedData = {'bio': _bioController.text};
 
+      // Handle profile picture changes
       if (_image != null) {
+        // User selected a new image - upload to Firebase
         String photoUrl = await StorageMethods().uploadImageToStorage(
           'profilePics',
           _image!,
@@ -252,12 +289,22 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         );
         updatedData['photoUrl'] = photoUrl;
 
-        if (_initialPhotoUrl != null && _initialPhotoUrl != 'default') {
+        // Delete old Firebase photo if it exists (but not Google photos)
+        if (_initialPhotoUrl != null && 
+            _initialPhotoUrl != 'default' && 
+            _isFirebasePhoto(_initialPhotoUrl)) {
           await StorageMethods().deleteImage(_initialPhotoUrl!);
         }
       } else if (_currentPhotoUrl == 'default') {
+        // User wants to remove current photo
         if (_initialPhotoUrl != null && _initialPhotoUrl != 'default') {
-          await StorageMethods().deleteImage(_initialPhotoUrl!);
+          
+          // Only delete from Firebase Storage if it's our Firebase photo
+          if (_isFirebasePhoto(_initialPhotoUrl)) {
+            await StorageMethods().deleteImage(_initialPhotoUrl!);
+          }
+          // If it's a Google photo, we just remove the reference without deleting
+          // since we don't own that storage
         }
         updatedData['photoUrl'] = 'default';
       }
@@ -289,7 +336,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update profile')),
+        SnackBar(content: Text('Failed to update profile: $e')),
       );
     }
     setState(() => _isLoading = false);
@@ -370,21 +417,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                           fit: BoxFit.cover,
                                           errorBuilder:
                                               (context, error, stackTrace) =>
-                                                  Center(
-                                            child: Icon(
-                                              Icons.account_circle,
-                                              size: 96,
-                                              color: colors.iconColor,
-                                            ),
-                                          ),
+                                                  _buildDefaultAvatar(colors),
                                         )
-                                      : Center(
-                                          child: Icon(
-                                            Icons.account_circle,
-                                            size: 96,
-                                            color: colors.iconColor,
-                                          ),
-                                        ),
+                                      : _buildDefaultAvatar(colors),
                             ),
                             Positioned(
                               right: 0,
