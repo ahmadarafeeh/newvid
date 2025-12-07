@@ -106,11 +106,12 @@ class _SearchScreenState extends State<SearchScreen> {
   int _offset = 0;
   bool _isLoadingMore = false;
   bool _hasMorePosts = true;
+  bool _isFirstLoad = true; // NEW: Track if this is the first load
 
-  // ========== CONFIGURE THIS VALUE ==========
-  // Change this number to control how many posts are fetched at a time
-  final int _postsLimit = 9; // Changed from 20 to 12
-  // ==========================================
+  // ========== CONFIGURE THESE VALUES ==========
+  final int _initialPostsLimit = 12; // NEW: 9 posts on first load
+  final int _subsequentPostsLimit = 6; // NEW: 6 posts on subsequent loads
+  // ============================================
 
   // You can also configure how many posts show initially
   final int _initialPostsToShow = 12; // Number of posts to show initially
@@ -137,9 +138,11 @@ class _SearchScreenState extends State<SearchScreen> {
     super.initState();
     _initData();
 
+    // Enhanced scroll listener with both extentAfter (for mobile) and pixels (for web)
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >=
-              _scrollController.position.maxScrollExtent - 300 &&
+              _scrollController.position.maxScrollExtent -
+                  200 && // Reduced threshold for web
           !_isLoadingMore &&
           _hasMorePosts &&
           !isShowUsers) {
@@ -279,12 +282,28 @@ class _SearchScreenState extends State<SearchScreen> {
       );
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        width: double.infinity,
-        height: double.infinity,
-        child: VideoPlayer(controller),
+    // FIXED: Use AspectRatio with same ratio as images (0.75) and FittedBox for proper scaling
+    return AspectRatio(
+      aspectRatio: 0.75, // Same as images
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          color: colors.gridItemBackgroundColor,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // FIXED: Use FittedBox to properly scale the video to cover the container
+              FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: controller.value.size.width,
+                  height: controller.value.size.height,
+                  child: VideoPlayer(controller),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -321,11 +340,15 @@ class _SearchScreenState extends State<SearchScreen> {
     try {
       final excludedUsers = [...blockedUsersSet, currentUserId];
 
+      // MODIFIED: Use _initialPostsLimit (9) for first load
+      final postsLimit =
+          _isFirstLoad ? _initialPostsLimit : _subsequentPostsLimit;
+
       final response = await _supabase.rpc('get_search_feed', params: {
         'current_user_id': currentUserId,
         'excluded_users': excludedUsers,
         'page_offset': 0,
-        'page_limit': _postsLimit,
+        'page_limit': postsLimit, // MODIFIED: Use dynamic limit
       });
 
       if (response is List && response.isNotEmpty) {
@@ -346,14 +369,20 @@ class _SearchScreenState extends State<SearchScreen> {
         }
 
         _offset = _allPosts.length;
-        _hasMorePosts = _allPosts.length == _postsLimit;
+        // MODIFIED: Check against the correct limit used
+        _hasMorePosts = _allPosts.length == postsLimit;
+
+        // MODIFIED: Mark first load as complete
+        _isFirstLoad = false;
       } else {
         _allPosts = [];
         _hasMorePosts = false;
+        _isFirstLoad = false; // MODIFIED: Still mark as complete even if empty
       }
     } catch (e) {
       _allPosts = [];
       _hasMorePosts = false;
+      _isFirstLoad = false; // MODIFIED: Still mark as complete even on error
     }
   }
 
@@ -365,11 +394,15 @@ class _SearchScreenState extends State<SearchScreen> {
     try {
       final excludedUsers = [...blockedUsersSet, currentUserId];
 
+      // MODIFIED: Always use _subsequentPostsLimit (6) for subsequent loads
+      final postsLimit = _subsequentPostsLimit;
+
       final response = await _supabase.rpc('get_search_feed', params: {
         'current_user_id': currentUserId,
         'excluded_users': excludedUsers,
-        'page_offset': _offset ~/ _postsLimit,
-        'page_limit': _postsLimit,
+        'page_offset':
+            _offset ~/ postsLimit, // MODIFIED: Calculate offset correctly
+        'page_limit': postsLimit,
       });
 
       if (response is List && response.isNotEmpty) {
@@ -392,7 +425,8 @@ class _SearchScreenState extends State<SearchScreen> {
         setState(() {
           _allPosts.addAll(newPosts);
           _offset += newPosts.length;
-          _hasMorePosts = newPosts.length == _postsLimit;
+          // MODIFIED: Check against _subsequentPostsLimit
+          _hasMorePosts = newPosts.length == _subsequentPostsLimit;
         });
       } else {
         setState(() => _hasMorePosts = false);
@@ -877,80 +911,95 @@ class _SearchScreenState extends State<SearchScreen> {
 
     return Stack(
       children: [
-        ListView(
-          controller: _scrollController,
-          padding: const EdgeInsets.all(8.0),
-          children: [
-            if (topPosts.isNotEmpty)
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16.0),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Divider(color: colors.dividerColor),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                          child: Text(
-                            'Top posts for this week 🏆',
-                            style: TextStyle(
-                              color: colors.textColor,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Divider(color: colors.dividerColor),
-                        ),
-                      ],
-                    ),
-                  ),
-                  GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      childAspectRatio: 0.75,
-                      crossAxisSpacing: 8.0,
-                      mainAxisSpacing: 8.0,
-                    ),
-                    itemCount: topPosts.length,
-                    itemBuilder: (context, index) {
-                      final post = topPosts[index];
-                      final postUrl = post['postUrl']?.toString() ?? '';
-                      return _buildPostItem(post, postUrl, colors, true);
-                    },
-                  ),
-                  if (remainingPosts.isNotEmpty)
+        // Enhanced scroll detection with NotificationListener
+        NotificationListener<ScrollNotification>(
+          onNotification: (ScrollNotification scrollNotification) {
+            // Check using extentAfter (more reliable on mobile)
+            if (scrollNotification.metrics.extentAfter <
+                    500 && // Reduced threshold for mobile
+                !_isLoadingMore &&
+                _hasMorePosts &&
+                !isShowUsers) {
+              _loadMorePosts();
+            }
+            return false;
+          },
+          child: ListView(
+            controller: _scrollController,
+            padding: const EdgeInsets.all(8.0),
+            children: [
+              if (topPosts.isNotEmpty)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 16.0),
-                      child: Divider(color: colors.dividerColor),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Divider(color: colors.dividerColor),
+                          ),
+                          Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 8.0),
+                            child: Text(
+                              'Top posts for this week 🏆',
+                              style: TextStyle(
+                                color: colors.textColor,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Divider(color: colors.dividerColor),
+                          ),
+                        ],
+                      ),
                     ),
-                ],
-              ),
-            if (remainingPosts.isNotEmpty)
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  childAspectRatio: 0.75,
-                  crossAxisSpacing: 8.0,
-                  mainAxisSpacing: 8.0,
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 3,
+                        childAspectRatio: 0.75,
+                        crossAxisSpacing: 8.0,
+                        mainAxisSpacing: 8.0,
+                      ),
+                      itemCount: topPosts.length,
+                      itemBuilder: (context, index) {
+                        final post = topPosts[index];
+                        final postUrl = post['postUrl']?.toString() ?? '';
+                        return _buildPostItem(post, postUrl, colors, true);
+                      },
+                    ),
+                    if (remainingPosts.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16.0),
+                        child: Divider(color: colors.dividerColor),
+                      ),
+                  ],
                 ),
-                itemCount: remainingPosts.length,
-                itemBuilder: (context, index) {
-                  final post = remainingPosts[index];
-                  final postUrl = post['postUrl']?.toString() ?? '';
-                  return _buildPostItem(post, postUrl, colors, false);
-                },
-              ),
-          ],
+              if (remainingPosts.isNotEmpty)
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    childAspectRatio: 0.75,
+                    crossAxisSpacing: 8.0,
+                    mainAxisSpacing: 8.0,
+                  ),
+                  itemCount: remainingPosts.length,
+                  itemBuilder: (context, index) {
+                    final post = remainingPosts[index];
+                    final postUrl = post['postUrl']?.toString() ?? '';
+                    return _buildPostItem(post, postUrl, colors, false);
+                  },
+                ),
+            ],
+          ),
         ),
         if (_isLoadingMore)
           Positioned(
