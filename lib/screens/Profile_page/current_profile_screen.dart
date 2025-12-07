@@ -178,12 +178,15 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen> {
   final Map<String, VideoPlayerController> _videoControllers = {};
   final Map<String, bool> _videoControllersInitialized = {};
 
-  // ========== PAGINATION VARIABLES ==========
+  // ========== PAGINATION VARIABLES (MATCHING OTHERUSERPROFILESCREEN) ==========
   List<dynamic> _displayedPosts = []; // Posts currently shown
   int _postsOffset = 0; // Current offset for pagination
-  final int _postsLimit = 6; // Fetch 6 posts at a time (changed from 9)
+  // MODIFIED: Use separate limits for first and subsequent loads
+  final int _initialPostsLimit = 9; // MODIFIED: 9 posts on first load
+  final int _subsequentPostsLimit = 6; // MODIFIED: 6 posts on subsequent loads
   bool _hasMorePosts = true;
   bool _isLoadingMore = false;
+  bool _isFirstLoad = true; // MODIFIED: Track if this is the first load
   // ==========================================
 
   // ========== SCROLL CONTROLLER FOR INFINITE SCROLL ==========
@@ -209,17 +212,23 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen> {
     _fetchViewCount();
   }
 
-  // ========== SCROLL LISTENER FOR INFINITE SCROLL ==========
+  // ========== FIXED SCROLL LISTENER FOR MOBILE (MATCHING OTHERUSERPROFILESCREEN) ==========
   void _scrollListener() {
-    // Check if we've reached the bottom of the scroll
+    // More reliable detection for mobile
     if (_scrollController.position.pixels >=
-            _scrollController.position.maxScrollExtent - 200 &&
+            _scrollController.position.maxScrollExtent - 50 &&
         !_isLoadingMore &&
-        _hasMorePosts) {
-      _loadMorePosts();
+        _hasMorePosts &&
+        _selectedTabIndex == 0) {
+      // Reduced delay to 15ms for faster loading
+      Future.delayed(const Duration(milliseconds: 15), () {
+        if (mounted) {
+          _loadMorePosts();
+        }
+      });
     }
   }
-  // =========================================================
+  // ======================================================
 
   // -------------------------
   // Video player logic for first-second looping
@@ -396,6 +405,16 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen> {
     );
   }
   // =========================================================
+
+  // Add this method to pre-initialize video controllers (like in OtherUserProfileScreen)
+  void _preInitializeVideoControllers(List<dynamic> posts) {
+    for (final post in posts) {
+      final postUrl = post['postUrl'] ?? '';
+      if (_isVideoFile(postUrl)) {
+        _initializeVideoController(postUrl);
+      }
+    }
+  }
 
   // -------------------------
   // Placeholder Methods
@@ -636,13 +655,17 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen> {
 
       final totalPostCount = totalPostsResponse.length;
 
-      // Now get the initial batch of posts (first 6)
+      // MODIFIED: Use _initialPostsLimit (9) for first load
+      final postsLimit =
+          _isFirstLoad ? _initialPostsLimit : _subsequentPostsLimit;
+
+      // Get the initial batch of posts (first 9 on first load) - FIXED: Include all fields like in OtherUserProfileScreen
       final initialPosts = await _supabase
           .from('posts')
-          .select('postId, postUrl')
+          .select('postId, postUrl, description, datePublished, uid')
           .eq('uid', widget.uid)
           .order('datePublished', ascending: false)
-          .range(0, _postsLimit - 1);
+          .range(0, postsLimit - 1);
 
       final List<Future<dynamic>> queries = [
         _supabase.from('users').select().eq('uid', widget.uid).single(),
@@ -676,13 +699,8 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen> {
         throw Exception('User data not found for UID: ${widget.uid}');
       }
 
-      // Pre-initialize video controllers for initial video posts
-      for (final post in postsResponse) {
-        final postUrl = post['postUrl'] ?? '';
-        if (_isVideoFile(postUrl)) {
-          _initializeVideoController(postUrl);
-        }
-      }
+      // Pre-initialize video controllers for initial video posts - FIXED: Use helper method
+      _preInitializeVideoControllers(postsResponse);
 
       // Pre-initialize video controllers for gallery covers
       for (final gallery in galleriesResponse) {
@@ -709,8 +727,9 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen> {
           _galleries = galleriesResponse;
           _displayedPosts = postsResponse; // Set initial displayed posts
           _postsOffset = postsResponse.length; // Set offset for next load
-          _hasMorePosts = totalPostCount >
-              postsResponse.length; // Check if more posts exist
+          // MODIFIED: Check against the correct limit used
+          _hasMorePosts = totalPostCount > postsResponse.length;
+          _isFirstLoad = false; // MODIFIED: Mark first load as complete
         });
       }
     } catch (e, stackTrace) {
@@ -718,6 +737,8 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen> {
         setState(() {
           hasError = true;
           errorMessage = 'Failed to load profile data';
+          _isFirstLoad =
+              false; // MODIFIED: Still mark as complete even on error
         });
         showSnackBar(
             context, "Please try again or contact us at ratedly9@gmail.com");
@@ -729,37 +750,38 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen> {
     }
   }
 
-  // ========== LOAD MORE POSTS METHOD (INFINITE SCROLL) ==========
+  // ========== LOAD MORE POSTS METHOD (MATCHING OTHERUSERPROFILESCREEN) ==========
   Future<void> _loadMorePosts() async {
     if (!_hasMorePosts || _isLoadingMore) return;
 
     setState(() => _isLoadingMore = true);
 
     try {
+      // MODIFIED: Always use _subsequentPostsLimit (6) for subsequent loads
+      final postsLimit = _subsequentPostsLimit;
+
+      // FIXED: Include all fields like in OtherUserProfileScreen
       final newPosts = await _supabase
           .from('posts')
-          .select('postId, postUrl')
+          .select('postId, postUrl, description, datePublished, uid')
           .eq('uid', widget.uid)
           .order('datePublished', ascending: false)
-          .range(_postsOffset, _postsOffset + _postsLimit - 1);
+          .range(_postsOffset, _postsOffset + postsLimit - 1);
 
-      // Pre-initialize video controllers for new video posts
-      for (final post in newPosts) {
-        final postUrl = post['postUrl'] ?? '';
-        if (_isVideoFile(postUrl)) {
-          _initializeVideoController(postUrl);
-        }
-      }
+      // Pre-initialize video controllers for new video posts - FIXED: Use helper method
+      _preInitializeVideoControllers(newPosts);
 
-      if (newPosts.isNotEmpty) {
+      if (newPosts.isNotEmpty && mounted) {
         setState(() {
           _displayedPosts.addAll(newPosts);
           _postsOffset += newPosts.length;
-          _hasMorePosts = newPosts.length ==
-              _postsLimit; // If we got less than limit, no more posts
+          // MODIFIED: Check against _subsequentPostsLimit
+          _hasMorePosts = newPosts.length == _subsequentPostsLimit;
         });
       } else {
-        setState(() => _hasMorePosts = false);
+        if (mounted) {
+          setState(() => _hasMorePosts = false);
+        }
       }
     } catch (e) {
       // Handle error quietly
@@ -878,6 +900,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen> {
                             child: CircularProgressIndicator(
                                 color: colors.textColor),
                           ),
+                        const SizedBox(height: 20), // Add bottom padding
                       ],
                     ),
                   ),
@@ -1058,6 +1081,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen> {
     _displayedPosts.clear();
     _postsOffset = 0;
     _hasMorePosts = true;
+    _isFirstLoad = true; // MODIFIED: Reset first load flag
     await getData();
     if (mounted) {
       setState(() {});
@@ -1112,90 +1136,89 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen> {
   // Tab buttons
   Widget _buildTabButtons(_ColorSet colors) {
     return Container(
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: colors.cardColor, width: 1),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: colors.cardColor, width: 1),
+          ),
         ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextButton(
-              onPressed: () => setState(() => _selectedTabIndex = 0),
-              style: TextButton.styleFrom(
-                foregroundColor: _selectedTabIndex == 0
-                    ? colors.textColor
-                    : colors.textColor.withOpacity(0.5),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.zero,
+        child: Row(
+          children: [
+            Expanded(
+              child: TextButton(
+                onPressed: () => setState(() => _selectedTabIndex = 0),
+                style: TextButton.styleFrom(
+                  foregroundColor: _selectedTabIndex == 0
+                      ? colors.textColor
+                      : colors.textColor.withOpacity(0.5),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.zero,
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.grid_on,
+                      color: _selectedTabIndex == 0
+                          ? colors.textColor
+                          : colors.textColor.withOpacity(0.5),
+                    ),
+                    Text(
+                      'POSTS',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: _selectedTabIndex == 0
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                    if (_selectedTabIndex == 0)
+                      Container(
+                        height: 1,
+                        color: colors.textColor,
+                      ),
+                  ],
                 ),
               ),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.grid_on,
-                    color: _selectedTabIndex == 0
-                        ? colors.textColor
-                        : colors.textColor.withOpacity(0.5),
-                  ),
-                  Text(
-                    'POSTS',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: _selectedTabIndex == 0
-                          ? FontWeight.bold
-                          : FontWeight.normal,
-                    ),
-                  ),
-                  if (_selectedTabIndex == 0)
-                    Container(
-                      height: 1,
-                      color: colors.textColor,
-                    ),
-                ],
-              ),
             ),
-          ),
-          Expanded(
-            child: TextButton(
-              onPressed: () => setState(() => _selectedTabIndex = 1),
-              style: TextButton.styleFrom(
-                foregroundColor: _selectedTabIndex == 1
-                    ? colors.textColor
-                    : colors.textColor.withOpacity(0.5),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.zero,
+            Expanded(
+              child: TextButton(
+                onPressed: () => setState(() => _selectedTabIndex = 1),
+                style: TextButton.styleFrom(
+                  foregroundColor: _selectedTabIndex == 1
+                      ? colors.textColor
+                      : colors.textColor.withOpacity(0.5),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.zero,
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.collections,
+                      color: _selectedTabIndex == 1
+                          ? colors.textColor
+                          : colors.textColor.withOpacity(0.5),
+                    ),
+                    Text(
+                      'GALLERIES',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: _selectedTabIndex == 1
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                    if (_selectedTabIndex == 1)
+                      Container(
+                        height: 1,
+                        color: colors.textColor,
+                      ),
+                  ],
                 ),
               ),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.collections,
-                    color: _selectedTabIndex == 1
-                        ? colors.textColor
-                        : colors.textColor.withOpacity(0.5),
-                  ),
-                  Text(
-                    'GALLERIES',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: _selectedTabIndex == 1
-                          ? FontWeight.bold
-                          : FontWeight.normal,
-                    ),
-                  ),
-                  if (_selectedTabIndex == 1)
-                    Container(
-                      height: 1,
-                      color: colors.textColor,
-                    ),
-                ],
-              ),
             ),
-          ),
-        ],
-      ),
-    );
+          ],
+        ));
   }
 
   // ========== UPDATED POSTS GRID WITH INFINITE SCROLL ==========
@@ -1252,32 +1275,36 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen> {
     );
   }
 
-  // UPDATED: Post item with video that fills entire space
+  // UPDATED: Post item with video that fills entire space - FIXED to match OtherUserProfileScreen
   Widget _buildPostItem(Map<String, dynamic> post, _ColorSet colors) {
     final postUrl = post['postUrl'] ?? '';
     final isVideo = _isVideoFile(postUrl);
 
-    // Start initialization if it's a video
-    if (isVideo) {
-      _initializeVideoController(postUrl);
-    }
-
     return GestureDetector(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ImageViewScreen(
-            imageUrl: postUrl,
-            postId: post['postId'],
-            description: post['description'],
-            userId: post['uid'],
-            username: userData['username'] ?? '',
-            profImage: userData['photoUrl'] ?? '',
-            onPostDeleted: _forceRefresh,
-            datePublished: post['datePublished'],
+      onTap: () {
+        // Pause any currently playing video before navigation (like in OtherUserProfileScreen)
+        for (final controller in _videoControllers.values) {
+          if (controller.value.isPlaying) {
+            controller.pause();
+          }
+        }
+
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ImageViewScreen(
+              imageUrl: postUrl,
+              postId: post['postId']?.toString() ?? '',
+              description: post['description']?.toString() ?? '',
+              userId: post['uid']?.toString() ?? '',
+              username: userData['username']?.toString() ?? '',
+              profImage: userData['photoUrl']?.toString() ?? '',
+              onPostDeleted: _forceRefresh,
+              datePublished: post['datePublished']?.toString() ?? '',
+            ),
           ),
-        ),
-      ),
+        );
+      },
       child: Container(
         margin: const EdgeInsets.all(1), // Reduced margin
         decoration: BoxDecoration(
