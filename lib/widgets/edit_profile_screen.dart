@@ -430,7 +430,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (pickedFile != null) {
         final File videoFile = File(pickedFile.path);
 
-        // Load video into trimmer
+        // Load video into trimmer (same as AddPostScreen)
         await _trimmer.loadVideo(videoFile: videoFile);
 
         setState(() {
@@ -438,7 +438,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           _image = null;
           _pickedFileName = pickedFile.name;
           _currentPhotoUrl = null;
-          _isTrimming = true;
+          _isTrimming = true; // This will show the trimmer screen
           _isLoading = false;
         });
       } else {
@@ -697,9 +697,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               color: Colors.black,
               child: Column(
                 children: <Widget>[
+                  // Video Viewer for preview
                   Expanded(
                     child: VideoViewer(trimmer: _trimmer),
                   ),
+
+                  // Trim Viewer with fixed 3-second duration
                   Center(
                     child: TrimViewer(
                       trimmer: _trimmer,
@@ -712,6 +715,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           setState(() => _isPlaying = value),
                     ),
                   ),
+
+                  // Play/Pause button
                   TextButton(
                     child: _isPlaying
                         ? Icon(
