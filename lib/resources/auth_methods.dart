@@ -9,17 +9,15 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:Ratedly/resources/storage_methods.dart';
 import 'package:Ratedly/models/user.dart';
-import 'package:country_detector/country_detector.dart'; // ADD THIS IMPORT
-import 'package:Ratedly/services/country_service.dart'; // ADD THIS IMPORT
+import 'package:country_detector/country_detector.dart';
+import 'package:Ratedly/services/country_service.dart';
 
 class AuthMethods {
   final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email']);
   final SupabaseClient _supabase = Supabase.instance.client;
-  final CountryService _countryService =
-      CountryService(); // ADD CountryService instance
-  final CountryDetector _detector =
-      CountryDetector(); // ADD CountryDetector instance
+  final CountryService _countryService = CountryService();
+  final CountryDetector _detector = CountryDetector();
 
   // Nonce helpers for Apple sign-in
   String _generateRawNonce([int length = 32]) {
@@ -617,9 +615,9 @@ class AuthMethods {
   }
 
   // ----------------------
-  // Backfill country for existing onboarded users
+  // Backfill country for existing users (ONLY CALL THIS ONCE PER USER)
   // ----------------------
   Future<void> backfillCountryForExistingUsers() async {
-    await _countryService.backfillCountryForOnboardedUsers();
+    await _countryService.checkAndBackfillCountryForExistingUsers();
   }
 }
