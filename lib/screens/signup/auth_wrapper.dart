@@ -7,7 +7,7 @@ import 'package:Ratedly/screens/first_time/get_started_page.dart';
 import 'package:Ratedly/screens/signup/onboarding_flow.dart';
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:Ratedly/services/country_service.dart'; // ADD THIS IMPORT
+import 'package:Ratedly/services/country_service.dart';
 
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({Key? key}) : super(key: key);
@@ -18,7 +18,7 @@ class AuthWrapper extends StatefulWidget {
 
 class _AuthWrapperState extends State<AuthWrapper> {
   final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
-  final CountryService _countryService = CountryService(); // ADD CountryService
+  final CountryService _countryService = CountryService();
   firebase_auth.User? _currentUser;
   bool _onboardingComplete = false;
   bool _isLoading = true;
@@ -52,11 +52,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
         // Background verification without blocking UI
         _verifyOnboardingInBackground();
 
-        // CHECK COUNTRY: Run country check in background
-        _checkCountryInBackground();
+        // RUN COUNTRY BACKFILL: For existing users who don't have country
+        _runCountryBackfillForExistingUsers();
 
-        // BACKFILL COUNTRY: For existing users who completed onboarding
-        _backfillCountryInBackground();
+        // Also run regular country check
+        _checkCountryInBackground();
       } else {
         // No cache available, show content immediately
         if (mounted) {
@@ -67,28 +67,29 @@ class _AuthWrapperState extends State<AuthWrapper> {
     });
   }
 
+  // ADD THIS METHOD: Run country backfill for existing users
+  Future<void> _runCountryBackfillForExistingUsers() async {
+    if (_currentUser == null) return;
+
+    try {
+      // Wait a bit so it doesn't interfere with initial app load
+      await Future.delayed(const Duration(seconds: 3));
+      await _countryService.checkAndBackfillCountryForExistingUsers();
+    } catch (e) {
+      print('Country backfill failed: $e');
+    }
+  }
+
   // ADD THIS METHOD: Check country in background
   Future<void> _checkCountryInBackground() async {
     if (_currentUser == null) return;
 
     try {
       // Wait a bit so it doesn't interfere with initial app load
-      await Future.delayed(const Duration(seconds: 2));
+      await Future.delayed(const Duration(seconds: 5));
       await _countryService.checkAndUpdateCountryIfNeeded();
     } catch (e) {
       print('Background country check failed: $e');
-    }
-  }
-
-  // ADD THIS METHOD: Backfill country for existing users
-  Future<void> _backfillCountryInBackground() async {
-    if (_currentUser == null) return;
-
-    try {
-      await Future.delayed(const Duration(seconds: 4));
-      await _countryService.backfillCountryForOnboardedUsers();
-    } catch (e) {
-      print('Background country backfill failed: $e');
     }
   }
 
@@ -171,11 +172,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
         }
         _updateAuthCache(hasCompletedOnboarding);
 
-        // CHECK COUNTRY: Run country check after onboarding check
-        _checkCountryInBackground();
+        // RUN COUNTRY BACKFILL: For existing users
+        _runCountryBackfillForExistingUsers();
 
-        // BACKFILL COUNTRY: For existing users
-        _backfillCountryInBackground();
+        // Also run regular country check
+        _checkCountryInBackground();
       }
     } catch (e) {
       // Background check failed - user will see onboarding if needed
