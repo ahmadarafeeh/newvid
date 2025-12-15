@@ -8,6 +8,7 @@ class CountryService {
   // Keys for SharedPreferences
   static const String _lastCheckKey = 'last_country_check_';
   static const String _countryUpdateEnabledKey = 'country_update_enabled';
+  static const String _countryBackfilledKey = 'country_backfilled_';
 
   // Configuration
   static const int _checkIntervalDays = 3; // Check every 3 days
@@ -136,6 +137,10 @@ class CountryService {
 
         // Set up the timer
         await setupCountryTimer(userId);
+
+        // Mark as backfilled
+        final backfilledKey = '$_countryBackfilledKey$userId';
+        await _prefs!.setBool(backfilledKey, true);
       } else {
         print('CountryService: Could not detect country for user $userId');
       }
@@ -144,8 +149,8 @@ class CountryService {
     }
   }
 
-  // Backfill country for existing users who completed onboarding
-  Future<void> backfillCountryForOnboardedUsers() async {
+  // NEW: Check and backfill country for ALL existing users
+  Future<void> checkAndBackfillCountryForExistingUsers() async {
     try {
       await _initPrefs();
 
@@ -154,28 +159,48 @@ class CountryService {
 
       final userId = user.uid;
 
-      // Check if user has completed onboarding but doesn't have country
+      // Check if we've already backfilled this user
+      final backfilledKey = '$_countryBackfilledKey$userId';
+      final alreadyBackfilled = _prefs!.getBool(backfilledKey) ?? false;
+
+      if (alreadyBackfilled) {
+        print('CountryService: User $userId already backfilled, skipping');
+        return;
+      }
+
+      // Get user data from database
       final userData = await _supabase
           .from('users')
-          .select('onboardingComplete, country, username')
+          .select('country, username, onboardingComplete')
           .eq('uid', userId)
           .maybeSingle();
 
-      if (userData != null) {
-        final bool onboardingComplete = userData['onboardingComplete'] == true;
-        final bool hasUsername = userData['username'] != null &&
-            userData['username'].toString().isNotEmpty;
-        final String? currentCountry = userData['country'] as String?;
+      if (userData == null) {
+        print('CountryService: No user data found for $userId');
+        return;
+      }
 
-        // If user has completed onboarding (has username) but no country
-        if (onboardingComplete && hasUsername && currentCountry == null) {
-          print(
-              'CountryService: Backfilling country for onboarded user $userId');
-          await setCountryForUser(userId);
-        }
+      final String? currentCountry = userData['country'] as String?;
+      final bool hasUsername = userData['username'] != null &&
+          userData['username'].toString().isNotEmpty;
+      final bool onboardingComplete = userData['onboardingComplete'] == true;
+
+      // Check if user needs backfill
+      final bool needsBackfill =
+          (onboardingComplete || hasUsername) && currentCountry == null;
+
+      if (needsBackfill) {
+        print('CountryService: Backfilling country for existing user $userId');
+        await setCountryForUser(userId);
+      } else if (currentCountry != null) {
+        // User already has country, just setup timer
+        print(
+            'CountryService: User $userId already has country $currentCountry, setting up timer');
+        await setupCountryTimer(userId);
+        await _prefs!.setBool(backfilledKey, true);
       }
     } catch (e) {
-      print('Error in backfillCountryForOnboardedUsers: $e');
+      print('Error in checkAndBackfillCountryForExistingUsers: $e');
     }
   }
 
@@ -235,6 +260,25 @@ class CountryService {
       await _prefs!.remove(lastCheckKey);
     } catch (e) {
       print('CountryService error in resetCheckTimer: $e');
+    }
+  }
+
+  // Get user's current country from database
+  Future<String?> getCurrentUserCountry() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return null;
+
+      final userData = await _supabase
+          .from('users')
+          .select('country')
+          .eq('uid', user.uid)
+          .maybeSingle();
+
+      return userData?['country'] as String?;
+    } catch (e) {
+      print('Error getting user country: $e');
+      return null;
     }
   }
 
