@@ -41,6 +41,8 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _migrationEmail;
   String? _migrationUid;
   bool _migrationCompleted = false;
+  // Track authentication provider ('email', 'google', or 'apple')
+  String? _migrationProvider;
 
   @override
   void initState() {
@@ -55,6 +57,8 @@ class _LoginScreenState extends State<LoginScreen> {
             _migrationEmail = widget.migrationEmail;
             _migrationUid = widget.migrationUid;
             _emailController.text = widget.migrationEmail!;
+            // Default to email provider when redirected
+            _migrationProvider = 'email';
           });
         }
       });
@@ -140,6 +144,10 @@ class _LoginScreenState extends State<LoginScreen> {
           _showMigrationForm = true;
           _migrationEmail = _emailController.text.trim();
           _migrationUid = firebaseUser.uid;
+          // Check if user is email/password or social
+          final isSocialUser = firebaseUser.providerData
+              .any((userInfo) => userInfo.providerId != 'password');
+          _migrationProvider = isSocialUser ? 'google' : 'email';
         });
       } else {
         if (!mounted) return;
@@ -154,6 +162,11 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleMigration() async {
+    // Only handle email/password migration here
+    if (_migrationProvider != 'email') {
+      return;
+    }
+
     // Validate inputs
     if (_newPasswordController.text.isEmpty ||
         _confirmPasswordController.text.isEmpty) {
@@ -223,6 +236,7 @@ class _LoginScreenState extends State<LoginScreen> {
           _showMigrationForm = false;
           _migrationEmail = null;
           _migrationUid = null;
+          _migrationProvider = null;
           _errorMessage = '';
         });
 
@@ -250,6 +264,42 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _migrateWithGoogle() async {
+    if (!mounted) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
+    try {
+      // Use the migrateGoogleUser method
+      final result = await AuthMethods().migrateGoogleUser(
+        firebaseUid: _migrationUid!,
+        email: _migrationEmail!,
+      );
+
+      if (!mounted) return;
+
+      setState(() => _isLoading = false);
+
+      if (result == "oauth_initiated") {
+        // OAuth flow started - show waiting message
+        _showSnackBarSafe('Please complete Google sign-in in the browser...');
+
+        // The OAuth completion will be handled by the deep link handler
+      } else if (result == "needs_google_reauth") {
+        // User needs to re-authenticate
+        _showSnackBarSafe('Please re-authenticate with Google');
+        await loginWithGoogle();
+      } else {
+        setState(() => _errorMessage = result);
+      }
+    } catch (e) {
+      setState(() => _errorMessage = 'Google migration failed: $e');
+    }
+  }
+
   void _cancelMigration() {
     if (!mounted) return;
 
@@ -257,6 +307,7 @@ class _LoginScreenState extends State<LoginScreen> {
       _showMigrationForm = false;
       _migrationEmail = null;
       _migrationUid = null;
+      _migrationProvider = null;
       _newPasswordController.clear();
       _confirmPasswordController.clear();
       _errorMessage = '';
@@ -305,12 +356,18 @@ class _LoginScreenState extends State<LoginScreen> {
         // Show migration form for Google user
         final firebaseUser = FirebaseAuth.instance.currentUser;
         if (firebaseUser != null && firebaseUser.email != null) {
+          // Check if this is a Google user
+          final isGoogleUser = firebaseUser.providerData
+              .any((userInfo) => userInfo.providerId == 'google.com');
+
           if (mounted) {
             setState(() {
               _showMigrationForm = true;
               _migrationEmail = firebaseUser.email!;
               _migrationUid = firebaseUser.uid;
               _emailController.text = firebaseUser.email!;
+              // Set the correct provider
+              _migrationProvider = isGoogleUser ? 'google' : 'email';
             });
           }
         }
@@ -369,12 +426,18 @@ class _LoginScreenState extends State<LoginScreen> {
         // Show migration form for Apple user
         final firebaseUser = FirebaseAuth.instance.currentUser;
         if (firebaseUser != null && firebaseUser.email != null) {
+          // Check if this is an Apple user
+          final isAppleUser = firebaseUser.providerData
+              .any((userInfo) => userInfo.providerId == 'apple.com');
+
           if (mounted) {
             setState(() {
               _showMigrationForm = true;
               _migrationEmail = firebaseUser.email!;
               _migrationUid = firebaseUser.uid;
               _emailController.text = firebaseUser.email!;
+              // Set the correct provider
+              _migrationProvider = isAppleUser ? 'apple' : 'email';
             });
           }
         }
@@ -393,6 +456,260 @@ class _LoginScreenState extends State<LoginScreen> {
         });
       }
     }
+  }
+
+  // Build password migration form
+  Widget _buildPasswordMigrationForm() {
+    return Column(
+      children: [
+        const SizedBox(height: 20),
+        Text(
+          'We\'re upgrading our security system. Please set a new password for your account to continue.',
+          style: TextStyle(
+            color: Colors.grey[400],
+            fontFamily: 'Inter',
+            fontSize: 14,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Email: $_migrationEmail',
+          style: TextStyle(
+            color: Colors.grey[600],
+            fontFamily: 'Inter',
+            fontSize: 14,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 24),
+        TextFieldInput(
+          hintText: 'New Password',
+          textInputType: TextInputType.text,
+          textEditingController: _newPasswordController,
+          isPass: true,
+          hintStyle: TextStyle(
+            color: Colors.grey[400],
+            fontFamily: 'Inter',
+          ),
+          fillColor: const Color(0xFF333333),
+        ),
+        const SizedBox(height: 16),
+        TextFieldInput(
+          hintText: 'Confirm New Password',
+          textInputType: TextInputType.text,
+          textEditingController: _confirmPasswordController,
+          isPass: true,
+          hintStyle: TextStyle(
+            color: Colors.grey[400],
+            fontFamily: 'Inter',
+          ),
+          fillColor: const Color(0xFF333333),
+        ),
+        if (_errorMessage.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.red.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.red.withOpacity(0.3)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.red, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _errorMessage,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 24),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : _cancelMigration,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF444444),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                    fontFamily: 'Inter',
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : _handleMigration,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF333333),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: _isLoading
+                    ? const CircularProgressIndicator(
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      )
+                    : const Text(
+                        'Update Account',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          fontFamily: 'Inter',
+                        ),
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // Build Google migration form
+  Widget _buildGoogleMigrationForm() {
+    return Column(
+      children: [
+        const SizedBox(height: 20),
+        Text(
+          'We\'re upgrading our security system. Please re-authenticate with Google to migrate your account.',
+          style: TextStyle(
+            color: Colors.grey[400],
+            fontFamily: 'Inter',
+            fontSize: 14,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Account: $_migrationEmail',
+          style: TextStyle(
+            color: Colors.grey[600],
+            fontFamily: 'Inter',
+            fontSize: 14,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 24),
+        ElevatedButton.icon(
+          onPressed: _isLoading ? null : _migrateWithGoogle,
+          icon: Image.asset(
+            'assets/logo/google-logo.png',
+            width: 24,
+            height: 24,
+            fit: BoxFit.contain,
+          ),
+          label: _isLoading
+              ? const CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                )
+              : const Text(
+                  'Migrate with Google',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontWeight: FontWeight.w500,
+                    fontSize: 16,
+                  ),
+                ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF333333),
+            foregroundColor: Colors.white,
+            minimumSize: const Size(double.infinity, 56),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        ElevatedButton(
+          onPressed: _cancelMigration,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF444444),
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          child: const Text(
+            'Cancel',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              fontFamily: 'Inter',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Build Apple migration form (placeholder - you can implement Apple migration later)
+  Widget _buildAppleMigrationForm() {
+    return Column(
+      children: [
+        const SizedBox(height: 20),
+        Text(
+          'Apple account migration is not yet implemented. Please use email/password login for now.',
+          style: TextStyle(
+            color: Colors.grey[400],
+            fontFamily: 'Inter',
+            fontSize: 14,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Account: $_migrationEmail',
+          style: TextStyle(
+            color: Colors.grey[600],
+            fontFamily: 'Inter',
+            fontSize: 14,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 24),
+        ElevatedButton(
+          onPressed: _cancelMigration,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF444444),
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          child: const Text(
+            'Cancel',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              fontFamily: 'Inter',
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -433,129 +750,14 @@ class _LoginScreenState extends State<LoginScreen> {
                     textAlign: TextAlign.center,
                   ),
                   if (_showMigrationForm) ...[
-                    // Migration form
-                    const SizedBox(height: 20),
-                    Text(
-                      'We\'re upgrading our security system. Please set a new password for your account to continue.',
-                      style: TextStyle(
-                        color: Colors.grey[400],
-                        fontFamily: 'Inter',
-                        fontSize: 14,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Email: $_migrationEmail',
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontFamily: 'Inter',
-                        fontSize: 14,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 24),
-                    TextFieldInput(
-                      hintText: 'New Password',
-                      textInputType: TextInputType.text,
-                      textEditingController: _newPasswordController,
-                      isPass: true,
-                      hintStyle: TextStyle(
-                        color: Colors.grey[400],
-                        fontFamily: 'Inter',
-                      ),
-                      fillColor: const Color(0xFF333333),
-                    ),
-                    const SizedBox(height: 16),
-                    TextFieldInput(
-                      hintText: 'Confirm New Password',
-                      textInputType: TextInputType.text,
-                      textEditingController: _confirmPasswordController,
-                      isPass: true,
-                      hintStyle: TextStyle(
-                        color: Colors.grey[400],
-                        fontFamily: 'Inter',
-                      ),
-                      fillColor: const Color(0xFF333333),
-                    ),
-                    if (_errorMessage.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                          border:
-                              Border.all(color: Colors.red.withOpacity(0.3)),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.error,
-                                color: Colors.red, size: 20),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _errorMessage,
-                                style: const TextStyle(color: Colors.red),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                    // Show different forms based on provider
+                    if (_migrationProvider == 'email') ...[
+                      _buildPasswordMigrationForm(),
+                    ] else if (_migrationProvider == 'google') ...[
+                      _buildGoogleMigrationForm(),
+                    ] else if (_migrationProvider == 'apple') ...[
+                      _buildAppleMigrationForm(),
                     ],
-                    const SizedBox(height: 24),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: _isLoading ? null : _cancelMigration,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF444444),
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            child: const Text(
-                              'Cancel',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                                fontFamily: 'Inter',
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: _isLoading ? null : _handleMigration,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF333333),
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            child: _isLoading
-                                ? const CircularProgressIndicator(
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                        Colors.white),
-                                  )
-                                : const Text(
-                                    'Update Account',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w500,
-                                      fontFamily: 'Inter',
-                                    ),
-                                  ),
-                          ),
-                        ),
-                      ],
-                    ),
                     const SizedBox(height: 16),
                   ] else ...[
                     // Normal login form
@@ -623,11 +825,12 @@ class _LoginScreenState extends State<LoginScreen> {
                               recognizer: TapGestureRecognizer()
                                 ..onTap = () {
                                   Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) =>
-                                            const PrivacyPolicyScreen(),
-                                      ));
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const PrivacyPolicyScreen(),
+                                    ),
+                                  );
                                 },
                             ),
                           ],
