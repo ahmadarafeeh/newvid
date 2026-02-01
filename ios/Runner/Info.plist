@@ -4,18 +4,37 @@
 <dict>
 	<key>CFBundleURLTypes</key>
 	<array>
+		<!-- Google Sign-in Scheme -->
 		<dict>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-			<!-- TODO Replace this value: -->
-			<!-- Copied from GoogleService-Info.plist key REVERSED_CLIENT_ID -->
 				<string>com.googleusercontent.apps.411393947451-dci447kne3aglou6qf8qqgh053sn1rps</string>
 			</array>
+			<key>CFBundleURLName</key>
+			<string>com.googleusercontent.apps</string>
+		</dict>
+		<!-- Supabase OAuth Redirect Scheme -->
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>ratedly</string>
+			</array>
+			<key>CFBundleURLName</key>
+			<string>com.yourcompany.ratedly</string>
 		</dict>
 	</array>
-<!-- End of the Google Sign-in Section -->
+	
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>googlechromes</string>
+		<string>comgooglemaps</string>
+		<string>comgooglemapsurl</string>
+	</array>
+	
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
