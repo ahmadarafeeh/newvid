@@ -17,7 +17,6 @@ import 'package:Ratedly/services/analytics_service.dart';
 import 'package:Ratedly/services/notification_service.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:Ratedly/services/country_service.dart';
-import 'package:uni_links/uni_links.dart'; // Add this import
 
 const bool useDebugHome = false;
 
@@ -76,17 +75,19 @@ Future<void> _initializeNonEssentialServicesInBackground() async {
 
 Future<void> _initializeSupabaseInBackground() async {
   try {
-    // Initialize Supabase WITHOUT the redirect URL here
+    // ✅ CORRECTED: Initialize Supabase WITHOUT redirect URL
     await Supabase.initialize(
       url: supabaseUrl,
       anonKey: supabaseAnonKey,
       authOptions: const FlutterAuthClientOptions(
-        autoRefreshToken: false,
-        // Do NOT set redirectTo/redirectUrl here
+        autoRefreshToken: true,
+        // ❌ DO NOT set redirectTo or redirectUrl here
       ),
     );
+    
+    print('✅ Supabase initialized');
   } catch (e) {
-    // Error handling
+    print('❌ Supabase initialization error: $e');
   }
 }
 
@@ -129,8 +130,6 @@ class OptimizedMyApp extends StatefulWidget {
 }
 
 class _OptimizedMyAppState extends State<OptimizedMyApp> {
-  StreamSubscription? _sub;
-
   static final _lightTheme = ThemeData.light().copyWith(
     scaffoldBackgroundColor: Colors.grey[100],
     bottomNavigationBarTheme: BottomNavigationBarThemeData(
@@ -156,83 +155,6 @@ class _OptimizedMyAppState extends State<OptimizedMyApp> {
       elevation: 0,
     ),
   );
-
-  @override
-  void initState() {
-    super.initState();
-    _initDeepLinks();
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
-
-  // Handle deep links for OAuth redirects
-  void _initDeepLinks() async {
-    try {
-      // Handle initial link when app is opened from a deep link
-      final initialLink = await getInitialLink();
-      if (initialLink != null) {
-        _handleDeepLink(initialLink);
-      }
-
-      // Listen for links while app is running
-      _sub = linkStream.listen((String? link) {
-        if (link != null) {
-          _handleDeepLink(link);
-        }
-      }, onError: (err) {
-        // Handle error
-      });
-    } on PlatformException {
-      // Platform exception handling
-    }
-  }
-
-  void _handleDeepLink(String link) {
-    if (link.contains('access_token') || link.contains('error')) {
-      // This is likely a Supabase OAuth callback
-      final uri = Uri.parse(link);
-      final accessToken = uri.queryParameters['access_token'];
-      final refreshToken = uri.queryParameters['refresh_token'];
-      final error = uri.queryParameters['error'];
-
-      if (error != null) {
-        print(
-            'OAuth error: $error - ${uri.queryParameters['error_description']}');
-      } else if (accessToken != null) {
-        print('OAuth success, access token received');
-
-        // Check if this is a migration flow
-        // You might want to trigger migration completion here
-        // This would require checking if there's a pending migration
-        _completePendingGoogleMigration();
-      }
-    }
-  }
-
-// Add this helper method to main.dart
-  Future<void> _completePendingGoogleMigration() async {
-    try {
-      // Wait a bit for the session to be fully established
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // Call the migration completion method
-      final authMethods = AuthMethods();
-      final result = await authMethods.completeGoogleMigrationFromDeepLink();
-
-      if (result == "success") {
-        print('Google migration completed successfully!');
-        // You might want to navigate the user or show a success message
-      } else {
-        print('Google migration failed: $result');
-      }
-    } catch (e) {
-      print('Error completing Google migration: $e');
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
