@@ -119,126 +119,118 @@ class AuthMethods {
     }
   }
 
-// Add this method to handle Google user migration
+  // ----------------------
+  // SIMPLIFIED Google user migration
+  // ----------------------
   Future<String> migrateGoogleUser({
     required String firebaseUid,
     required String email,
   }) async {
     try {
-      final firebaseUser = _auth.currentUser;
-      if (firebaseUser == null) {
-        return "User not logged in. Please log in with Google first.";
-      }
-
-      // Check if user signed in with Google in Firebase
-      final isGoogleUser = firebaseUser.providerData
-          .any((userInfo) => userInfo.providerId == 'google.com');
-
-      if (!isGoogleUser) {
-        return "Please sign in with Google to migrate your account.";
-      }
-
-      // Get the current Firebase user's Google credential
-      try {
-        // First, ensure the user has Google credentials
-        final isSignedInWithGoogle = await _googleSignIn.isSignedIn();
-
-        if (!isSignedInWithGoogle) {
-          // User needs to re-authenticate with Google
-          return "needs_google_reauth";
-        }
-
-        // Get the Google user silently (without UI)
-        final GoogleSignInAccount? googleUser =
-            await _googleSignIn.signInSilently();
-
-        if (googleUser == null) {
-          // Couldn't get Google user silently, need interactive sign-in
-          return "needs_google_reauth";
-        }
-
-        final GoogleSignInAuthentication googleAuth =
-            await googleUser.authentication;
-
-        // For migration, we need to sign in to Supabase with Google OAuth
-        // Note: This will open a browser for OAuth flow
-        await _supabase.auth.signInWithOAuth(
-          OAuthProvider.google, // ✅ Use the new OAuthProvider enum
-          redirectTo: 'ratedly://login-callback',
-        );
-
-        // The actual OAuth completion happens in the browser and redirects back
-        // We can't wait for it here, so we return a special status
-        return "oauth_initiated";
-      } catch (e) {
-        if (e.toString().contains('PlatformException') &&
-            e.toString().contains('signInSilently')) {
-          return "needs_google_reauth";
-        }
-        return "Google migration failed: $e";
-      }
+      print('🚀 Starting Google OAuth migration for: $email');
+      
+      // Start Supabase Google OAuth - this will open browser
+      await _supabase.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: 'ratedly://login-callback',
+      );
+      
+      print('✅ OAuth flow initiated successfully');
+      return "oauth_initiated";
+      
     } catch (e) {
+      print('❌ Google OAuth migration error: $e');
       return "Google migration failed: $e";
     }
   }
 
-// Add this method to re-authenticate with Google (for migration)
-  Future<String> reauthenticateWithGoogleForMigration({
-    required String firebaseUid,
-    required String email,
-  }) async {
+  // ----------------------
+  // NEW: Complete migration after OAuth success
+  // ----------------------
+  Future<String> completeMigrationAfterOAuth() async {
     try {
-      // Sign in with Google to get fresh credentials
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) {
-        return "cancelled";
+      print('🔄 Checking for migration completion...');
+      
+      // Wait a moment for Supabase to process the OAuth response
+      await Future.delayed(const Duration(seconds: 1));
+      
+      // Get current Supabase session
+      final session = _supabase.auth.currentSession;
+      if (session == null) {
+        print('❌ No Supabase session found');
+        return "No Supabase session found. OAuth might have failed.";
       }
-
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-
-      // Now try the Supabase OAuth again
-      await _supabase.auth.signInWithOAuth(
-        OAuthProvider.google, // ✅ Use the new OAuthProvider enum
-        redirectTo: 'ratedly://login-callback',
-      );
-
-      return "oauth_initiated";
+      
+      // Get current Firebase user
+      final firebaseUser = _auth.currentUser;
+      if (firebaseUser == null) {
+        print('❌ No Firebase user found');
+        return "Firebase user not found. Please log in again.";
+      }
+      
+      print('✅ Found Firebase UID: ${firebaseUser.uid}');
+      print('✅ Found Supabase UID: ${session.user.id}');
+      
+      // Check if user is already migrated
+      final List<dynamic> userCheck = await _supabase
+          .from('users')
+          .select('migrated, supabase_uid')
+          .eq('uid', firebaseUser.uid)
+          .limit(1);
+      
+      if (userCheck.isNotEmpty && userCheck[0]['migrated'] == true) {
+        print('ℹ️ User already migrated');
+        return "already_migrated";
+      }
+      
+      // Update the user record to mark as migrated
+      print('📝 Marking user as migrated...');
+      await _supabase.from('users').update({
+        'migrated': true,
+        'supabase_uid': session.user.id,
+      }).eq('uid', firebaseUser.uid);
+      
+      print('✅ Migration completed successfully!');
+      return "success";
+      
     } catch (e) {
-      return "Re-authentication failed: $e";
+      print('❌ Error completing migration: $e');
+      return "Failed to complete migration: $e";
     }
   }
 
-// Add this method to handle OAuth completion (to be called from deep link handler)
-  Future<String> completeGoogleMigrationFromDeepLink() async {
+  // ----------------------
+  // Check if user needs migration (call this after OAuth)
+  // ----------------------
+  Future<bool> checkAndCompleteMigration() async {
     try {
-      // Wait a moment for Supabase to process the OAuth response
-      await Future.delayed(const Duration(seconds: 1));
-
-      final session = _supabase.auth.currentSession;
-      if (session == null) {
-        return "No Supabase session found. OAuth might have failed.";
-      }
-
       final firebaseUser = _auth.currentUser;
-      if (firebaseUser == null) {
-        return "Firebase user not found. Please log in again.";
+      if (firebaseUser == null) return false;
+      
+      final session = _supabase.auth.currentSession;
+      if (session == null) return false;
+      
+      // Check if already migrated
+      final List<dynamic> userCheck = await _supabase
+          .from('users')
+          .select('migrated')
+          .eq('uid', firebaseUser.uid)
+          .limit(1);
+      
+      if (userCheck.isEmpty) return false;
+      
+      if (userCheck[0]['migrated'] != true) {
+        // Not migrated yet - complete it
+        await _supabase.from('users').update({
+          'migrated': true,
+          'supabase_uid': session.user.id,
+        }).eq('uid', firebaseUser.uid);
+        return true;
       }
-
-      // Check if this is a Google user
-      final isGoogleUser = firebaseUser.providerData
-          .any((userInfo) => userInfo.providerId == 'google.com');
-
-      if (!isGoogleUser) {
-        return "Current user is not a Google user.";
-      }
-
-      // Update the user record to mark as migrated
-      await markAsMigrated(firebaseUser.uid, session.user.id);
-
-      return "success";
+      
+      return true; // Already migrated
     } catch (e) {
-      return "Failed to complete Google migration: $e";
+      return false;
     }
   }
 
@@ -702,7 +694,6 @@ class AuthMethods {
   // ----------------------
   // Google sign-in (Firebase auth) - sets migrated = false
   // ----------------------
-// Update the existing signInWithGoogle method (around line 420 in your code)
   Future<String> signInWithGoogle() async {
     try {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
