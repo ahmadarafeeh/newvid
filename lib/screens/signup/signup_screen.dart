@@ -1,3 +1,4 @@
+import 'dart:convert'; // Add this import at the top of the file
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:Ratedly/resources/auth_methods.dart';
@@ -9,6 +10,7 @@ import 'package:Ratedly/screens/terms_of_service_screen.dart';
 import 'package:Ratedly/screens/privacy_policy_screen.dart';
 import 'package:flutter/foundation.dart'
     show kIsWeb, defaultTargetPlatform, TargetPlatform;
+import 'package:supabase_flutter/supabase_flutter.dart'; // Add this import
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({Key? key}) : super(key: key);
@@ -21,55 +23,69 @@ class _SignupScreenState extends State<SignupScreen> {
   final TextEditingController _emailController = TextEditingController();
   bool _isLoading = false;
 
+  // ✅ NEW: Supabase instance
+  final SupabaseClient _supabase = Supabase.instance.client;
+
   @override
   void dispose() {
     super.dispose();
     _emailController.dispose();
   }
 
-  void signUpWithGoogle() async {
+  // ✅ NEW: Supabase Google Sign-up (no Firebase involved)
+  void signUpWithGoogleSupabase() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
-    String res = await AuthMethods().signInWithGoogle();
-    if (!mounted) return;
-    setState(() => _isLoading = false);
-    if (res == "success") {
-      if (mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const AuthWrapper()),
-          (route) => false,
-        );
+
+    try {
+      await _supabase.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: kIsWeb
+            ? 'https://tbiemcbqjjjsgumnjlqq.supabase.co/auth/v1/callback'
+            : 'ratedly://login-callback',
+      );
+
+      // If we get here, the OAuth flow has been initiated
+      // The actual sign-up completion will be handled by the auth state listener
+      // in your AuthWrapper
+      print('✅ Google OAuth sign-up initiated');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+
+      String errorMessage = "Google sign-up failed";
+      if (e is AuthException) {
+        errorMessage = e.message;
       }
-    } else if (res == "onboarding_required") {
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const AuthWrapper()),
-        );
-      }
-    } else if (res == "cancelled") {
-      if (mounted) showSnackBar(context, 'Google sign-in cancelled');
-    } else {
-      if (mounted) showSnackBar(context, res);
+
+      if (mounted) showSnackBar(context, errorMessage);
     }
   }
 
-  void signUpWithApple() async {
+  // ✅ NEW: Supabase Apple Sign-up (no Firebase involved)
+  void signUpWithAppleSupabase() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
-    String res = await AuthMethods().signInWithApple();
-    if (!mounted) return;
-    setState(() => _isLoading = false);
 
-    if (res == "success" || res == "onboarding_required") {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const AuthWrapper()),
+    try {
+      await _supabase.auth.signInWithOAuth(
+        OAuthProvider.apple,
+        redirectTo: kIsWeb
+            ? 'https://tbiemcbqjjjsgumnjlqq.supabase.co/auth/v1/callback'
+            : 'ratedly://login-callback',
       );
-    } else if (res == "cancelled") {
-      showSnackBar(context, 'Apple sign-in cancelled');
-    } else {
-      showSnackBar(context, res);
+
+      print('✅ Apple OAuth sign-up initiated');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+
+      String errorMessage = "Apple sign-up failed";
+      if (e is AuthException) {
+        errorMessage = e.message;
+      }
+
+      if (mounted) showSnackBar(context, errorMessage);
     }
   }
 
@@ -144,7 +160,7 @@ class _SignupScreenState extends State<SignupScreen> {
               ),
               const SizedBox(height: 24),
               ElevatedButton(
-                onPressed: navigateToPasswordScreen,
+                onPressed: _isLoading ? null : navigateToPasswordScreen,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF333333),
                   padding: const EdgeInsets.symmetric(vertical: 16),
@@ -193,9 +209,9 @@ class _SignupScreenState extends State<SignupScreen> {
               ),
               const SizedBox(height: 24),
 
-              // Google Signup Button
+              // ✅ UPDATED: Google Sign-up Button (Supabase-only)
               ElevatedButton.icon(
-                onPressed: signUpWithGoogle,
+                onPressed: _isLoading ? null : signUpWithGoogleSupabase,
                 icon: Container(
                   width: 29,
                   height: 29,
@@ -207,14 +223,19 @@ class _SignupScreenState extends State<SignupScreen> {
                     fit: BoxFit.contain,
                   ),
                 ),
-                label: const Text(
-                  'Sign up with Google',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    fontWeight: FontWeight.w500,
-                    fontSize: 16,
-                  ),
-                ),
+                label: _isLoading
+                    ? const CircularProgressIndicator(
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        strokeWidth: 2,
+                      )
+                    : const Text(
+                        'Sign up with Google',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontWeight: FontWeight.w500,
+                          fontSize: 16,
+                        ),
+                      ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF333333),
                   foregroundColor: Colors.white,
@@ -226,11 +247,11 @@ class _SignupScreenState extends State<SignupScreen> {
                 ),
               ),
 
-              // Conditionally show Apple Signup Button only on iOS/macOS
+              // ✅ UPDATED: Conditionally show Apple Signup Button (Supabase-only)
               if (_shouldShowAppleButton) ...[
                 const SizedBox(height: 16),
                 ElevatedButton.icon(
-                  onPressed: signUpWithApple,
+                  onPressed: _isLoading ? null : signUpWithAppleSupabase,
                   icon: Container(
                     width: 29,
                     height: 29,
@@ -243,14 +264,20 @@ class _SignupScreenState extends State<SignupScreen> {
                       color: Colors.white,
                     ),
                   ),
-                  label: const Text(
-                    'Sign up with Apple',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontWeight: FontWeight.w500,
-                      fontSize: 16,
-                    ),
-                  ),
+                  label: _isLoading
+                      ? const CircularProgressIndicator(
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.white),
+                          strokeWidth: 2,
+                        )
+                      : const Text(
+                          'Sign up with Apple',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontWeight: FontWeight.w500,
+                            fontSize: 16,
+                          ),
+                        ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF333333),
                     foregroundColor: Colors.white,
@@ -320,10 +347,13 @@ class _SignupScreenState extends State<SignupScreen> {
 
               // Login prompt
               TextButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const LoginScreen()),
-                ),
+                onPressed: _isLoading
+                    ? null
+                    : () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (context) => const LoginScreen()),
+                        ),
                 child: RichText(
                   text: TextSpan(
                     style: TextStyle(
@@ -340,13 +370,16 @@ class _SignupScreenState extends State<SignupScreen> {
                           fontWeight: FontWeight.bold,
                         ),
                         recognizer: TapGestureRecognizer()
-                          ..onTap = () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (context) => const LoginScreen()),
-                            );
-                          },
+                          ..onTap = _isLoading
+                              ? null
+                              : () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (context) =>
+                                            const LoginScreen()),
+                                  );
+                                },
                       ),
                     ],
                   ),
@@ -375,6 +408,9 @@ class _PasswordSignupScreenState extends State<PasswordSignupScreen> {
       TextEditingController();
   bool _isLoading = false;
 
+  // ✅ NEW: Supabase instance
+  final SupabaseClient _supabase = Supabase.instance.client;
+
   @override
   void dispose() {
     super.dispose();
@@ -382,32 +418,118 @@ class _PasswordSignupScreenState extends State<PasswordSignupScreen> {
     _passwordConfirmationController.dispose();
   }
 
-  void signUpUser() async {
+  // ✅ NEW: Supabase Email/Password Sign-up (no Firebase involved)
+  void signUpWithEmailAndPasswordSupabase() async {
     if (_passwordController.text != _passwordConfirmationController.text) {
       showSnackBar(context, "Passwords don't match");
+      return;
+    }
+
+    if (_passwordController.text.length < 6) {
+      showSnackBar(context, "Password must be at least 6 characters");
       return;
     }
 
     if (!mounted) return;
     setState(() => _isLoading = true);
 
-    String res = await AuthMethods().signUpUser(
-      email: widget.email,
-      password: _passwordController.text,
-    );
+    try {
+      // 1. Sign up with Supabase Auth
+      final AuthResponse response = await _supabase.auth.signUp(
+        email: widget.email,
+        password: _passwordController.text,
+        emailRedirectTo: kIsWeb
+            ? 'https://tbiemcbqjjjsgumnjlqq.supabase.co/auth/v1/callback'
+            : 'ratedly://login-callback',
+      );
 
-    if (!mounted) return;
-    setState(() => _isLoading = false);
+      if (!mounted) return;
+      setState(() => _isLoading = false);
 
-    if (res == "success") {
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const AuthWrapper()),
-        );
+      if (response.user == null) {
+        showSnackBar(context, "Sign-up failed. Please try again.");
+        return;
       }
-    } else {
-      if (mounted) showSnackBar(context, "Signup failed. Please try again.");
+
+      // 2. Create user record in the 'users' table
+      try {
+        await _supabase.from('users').upsert({
+          'uid': response.user!.id, // Use Supabase UID as primary key
+          'email': widget.email,
+          'username': '',
+          'bio': '',
+          'photoUrl': 'default',
+          'isPrivate': false,
+          'onboardingComplete': false,
+          'createdAt': DateTime.now().toIso8601String(),
+          'dateOfBirth': null,
+          'gender': null,
+          'isVerified': false,
+          'blockedUsers': jsonEncode([]), // ✅ Now this works with the import
+          'country': null,
+          'migrated': true, // Supabase users are already "migrated"
+          'supabase_uid': response.user!.id,
+        });
+
+        print('✅ User record created for Supabase user: ${response.user!.id}');
+
+        // Check if email needs verification
+        if (response.session == null) {
+          // Email confirmation required
+          if (mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => AlertDialog(
+                title: const Text('Check your email'),
+                content: const Text(
+                  'We\'ve sent you a confirmation email. '
+                  'Please check your inbox and verify your email address.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context); // Close dialog
+                      Navigator.pop(context); // Go back to login screen
+                    },
+                    child: const Text('OK'),
+                  ),
+                ],
+              ),
+            );
+          }
+        } else {
+          // Email already verified or not required
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const AuthWrapper()),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          showSnackBar(context,
+              "User created, but profile setup failed. Please contact support.");
+        }
+        print('Error creating user record: $e');
+      }
+    } on AuthException catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+
+      String errorMessage = "Sign-up failed";
+      if (e.message?.contains('User already registered') ?? false) {
+        errorMessage = "Email already registered. Please log in instead.";
+      } else if (e.message?.contains('invalid email') ?? false) {
+        errorMessage = "Please enter a valid email address.";
+      }
+
+      if (mounted) showSnackBar(context, errorMessage);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      if (mounted) showSnackBar(context, "Sign-up failed. Please try again.");
     }
   }
 
@@ -419,7 +541,7 @@ class _PasswordSignupScreenState extends State<PasswordSignupScreen> {
         backgroundColor: const Color(0xFF121212),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+          onPressed: _isLoading ? null : () => Navigator.pop(context),
         ),
         title: const Text(
           'Create your account',
@@ -460,6 +582,25 @@ class _PasswordSignupScreenState extends State<PasswordSignupScreen> {
               ),
               const SizedBox(height: 40),
 
+              // Email (read-only)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF333333),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  widget.email,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontFamily: 'Inter',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+
               // Password
               TextFieldInput(
                 hintText: 'Enter your password',
@@ -472,7 +613,19 @@ class _PasswordSignupScreenState extends State<PasswordSignupScreen> {
                 ),
                 fillColor: const Color(0xFF333333),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                child: Text(
+                  'Password must be at least 6 characters',
+                  style: TextStyle(
+                    color: Colors.grey[400],
+                    fontSize: 12,
+                    fontFamily: 'Inter',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
 
               // Confirm Password
               TextFieldInput(
@@ -491,7 +644,8 @@ class _PasswordSignupScreenState extends State<PasswordSignupScreen> {
 
               // Sign Up Button
               ElevatedButton(
-                onPressed: signUpUser,
+                onPressed:
+                    _isLoading ? null : signUpWithEmailAndPasswordSupabase,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF333333),
                   padding: const EdgeInsets.symmetric(vertical: 16),
