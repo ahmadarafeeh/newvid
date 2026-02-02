@@ -9,45 +9,32 @@ class AppDelegate: FlutterAppDelegate {
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     GeneratedPluginRegistrant.register(with: self)
-    
-    // Handle custom URL scheme on launch
-    if let url = launchOptions?[UIApplication.LaunchOptionsKey.url] as? URL {
-      handleIncomingURL(url)
-    }
-    
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
-  
-  // Handle custom URL schemes when app is already running
+
+  // This method handles all URL openings, including OAuth redirects
   override func application(
     _ app: UIApplication,
     open url: URL,
     options: [UIApplication.OpenURLOptionsKey : Any] = [:]
   ) -> Bool {
-    // Handle Google Sign-in
+    // First, try to let the Google Sign-In SDK handle the URL (if it's a Google sign-in redirect)
     if GIDSignIn.sharedInstance.handle(url) {
+      print("✅ Google Sign-In handled URL: \(url.absoluteString)")
       return true
     }
     
-    // Handle your custom scheme (ratedly://)
+    // Check if this is our custom scheme (ratedly://)
+    // This is the Supabase OAuth redirect
     if url.scheme == "ratedly" {
-      handleIncomingURL(url)
-      return true
+      print("✅ Supabase OAuth redirect received: \(url.absoluteString)")
+      
+      // CRITICAL: Pass the URL to the Flutter engine
+      // The supabase_flutter SDK will automatically handle this OAuth response
+      return super.application(app, open: url, options: options)
     }
     
+    // For any other URLs, use default handling
     return super.application(app, open: url, options: options)
-  }
-  
-  // Helper method to handle incoming URLs
-  func handleIncomingURL(_ url: URL) {
-    // The uni_links plugin should automatically pick up this URL
-    print("AppDelegate handled URL: \(url.absoluteString)")
-    
-    // You can also post a notification if needed
-    NotificationCenter.default.post(
-      name: NSNotification.Name("IncomingURL"),
-      object: nil,
-      userInfo: ["url": url.absoluteString]
-    )
   }
 }
