@@ -58,7 +58,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
     // First check Supabase session (for new users)
     final supabaseSession = _supabase.auth.currentSession;
     if (supabaseSession != null) {
-      await DebugLogger.logEvent('AUTH_INIT', 'Supabase session found, handling...');
+      await DebugLogger.logEvent(
+          'AUTH_INIT', 'Supabase session found, handling...');
       await _handleSupabaseSession(supabaseSession, userProvider);
       return;
     }
@@ -66,7 +67,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
     // Then check Firebase (for existing users)
     final firebaseUser = _auth.currentUser;
     if (firebaseUser != null) {
-      await DebugLogger.logEvent('AUTH_INIT', 'Firebase user found, handling...');
+      await DebugLogger.logEvent(
+          'AUTH_INIT', 'Firebase user found, handling...');
       await _handleFirebaseUser(firebaseUser, userProvider);
       return;
     }
@@ -79,7 +81,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
   Future<void> _handleSupabaseSession(
       Session session, UserProvider userProvider) async {
     try {
-      DebugLogger.logEvent('SUPABASE_SESSION', 'Handling Supabase session for ${session.user.id}');
+      DebugLogger.logEvent('SUPABASE_SESSION',
+          'Handling Supabase session for ${session.user.id}');
 
       // Look up user record by supabase_uid
       var userDataResponse = await _supabase
@@ -133,8 +136,10 @@ class _AuthWrapperState extends State<AuthWrapper> {
         ...userData,
       });
 
-      final hasCompletedOnboarding = await _checkOnboardingStatus(_firebaseUid!);
-      DebugLogger.logEvent('ONBOARDING_STATUS_CHECK', 'hasCompletedOnboarding: $hasCompletedOnboarding');
+      final hasCompletedOnboarding =
+          await _checkOnboardingStatus(_firebaseUid!);
+      DebugLogger.logEvent('ONBOARDING_STATUS_CHECK',
+          'hasCompletedOnboarding: $hasCompletedOnboarding');
 
       if (mounted) {
         setState(() {
@@ -159,7 +164,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
     _photoUrl = firebaseUser.photoURL;
     _isMigrated = false;
 
-    DebugLogger.logEvent('FIREBASE_USER', 'Handling Firebase user $_firebaseUid');
+    DebugLogger.logEvent(
+        'FIREBASE_USER', 'Handling Firebase user $_firebaseUid');
 
     final cachedData = await _loadCachedAuthDataInstantly();
 
@@ -226,7 +232,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
     if (_firebaseUid == null || !_usingCachedData) return;
 
     try {
-      final hasCompletedOnboarding = await _checkOnboardingStatus(_firebaseUid!);
+      final hasCompletedOnboarding =
+          await _checkOnboardingStatus(_firebaseUid!);
 
       if (hasCompletedOnboarding != _onboardingComplete && mounted) {
         setState(() => _onboardingComplete = hasCompletedOnboarding);
@@ -268,7 +275,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
     try {
       await _initializeUserProvider(userProvider);
 
-      final hasCompletedOnboarding = await _checkOnboardingStatus(_firebaseUid!);
+      final hasCompletedOnboarding =
+          await _checkOnboardingStatus(_firebaseUid!);
 
       if (mounted) {
         setState(() => _onboardingComplete = hasCompletedOnboarding);
@@ -285,7 +293,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
     _checkingMigration = true;
 
     try {
-      final migrationStatus = await _authMethods.getCurrentUserMigrationStatus();
+      final migrationStatus =
+          await _authMethods.getCurrentUserMigrationStatus();
 
       if (mounted) {
         setState(() {
@@ -365,8 +374,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
     final isSupabaseUser = _supabaseUid != null;
 
     // If either type of user is logged in and onboarding is complete, go to home
-    if ((isFirebaseUser || isSupabaseUser) && _onboardingComplete && !_needsMigration) {
-      DebugLogger.logEvent('AUTH_WRAPPER', 'User logged in and onboarding complete → Home');
+    if ((isFirebaseUser || isSupabaseUser) &&
+        _onboardingComplete &&
+        !_needsMigration) {
+      DebugLogger.logEvent(
+          'AUTH_WRAPPER', 'User logged in and onboarding complete → Home');
       return const ResponsiveLayout(
         mobileScreenLayout: MobileScreenLayout(),
       );
@@ -374,7 +386,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
     // If logged in but onboarding incomplete, show onboarding flow
     if (isFirebaseUser || isSupabaseUser) {
-      DebugLogger.logEvent('AUTH_WRAPPER', 'User logged in but onboarding incomplete → OnboardingFlow');
+      DebugLogger.logEvent('AUTH_WRAPPER',
+          'User logged in but onboarding incomplete → OnboardingFlow');
       return OnboardingFlow(
         onComplete: _handleOnboardingComplete,
         onError: (error) {
