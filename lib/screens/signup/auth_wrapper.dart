@@ -12,6 +12,7 @@ import 'package:Ratedly/resources/auth_methods.dart';
 import 'package:Ratedly/screens/login.dart';
 import 'package:provider/provider.dart';
 import 'package:Ratedly/providers/user_provider.dart';
+import 'package:Ratedly/services/debug_logger.dart'; // ✅ Add this import
 
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({Key? key}) : super(key: key);
@@ -57,6 +58,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
     // First check Supabase session (for new users)
     final supabaseSession = _supabase.auth.currentSession;
     if (supabaseSession != null) {
+      await DebugLogger.logEvent('AUTH_INIT', 'Supabase session found, handling...');
       await _handleSupabaseSession(supabaseSession, userProvider);
       return;
     }
@@ -64,17 +66,21 @@ class _AuthWrapperState extends State<AuthWrapper> {
     // Then check Firebase (for existing users)
     final firebaseUser = _auth.currentUser;
     if (firebaseUser != null) {
+      await DebugLogger.logEvent('AUTH_INIT', 'Firebase user found, handling...');
       await _handleFirebaseUser(firebaseUser, userProvider);
       return;
     }
 
     // No user signed in
+    DebugLogger.logEvent('AUTH_INIT', 'No user signed in');
     if (mounted) setState(() => _isLoading = false);
   }
 
   Future<void> _handleSupabaseSession(
       Session session, UserProvider userProvider) async {
     try {
+      DebugLogger.logEvent('SUPABASE_SESSION', 'Handling Supabase session for ${session.user.id}');
+
       // Look up user record by supabase_uid
       var userDataResponse = await _supabase
           .from('users')
@@ -85,6 +91,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
       // If no record exists, create one for this new user
       if (userDataResponse == null) {
+        DebugLogger.logEvent('USER_RECORD_MISSING', 'Creating new user record');
         final newUser = {
           'uid': session.user.id, // Use Supabase UID as primary key
           'email': session.user.email,
@@ -99,12 +106,15 @@ class _AuthWrapperState extends State<AuthWrapper> {
           'isVerified': false,
           'blockedUsers': jsonEncode([]),
           'country': null,
-          'migrated': true, // Supabase users are already migrated
+          'migrated': true,
           'supabase_uid': session.user.id,
         };
 
         await _supabase.from('users').insert(newUser);
         userDataResponse = newUser;
+        DebugLogger.logEvent('USER_RECORD_CREATED', 'User record created');
+      } else {
+        DebugLogger.logEvent('USER_RECORD_FOUND', 'User record exists');
       }
 
       final userData = userDataResponse as Map<String, dynamic>;
@@ -123,8 +133,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
         ...userData,
       });
 
-      final hasCompletedOnboarding =
-          await _checkOnboardingStatus(_firebaseUid!);
+      final hasCompletedOnboarding = await _checkOnboardingStatus(_firebaseUid!);
+      DebugLogger.logEvent('ONBOARDING_STATUS_CHECK', 'hasCompletedOnboarding: $hasCompletedOnboarding');
 
       if (mounted) {
         setState(() {
@@ -135,7 +145,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
       _updateAuthCache(hasCompletedOnboarding);
       _runCountryChecks(_firebaseUid!);
-    } catch (e) {
+    } catch (e, stack) {
+      DebugLogger.logError('SUPABASE_SESSION_HANDLING', e);
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -148,7 +159,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
     _photoUrl = firebaseUser.photoURL;
     _isMigrated = false;
 
-    // Try to load cached data first
+    DebugLogger.logEvent('FIREBASE_USER', 'Handling Firebase user $_firebaseUid');
+
     final cachedData = await _loadCachedAuthDataInstantly();
 
     if (cachedData != null && mounted) {
@@ -181,7 +193,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
         userProvider.initializeUser(userData as Map<String, dynamic>);
       }
     } catch (e) {
-      // Error initializing UserProvider
+      DebugLogger.logError('INIT_USER_PROVIDER', e);
     }
   }
 
@@ -205,7 +217,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
         }
       }
     } catch (e) {
-      // Cache error
+      DebugLogger.logError('LOAD_CACHED_AUTH', e);
     }
     return null;
   }
@@ -214,15 +226,14 @@ class _AuthWrapperState extends State<AuthWrapper> {
     if (_firebaseUid == null || !_usingCachedData) return;
 
     try {
-      final hasCompletedOnboarding =
-          await _checkOnboardingStatus(_firebaseUid!);
+      final hasCompletedOnboarding = await _checkOnboardingStatus(_firebaseUid!);
 
       if (hasCompletedOnboarding != _onboardingComplete && mounted) {
         setState(() => _onboardingComplete = hasCompletedOnboarding);
         _updateAuthCache(hasCompletedOnboarding);
       }
     } catch (e) {
-      // Background verification failed
+      DebugLogger.logError('VERIFY_ONBOARDING_BG', e);
     }
   }
 
@@ -246,6 +257,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
       return hasCompletedOnboarding;
     } catch (e) {
+      DebugLogger.logError('CHECK_ONBOARDING_STATUS', e);
       return false;
     }
   }
@@ -256,15 +268,14 @@ class _AuthWrapperState extends State<AuthWrapper> {
     try {
       await _initializeUserProvider(userProvider);
 
-      final hasCompletedOnboarding =
-          await _checkOnboardingStatus(_firebaseUid!);
+      final hasCompletedOnboarding = await _checkOnboardingStatus(_firebaseUid!);
 
       if (mounted) {
         setState(() => _onboardingComplete = hasCompletedOnboarding);
       }
       _updateAuthCache(hasCompletedOnboarding);
     } catch (e) {
-      // Database check failed
+      DebugLogger.logError('CHECK_ONBOARDING_DB', e);
     }
   }
 
@@ -274,8 +285,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
     _checkingMigration = true;
 
     try {
-      final migrationStatus =
-          await _authMethods.getCurrentUserMigrationStatus();
+      final migrationStatus = await _authMethods.getCurrentUserMigrationStatus();
 
       if (mounted) {
         setState(() {
@@ -290,7 +300,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
         }
       }
     } catch (e) {
-      // Error checking migration
+      DebugLogger.logError('CHECK_MIGRATION', e);
     } finally {
       _checkingMigration = false;
     }
@@ -321,7 +331,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
         jsonEncode(cacheData),
       );
     } catch (e) {
-      // Cache update failed
+      DebugLogger.logError('UPDATE_AUTH_CACHE', e);
     }
   }
 
@@ -355,9 +365,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
     final isSupabaseUser = _supabaseUid != null;
 
     // If either type of user is logged in and onboarding is complete, go to home
-    if ((isFirebaseUser || isSupabaseUser) &&
-        _onboardingComplete &&
-        !_needsMigration) {
+    if ((isFirebaseUser || isSupabaseUser) && _onboardingComplete && !_needsMigration) {
+      DebugLogger.logEvent('AUTH_WRAPPER', 'User logged in and onboarding complete → Home');
       return const ResponsiveLayout(
         mobileScreenLayout: MobileScreenLayout(),
       );
@@ -365,16 +374,17 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
     // If logged in but onboarding incomplete, show onboarding flow
     if (isFirebaseUser || isSupabaseUser) {
+      DebugLogger.logEvent('AUTH_WRAPPER', 'User logged in but onboarding incomplete → OnboardingFlow');
       return OnboardingFlow(
         onComplete: _handleOnboardingComplete,
         onError: (error) {
-          // Handle onboarding errors if needed
-          print('Onboarding error: $error');
+          DebugLogger.logError('ONBOARDING_FLOW_ERROR', error);
         },
       );
     }
 
     // No user: show get started page
+    DebugLogger.logEvent('AUTH_WRAPPER', 'No user → GetStartedPage');
     return const GetStartedPage();
   }
 
