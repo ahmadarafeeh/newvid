@@ -8,6 +8,7 @@ import 'package:Ratedly/responsive/mobile_screen_layout.dart';
 import 'package:Ratedly/responsive/responsive_layout.dart';
 import 'package:provider/provider.dart';
 import 'package:Ratedly/utils/theme_provider.dart';
+import 'package:Ratedly/services/debug_logger.dart'; // ✅ Add this import
 
 class OnboardingFlow extends StatefulWidget {
   final VoidCallback onComplete;
@@ -47,11 +48,13 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
       bool isSupabaseUser = false;
       if (firebaseUser != null) {
         userId = firebaseUser.uid;
+        DebugLogger.logEvent('ONBOARDING_USER', 'Firebase user: $userId');
       } else if (supabaseSession != null) {
         userId = supabaseSession.user.id;
         isSupabaseUser = true;
+        DebugLogger.logEvent('ONBOARDING_USER', 'Supabase user: $userId');
       } else {
-        // No user – shouldn't happen if AuthWrapper already checked
+        DebugLogger.logEvent('ONBOARDING_USER', 'No user found');
         if (mounted) setState(() => _isLoading = false);
         return;
       }
@@ -62,6 +65,8 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
           .select('username, dateOfBirth, gender, onboardingComplete, photoUrl')
           .eq('uid', userId)
           .maybeSingle();
+
+      DebugLogger.logEvent('ONBOARDING_QUERY', 'User data: $response');
 
       if (mounted) {
         setState(() {
@@ -74,13 +79,20 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
       }
 
       if (_hasRequiredFields) {
+        DebugLogger.logEvent('ONBOARDING_COMPLETE',
+            'User already has required fields, completing');
         widget.onComplete();
+      } else {
+        DebugLogger.logEvent(
+            'ONBOARDING_NEEDED', 'User needs to complete onboarding');
       }
-    } catch (e) {
+    } catch (e, stack) {
+      DebugLogger.logError('ONBOARDING_CHECK', e);
       if (mounted) setState(() => _isLoading = false);
       // If user record missing (PGRST116), proceed to onboarding screens
       if (e is PostgrestException && e.code == 'PGRST116') {
-        // Record missing – this is fine for new users
+        DebugLogger.logEvent('ONBOARDING_QUERY',
+            'No user record found, proceeding to age screen');
         if (mounted) {
           setState(() {
             _userData = null;
@@ -103,6 +115,8 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
   }
 
   void _handleAgeVerificationComplete(DateTime dateOfBirth) {
+    DebugLogger.logEvent(
+        'AGE_VERIFICATION_COMPLETE', 'Navigating to profile setup');
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
@@ -121,20 +135,26 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
 
     // If no user at all, redirect to login
     if (firebaseUser == null && supabaseSession == null) {
+      DebugLogger.logEvent('ONBOARDING_REDIRECT', 'No user, going to login');
       return const LoginScreen();
     }
 
     if (_isLoading) {
+      DebugLogger.logEvent('ONBOARDING_LOADING', 'Showing loading screen');
       return _buildLoadingScreen();
     }
 
     if (_hasRequiredFields) {
+      DebugLogger.logEvent(
+          'ONBOARDING_REDIRECT', 'Onboarding complete, going to home');
       return const ResponsiveLayout(
         mobileScreenLayout: MobileScreenLayout(),
       );
     }
 
     // For both Firebase and Supabase users, start with age verification
+    DebugLogger.logEvent(
+        'ONBOARDING_REDIRECT', 'Showing age verification screen');
     return AgeVerificationScreen(
       onComplete: _handleAgeVerificationComplete,
     );
