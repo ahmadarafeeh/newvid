@@ -1,3 +1,4 @@
+import 'dart:async'; // ✅ Add this import for StreamSubscription
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,7 +13,7 @@ import 'package:Ratedly/resources/auth_methods.dart';
 import 'package:Ratedly/screens/login.dart';
 import 'package:provider/provider.dart';
 import 'package:Ratedly/providers/user_provider.dart';
-import 'package:Ratedly/services/debug_logger.dart'; // ✅ Add this import
+import 'package:Ratedly/services/debug_logger.dart';
 
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({Key? key}) : super(key: key);
@@ -46,10 +47,34 @@ class _AuthWrapperState extends State<AuthWrapper> {
     return _prefs!;
   }
 
+  late final StreamSubscription<AuthState> _authSubscription;
+
   @override
   void initState() {
     super.initState();
     _initializeAuth();
+
+    // 🔥 CRITICAL: Listen for auth state changes (e.g., after OAuth redirect)
+    _authSubscription = _supabase.auth.onAuthStateChange.listen((data) {
+      if (data.session != null) {
+        DebugLogger.logEvent(
+            'AUTH_LISTENER', 'New session detected, re-running initialization');
+        _initializeAuth();
+      } else if (data.session == null && mounted) {
+        DebugLogger.logEvent('AUTH_LISTENER', 'User signed out');
+        setState(() {
+          _firebaseUid = null;
+          _supabaseUid = null;
+          _isLoading = false;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _authSubscription.cancel();
+    super.dispose();
   }
 
   Future<void> _initializeAuth() async {
