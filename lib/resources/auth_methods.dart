@@ -59,7 +59,6 @@ class AuthMethods {
     try {
       print('🚀 Starting native Google Sign‑In...');
 
-      // System account picker – no browser
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
         return "cancelled";
@@ -72,7 +71,6 @@ class AuthMethods {
         return "Google sign‑in failed: no ID token";
       }
 
-      // Exchange ID token for a Supabase session
       final AuthResponse response = await _supabase.auth.signInWithIdToken(
         provider: OAuthProvider.google,
         idToken: googleAuth.idToken!,
@@ -85,11 +83,33 @@ class AuthMethods {
 
       print('✅ Native Google sign‑in successful, user: ${response.user!.id}');
 
-      // Check if the user needs onboarding (reuse existing method)
       return await _checkSupabaseUserOnboarding();
     } catch (e) {
       print('❌ Native Google sign‑in error: $e');
       return "Google sign‑in failed: ${e.toString()}";
+    }
+  }
+
+  // =============================================
+  // 🔁 NATIVE GOOGLE MIGRATION (for users coming from Firebase)
+  // =============================================
+  Future<String> migrateGoogleUserNative() async {
+    try {
+      // Use the existing native Google sign-in method
+      final result = await signInWithGoogleNative();
+      if (result == "success" || result == "onboarding_required") {
+        // After successful native sign-in, we have a Supabase session.
+        // Mark the Firebase user as migrated.
+        final firebaseUser = _auth.currentUser;
+        final supabaseSession = _supabase.auth.currentSession;
+        if (firebaseUser != null && supabaseSession != null) {
+          await markAsMigrated(firebaseUser.uid, supabaseSession.user.id);
+        }
+      }
+      return result;
+    } catch (e) {
+      print('❌ Google migration error: $e');
+      return "Google migration failed: $e";
     }
   }
 
@@ -1146,7 +1166,7 @@ class AuthMethods {
     }
   }
 
-  // ✅ MIGRATION METHOD (the one login.dart is calling)
+  // ✅ MIGRATION METHOD (email/password migration)
   Future<String> migrateUser({
     required String email,
     required String newPassword,
