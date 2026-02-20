@@ -77,7 +77,6 @@ class _SignupScreenState extends State<SignupScreen> {
         redirectTo: redirectUrl,
       );
 
-      // Navigate to AuthWrapper immediately
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -160,7 +159,7 @@ class _SignupScreenState extends State<SignupScreen> {
               ),
               const SizedBox(height: 40),
 
-              // ✅ Google button now uses native method
+              // ✅ Google button using native method
               ElevatedButton.icon(
                 onPressed: _isLoading ? null : signUpWithGoogleNative,
                 icon: Container(
@@ -203,7 +202,7 @@ class _SignupScreenState extends State<SignupScreen> {
                 ),
               ),
 
-              // Apple button (unchanged)
+              // Apple button
               if (_shouldShowAppleButton) ...[
                 const SizedBox(height: 16),
                 ElevatedButton.icon(
