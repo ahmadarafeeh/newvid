@@ -307,6 +307,72 @@ class AuthMethods {
     }
   }
 
+
+// Add this to AuthMethods if it's missing
+Future<String> migrateUser({
+  required String email,
+  required String newPassword,
+  required String firebaseUid,
+}) async {
+  try {
+    final firebaseUser = _auth.currentUser;
+    if (firebaseUser == null) {
+      return "User not logged in. Please log in first.";
+    }
+
+    if (firebaseUser.uid != firebaseUid) {
+      return "UID mismatch. Please log in with the correct account.";
+    }
+
+    if (firebaseUser.email != email) {
+      return "Email mismatch. Please log in with the correct account.";
+    }
+
+    final AuthResponse response = await _supabase.auth.signUp(
+      email: email,
+      password: newPassword,
+      data: {
+        'firebase_uid': firebaseUid,
+      },
+    );
+
+    if (response.user == null) {
+      return "Failed to create Supabase account";
+    }
+
+    await _supabase.from('users').update({
+      'migrated': true,
+      'supabase_uid': response.user!.id,
+    }).eq('uid', firebaseUid);
+
+    return "success";
+  } on AuthException catch (e) {
+    if (e.message?.contains('User already registered') ?? false) {
+      try {
+        final signInResponse = await _supabase.auth.signInWithPassword(
+          email: email,
+          password: newPassword,
+        );
+
+        if (signInResponse.user != null) {
+          await _supabase.from('users').update({
+            'migrated': true,
+            'supabase_uid': signInResponse.user!.id,
+          }).eq('uid', firebaseUid);
+          return "success";
+        } else {
+          return "Account exists but could not sign in. Please try a different password.";
+        }
+      } catch (signInError) {
+        return "Account exists but could not sign in. Please try a different password or contact support.";
+      }
+    }
+    return "Migration failed: ${e.message}";
+  } catch (e) {
+    return "Migration failed: $e";
+  }
+}
+
   // =============================================
   // 🔄 FIREBASE METHODS (For Migration)
   // =============================================
