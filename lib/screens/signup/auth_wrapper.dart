@@ -1,17 +1,18 @@
-import 'dart:async'; // ✅ Add this import for StreamSubscription
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'package:Ratedly/responsive/mobile_screen_layout.dart';
 import 'package:Ratedly/responsive/responsive_layout.dart';
 import 'package:Ratedly/screens/first_time/get_started_page.dart';
 import 'package:Ratedly/screens/signup/onboarding_flow.dart';
-import 'dart:convert';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:Ratedly/services/country_service.dart';
 import 'package:Ratedly/resources/auth_methods.dart';
 import 'package:Ratedly/screens/login.dart';
-import 'package:provider/provider.dart';
 import 'package:Ratedly/providers/user_provider.dart';
 import 'package:Ratedly/services/debug_logger.dart';
 
@@ -32,6 +33,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
   bool _usingCachedData = false;
   bool _needsMigration = false;
   bool _checkingMigration = false;
+  bool _isInitializing = false; // Prevents concurrent initializations
 
   String? _firebaseUid;
   String? _supabaseUid;
@@ -54,13 +56,17 @@ class _AuthWrapperState extends State<AuthWrapper> {
     super.initState();
     _initializeAuth();
 
-    // 🔥 CRITICAL: Listen for auth state changes (e.g., after OAuth redirect)
     _authSubscription = _supabase.auth.onAuthStateChange.listen((data) {
-      if (data.session != null) {
+      // React only to signedIn and tokenRefreshed to avoid double handling
+      if (data.event == AuthChangeEvent.signedIn ||
+          data.event == AuthChangeEvent.tokenRefreshed) {
         DebugLogger.logEvent(
-            'AUTH_LISTENER', 'New session detected, re-running initialization');
-        _initializeAuth();
-      } else if (data.session == null && mounted) {
+            'AUTH_LISTENER', 'Session change detected, re-initializing');
+        if (!_isInitializing) {
+          _isInitializing = true;
+          _initializeAuth().then((_) => _isInitializing = false);
+        }
+      } else if (data.event == AuthChangeEvent.signedOut && mounted) {
         DebugLogger.logEvent('AUTH_LISTENER', 'User signed out');
         setState(() {
           _firebaseUid = null;
@@ -80,7 +86,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
   Future<void> _initializeAuth() async {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
 
-    // First check Supabase session (for new users)
+    // First check Supabase session (for all users)
     final supabaseSession = _supabase.auth.currentSession;
     if (supabaseSession != null) {
       await DebugLogger.logEvent(
@@ -89,7 +95,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       return;
     }
 
-    // Then check Firebase (for existing users)
+    // Then check Firebase (for existing users not yet migrated)
     final firebaseUser = _auth.currentUser;
     if (firebaseUser != null) {
       await DebugLogger.logEvent(
@@ -109,7 +115,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       DebugLogger.logEvent('SUPABASE_SESSION',
           'Handling Supabase session for ${session.user.id}');
 
-      // Look up user record by supabase_uid
+      // First, try to find user record by supabase_uid
       var userDataResponse = await _supabase
           .from('users')
           .select()
@@ -117,11 +123,41 @@ class _AuthWrapperState extends State<AuthWrapper> {
           .maybeSingle()
           .timeout(const Duration(seconds: 5));
 
-      // If no record exists, create one for this new user
+      // If not found, check if there's a Firebase user (migration scenario)
+      if (userDataResponse == null) {
+        final firebaseUser = _auth.currentUser;
+        if (firebaseUser != null) {
+          DebugLogger.logEvent('SUPABASE_SESSION',
+              'No record by supabase_uid, checking by Firebase UID ${firebaseUser.uid}');
+          userDataResponse = await _supabase
+              .from('users')
+              .select()
+              .eq('uid', firebaseUser.uid)
+              .maybeSingle();
+
+          if (userDataResponse != null) {
+            DebugLogger.logEvent('SUPABASE_SESSION',
+                'Found existing Firebase user record, updating with supabase_uid');
+            // Update the existing record with supabase_uid and mark migrated
+            await _supabase.from('users').update({
+              'supabase_uid': session.user.id,
+              'migrated': true,
+            }).eq('uid', firebaseUser.uid);
+            // Re-fetch the updated record
+            userDataResponse = await _supabase
+                .from('users')
+                .select()
+                .eq('uid', firebaseUser.uid)
+                .maybeSingle();
+          }
+        }
+      }
+
+      // If still no record, create a new one (brand new Supabase user)
       if (userDataResponse == null) {
         DebugLogger.logEvent('USER_RECORD_MISSING', 'Creating new user record');
         final newUser = {
-          'uid': session.user.id, // Use Supabase UID as primary key
+          'uid': session.user.id, // Primary key = Supabase UID
           'email': session.user.email,
           'username': '',
           'bio': '',
@@ -138,7 +174,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
           'supabase_uid': session.user.id,
         };
 
-        await _supabase.from('users').insert(newUser);
+        // Use upsert to avoid duplicate key errors (though unlikely)
+        await _supabase.from('users').upsert(newUser, onConflict: 'uid');
         userDataResponse = newUser;
         DebugLogger.logEvent('USER_RECORD_CREATED', 'User record created');
       } else {
@@ -148,16 +185,17 @@ class _AuthWrapperState extends State<AuthWrapper> {
       final userData = userDataResponse as Map<String, dynamic>;
 
       _supabaseUid = session.user.id;
-      _firebaseUid = userData['uid'] as String?; // same as supabaseUid
+      // The uid column might be either Firebase UID or Supabase UID
+      _firebaseUid = userData['uid'] as String?;
       _userEmail = userData['email'] as String? ?? session.user.email;
       _userName = userData['username'] as String?;
       _photoUrl = userData['photoUrl'] as String?;
-      _isMigrated = true;
+      _isMigrated = userData['migrated'] == true;
 
       userProvider.initializeUser({
         'uid': _firebaseUid,
         'supabase_uid': _supabaseUid,
-        'migrated': true,
+        'migrated': _isMigrated,
         ...userData,
       });
 
@@ -398,7 +436,12 @@ class _AuthWrapperState extends State<AuthWrapper> {
     final isFirebaseUser = _firebaseUid != null;
     final isSupabaseUser = _supabaseUid != null;
 
-    // If either type of user is logged in and onboarding is complete, go to home
+    // Log the current state for debugging
+    DebugLogger.logEvent(
+        'AUTH_BUILD',
+        'isFirebaseUser: $isFirebaseUser, isSupabaseUser: $isSupabaseUser, '
+        '_onboardingComplete: $_onboardingComplete, _needsMigration: $_needsMigration');
+
     if ((isFirebaseUser || isSupabaseUser) &&
         _onboardingComplete &&
         !_needsMigration) {
@@ -409,7 +452,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
       );
     }
 
-    // If logged in but onboarding incomplete, show onboarding flow
     if (isFirebaseUser || isSupabaseUser) {
       DebugLogger.logEvent('AUTH_WRAPPER',
           'User logged in but onboarding incomplete → OnboardingFlow');
@@ -421,7 +463,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
       );
     }
 
-    // No user: show get started page
     DebugLogger.logEvent('AUTH_WRAPPER', 'No user → GetStartedPage');
     return const GetStartedPage();
   }
