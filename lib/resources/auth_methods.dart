@@ -16,24 +16,24 @@ import 'package:flutter/foundation.dart'
 class AuthMethods {
   final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
 
-  // ✅ UPDATED: Configure GoogleSignIn with iOS Client ID
+  // ✅ GoogleSignIn with both iOS client ID and Web server client ID
   final GoogleSignIn _googleSignIn;
 
   final SupabaseClient _supabase = Supabase.instance.client;
   final CountryService _countryService = CountryService();
   final CountryDetector _detector = CountryDetector();
 
-  // Constructor to initialize GoogleSignIn with platform-specific configuration
+  // Constructor with platform-specific configuration
   AuthMethods()
       : _googleSignIn = GoogleSignIn(
           scopes: ['email', 'profile'],
-          // Configure client ID for iOS
+          // iOS Client ID – used by the native SDK on the device
           clientId: defaultTargetPlatform == TargetPlatform.iOS
               ? '411393947451-dci447kne3aglou6qf8qqgh053sn1rps.apps.googleusercontent.com'
               : null,
-          // Optional: Configure server client ID for backend verification
+          // Web Client ID – used by Supabase to verify the token
           serverClientId: defaultTargetPlatform == TargetPlatform.iOS
-              ? '411393947451-dci447kne3aglou6qf8qqgh053sn1rps.apps.googleusercontent.com'
+              ? '411393947451-3h179hgbbhh3oqv8nm8ndbhc43j00rhc.apps.googleusercontent.com'
               : null,
         );
 
@@ -306,72 +306,6 @@ class AuthMethods {
       return null;
     }
   }
-
-
-// Add this to AuthMethods if it's missing
-Future<String> migrateUser({
-  required String email,
-  required String newPassword,
-  required String firebaseUid,
-}) async {
-  try {
-    final firebaseUser = _auth.currentUser;
-    if (firebaseUser == null) {
-      return "User not logged in. Please log in first.";
-    }
-
-    if (firebaseUser.uid != firebaseUid) {
-      return "UID mismatch. Please log in with the correct account.";
-    }
-
-    if (firebaseUser.email != email) {
-      return "Email mismatch. Please log in with the correct account.";
-    }
-
-    final AuthResponse response = await _supabase.auth.signUp(
-      email: email,
-      password: newPassword,
-      data: {
-        'firebase_uid': firebaseUid,
-      },
-    );
-
-    if (response.user == null) {
-      return "Failed to create Supabase account";
-    }
-
-    await _supabase.from('users').update({
-      'migrated': true,
-      'supabase_uid': response.user!.id,
-    }).eq('uid', firebaseUid);
-
-    return "success";
-  } on AuthException catch (e) {
-    if (e.message?.contains('User already registered') ?? false) {
-      try {
-        final signInResponse = await _supabase.auth.signInWithPassword(
-          email: email,
-          password: newPassword,
-        );
-
-        if (signInResponse.user != null) {
-          await _supabase.from('users').update({
-            'migrated': true,
-            'supabase_uid': signInResponse.user!.id,
-          }).eq('uid', firebaseUid);
-          return "success";
-        } else {
-          return "Account exists but could not sign in. Please try a different password.";
-        }
-      } catch (signInError) {
-        return "Account exists but could not sign in. Please try a different password or contact support.";
-      }
-    }
-    return "Migration failed: ${e.message}";
-  } catch (e) {
-    return "Migration failed: $e";
-  }
-}
 
   // =============================================
   // 🔄 FIREBASE METHODS (For Migration)
@@ -1209,6 +1143,71 @@ Future<String> migrateUser({
       }
     } catch (e) {
       return [];
+    }
+  }
+
+  // ✅ MIGRATION METHOD (the one login.dart is calling)
+  Future<String> migrateUser({
+    required String email,
+    required String newPassword,
+    required String firebaseUid,
+  }) async {
+    try {
+      final firebaseUser = _auth.currentUser;
+      if (firebaseUser == null) {
+        return "User not logged in. Please log in first.";
+      }
+
+      if (firebaseUser.uid != firebaseUid) {
+        return "UID mismatch. Please log in with the correct account.";
+      }
+
+      if (firebaseUser.email != email) {
+        return "Email mismatch. Please log in with the correct account.";
+      }
+
+      final AuthResponse response = await _supabase.auth.signUp(
+        email: email,
+        password: newPassword,
+        data: {
+          'firebase_uid': firebaseUid,
+        },
+      );
+
+      if (response.user == null) {
+        return "Failed to create Supabase account";
+      }
+
+      await _supabase.from('users').update({
+        'migrated': true,
+        'supabase_uid': response.user!.id,
+      }).eq('uid', firebaseUid);
+
+      return "success";
+    } on AuthException catch (e) {
+      if (e.message?.contains('User already registered') ?? false) {
+        try {
+          final signInResponse = await _supabase.auth.signInWithPassword(
+            email: email,
+            password: newPassword,
+          );
+
+          if (signInResponse.user != null) {
+            await _supabase.from('users').update({
+              'migrated': true,
+              'supabase_uid': signInResponse.user!.id,
+            }).eq('uid', firebaseUid);
+            return "success";
+          } else {
+            return "Account exists but could not sign in. Please try a different password.";
+          }
+        } catch (signInError) {
+          return "Account exists but could not sign in. Please try a different password or contact support.";
+        }
+      }
+      return "Migration failed: ${e.message}";
+    } catch (e) {
+      return "Migration failed: $e";
     }
   }
 }
