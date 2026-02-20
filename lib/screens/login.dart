@@ -250,6 +250,27 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // ✅ New method for Google users needing migration
+  Future<void> _migrateGoogleUser() async {
+    setState(() => _isLoading = true);
+    final result = await AuthMethods().migrateGoogleUserNative();
+    setState(() => _isLoading = false);
+
+    if (result == "success" || result == "onboarding_required") {
+      // Migration succeeded – navigate to AuthWrapper (will handle onboarding)
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const AuthWrapper()),
+        );
+      }
+    } else if (result == "cancelled") {
+      _showSnackBarSafe('Google sign-in cancelled', isError: true);
+    } else {
+      _showSnackBarSafe(result, isError: true);
+    }
+  }
+
   void _cancelMigration() {
     if (!mounted) return;
 
@@ -281,14 +302,12 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      // Note: Based on your AuthMethods class, this returns a String
       final String res = await AuthMethods().signInWithGoogle();
 
       if (!mounted) return;
       setState(() => _isLoading = false);
 
       if (res == "success" || res == "onboarding_required") {
-        // Get user data and set UserProvider
         final user = await AuthMethods().getUserDetails();
         if (user != null) {
           final userProvider =
@@ -302,18 +321,8 @@ class _LoginScreenState extends State<LoginScreen> {
           (route) => false,
         );
       } else if (res == "needs_migration") {
-        // Show migration form for Google user
-        final firebaseUser = FirebaseAuth.instance.currentUser;
-        if (firebaseUser != null && firebaseUser.email != null) {
-          if (mounted) {
-            setState(() {
-              _showMigrationForm = true;
-              _migrationEmail = firebaseUser.email!;
-              _migrationUid = firebaseUser.uid;
-              _emailController.text = firebaseUser.email!;
-            });
-          }
-        }
+        // For Google users, migrate without asking for password
+        await _migrateGoogleUser();
       } else if (res == "cancelled") {
         if (!mounted) return;
         _showSnackBarSafe('Google sign-in cancelled', isError: true);
@@ -345,14 +354,12 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      // Note: Based on your AuthMethods class, this returns a String
       final String res = await AuthMethods().signInWithApple();
 
       if (!mounted) return;
       setState(() => _isLoading = false);
 
       if (res == "success" || res == "onboarding_required") {
-        // Get user data and set UserProvider
         final user = await AuthMethods().getUserDetails();
         if (user != null) {
           final userProvider =
@@ -366,7 +373,8 @@ class _LoginScreenState extends State<LoginScreen> {
           MaterialPageRoute(builder: (context) => const AuthWrapper()),
         );
       } else if (res == "needs_migration") {
-        // Show migration form for Apple user
+        // For Apple users, we could add similar native migration later
+        // For now, fall back to showing migration form
         final firebaseUser = FirebaseAuth.instance.currentUser;
         if (firebaseUser != null && firebaseUser.email != null) {
           if (mounted) {
@@ -433,7 +441,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     textAlign: TextAlign.center,
                   ),
                   if (_showMigrationForm) ...[
-                    // Migration form
+                    // Migration form (only for email/password users)
                     const SizedBox(height: 20),
                     Text(
                       'We\'re upgrading our security system. Please set a new password for your account to continue.',
