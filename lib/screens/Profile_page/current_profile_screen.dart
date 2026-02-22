@@ -14,6 +14,46 @@ import 'package:video_player/video_player.dart';
 import 'package:flutter/gestures.dart';
 import 'package:Ratedly/screens/Profile_page/gallery_detail_screen.dart';
 import 'package:country_flags/country_flags.dart';
+import 'package:Ratedly/services/debug_logger.dart'; // For DebugLogger
+
+// Helper to log to login_logs table (same as in AuthWrapper)
+Future<void> _logProfileEvent({
+  required String eventType,
+  String? firebaseUid,
+  String? supabaseUid,
+  String? email,
+  bool? hasFirebaseSession,
+  bool? hasSupabaseSession,
+  bool? existingRecordFound,
+  String? recordSource,
+  bool? onboardingComplete,
+  bool? needsMigration,
+  String? errorDetails,
+  String? stackTrace,
+  String? navigationTarget,
+  Map<String, dynamic>? additionalData,
+}) async {
+  try {
+    await Supabase.instance.client.from('login_logs').insert({
+      'event_type': eventType,
+      'firebase_uid': firebaseUid,
+      'supabase_uid': supabaseUid,
+      'email': email,
+      'has_firebase_session': hasFirebaseSession,
+      'has_supabase_session': hasSupabaseSession,
+      'existing_record_found': existingRecordFound,
+      'record_source': recordSource,
+      'onboarding_complete': onboardingComplete,
+      'needs_migration': needsMigration,
+      'error_details': errorDetails,
+      'stack_trace': stackTrace,
+      'navigation_target': navigationTarget,
+      'additional_data': additionalData,
+    });
+  } catch (e) {
+    print('Failed to log to login_logs: $e');
+  }
+}
 
 // Define color schemes for both themes at top level (same as in feed_screen)
 class _ColorSet {
@@ -710,14 +750,27 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         });
       }
     } catch (e, stackTrace) {
+      // Log the error
+      DebugLogger.logError('PROFILE_LOAD_ERROR', e);
+      _logProfileEvent(
+        eventType: 'PROFILE_LOAD_ERROR',
+        supabaseUid: widget.uid,
+        errorDetails: e.toString(),
+        stackTrace: stackTrace.toString(),
+        additionalData: {
+          'userData': userData,
+          'hasUserData': userData.isNotEmpty,
+        },
+      );
+
       if (mounted) {
         setState(() {
           hasError = true;
-          errorMessage = 'Failed to load profile data';
+          errorMessage = e.toString(); // Show the actual error for debugging
           _isFirstLoad = false;
         });
         showSnackBar(
-            context, "Please try again or contact us at ratedly9@gmail.com");
+            context, "Failed to load profile data: ${e.toString()}");
       }
     } finally {
       if (mounted) {
