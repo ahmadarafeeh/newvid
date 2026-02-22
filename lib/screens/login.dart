@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // Added for logging
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:Ratedly/resources/auth_methods.dart';
 import 'package:Ratedly/screens/signup/signup_screen.dart';
 import 'package:Ratedly/utils/utils.dart';
@@ -14,7 +14,7 @@ import 'package:Ratedly/screens/privacy_policy_screen.dart';
 import 'package:Ratedly/screens/signup/auth_wrapper.dart';
 import 'package:flutter/foundation.dart';
 import 'package:Ratedly/providers/user_provider.dart';
-import 'package:Ratedly/services/debug_logger.dart'; // optional but keep
+import 'package:Ratedly/services/debug_logger.dart';
 
 // Helper to log to login_logs table (same as in AuthWrapper)
 Future<void> _logLoginEvent({
@@ -51,14 +51,13 @@ Future<void> _logLoginEvent({
       'additional_data': additionalData,
     });
   } catch (e) {
-    // Don't let logging failures break the app
     print('Failed to log to login_logs: $e');
   }
 }
 
 class LoginScreen extends StatefulWidget {
-  final String? migrationEmail;
-  final String? migrationUid;
+  final String? migrationEmail;   // kept for backward compatibility, not used
+  final String? migrationUid;     // kept for backward compatibility, not used
 
   const LoginScreen({
     Key? key,
@@ -73,35 +72,14 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _newPasswordController = TextEditingController();
-  final TextEditingController _confirmPasswordController =
-      TextEditingController();
 
   bool _isLoading = false;
-  bool _showMigrationForm = false;
   String _errorMessage = '';
-  String? _migrationEmail;
-  String? _migrationUid;
-  bool _migrationCompleted = false;
-  final SupabaseClient _supabase = Supabase.instance.client; // for logging
+  final SupabaseClient _supabase = Supabase.instance.client;
 
   @override
   void initState() {
     super.initState();
-
-    // Check if we were redirected here for migration
-    if (widget.migrationEmail != null && widget.migrationUid != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          setState(() {
-            _showMigrationForm = true;
-            _migrationEmail = widget.migrationEmail;
-            _migrationUid = widget.migrationUid;
-            _emailController.text = widget.migrationEmail!;
-          });
-        }
-      });
-    }
 
     // Log that this screen is shown
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -111,13 +89,8 @@ class _LoginScreenState extends State<LoginScreen> {
         supabaseUid: session?.user.id,
         email: session?.user.email,
         hasSupabaseSession: session != null,
-        additionalData: {
-          'migrationForm': _showMigrationForm,
-          'migrationEmail': _migrationEmail,
-        },
       );
-      DebugLogger.logEvent('LOGIN_SCREEN_SHOWN',
-          'LoginScreen displayed, migration form: $_showMigrationForm');
+      DebugLogger.logEvent('LOGIN_SCREEN_SHOWN', 'LoginScreen displayed');
     });
   }
 
@@ -125,15 +98,11 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
-    _newPasswordController.dispose();
-    _confirmPasswordController.dispose();
     super.dispose();
   }
 
-  // Safe method to show snackbars
   void _showSnackBarSafe(String message, {bool isError = false}) {
     if (!mounted) return;
-
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -147,12 +116,6 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> loginUser() async {
     if (!mounted) return;
 
-    // If we're in migration mode, handle migration first
-    if (_showMigrationForm) {
-      await _handleMigration();
-      return;
-    }
-
     setState(() {
       _isLoading = true;
       _errorMessage = '';
@@ -165,15 +128,13 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (!mounted) return;
-
       setState(() => _isLoading = false);
 
       if (res == 'success' || res == "onboarding_required") {
-        // Get user data using the existing getUserDetails method
+        // Get user data and set provider
         final user = await AuthMethods().getUserDetails();
         if (user != null) {
-          final userProvider =
-              Provider.of<UserProvider>(context, listen: false);
+          final userProvider = Provider.of<UserProvider>(context, listen: false);
           userProvider.setUser(user);
         }
 
@@ -187,22 +148,9 @@ class _LoginScreenState extends State<LoginScreen> {
           (route) => false,
         );
       } else if (res == "needs_migration") {
-        // Show migration form
-        final firebaseUser = FirebaseAuth.instance.currentUser;
-        if (firebaseUser == null) {
-          if (!mounted) return;
-          _showSnackBarSafe('Please log in first', isError: true);
-          return;
-        }
-
-        if (!mounted) return;
-        setState(() {
-          _showMigrationForm = true;
-          _migrationEmail = _emailController.text.trim();
-          _migrationUid = firebaseUser.uid;
-        });
+        // Instead of showing a password form, directly trigger Google migration
+        await _migrateWithGoogle();
       } else {
-        if (!mounted) return;
         _showSnackBarSafe(res, isError: true);
       }
     } catch (e) {
@@ -213,111 +161,13 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _handleMigration() async {
-    // Validate inputs
-    if (_newPasswordController.text.isEmpty ||
-        _confirmPasswordController.text.isEmpty) {
-      if (!mounted) return;
-      setState(() => _errorMessage = 'Please enter password');
-      return;
-    }
-
-    if (_newPasswordController.text != _confirmPasswordController.text) {
-      if (!mounted) return;
-      setState(() => _errorMessage = 'Passwords do not match');
-      return;
-    }
-
-    if (_newPasswordController.text.length < 6) {
-      if (!mounted) return;
-      setState(() => _errorMessage = 'Password must be at least 6 characters');
-      return;
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _isLoading = true;
-      _errorMessage = '';
-    });
-
-    try {
-      final result = await AuthMethods().migrateUser(
-        email: _migrationEmail!,
-        newPassword: _newPasswordController.text,
-        firebaseUid: _migrationUid!,
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        _isLoading = false;
-        _migrationCompleted = true;
-      });
-
-      if (result == 'success') {
-        // Get updated user data after migration using getUserDetails
-        final updatedUser = await AuthMethods().getUserDetails();
-        if (updatedUser != null) {
-          final userProvider =
-              Provider.of<UserProvider>(context, listen: false);
-          userProvider.setUser(updatedUser);
-        }
-
-        // Show success message
-        _showSnackBarSafe('Account updated successfully!');
-
-        // Clear migration form
-        _newPasswordController.clear();
-        _confirmPasswordController.clear();
-
-        // Wait a moment for user to see success message
-        await Future.delayed(const Duration(milliseconds: 500));
-
-        if (!mounted) return;
-
-        // Show message explaining they should use the new password
-        _showSnackBarSafe('Please log in with your new password');
-
-        // Reset the form and go back to login
-        setState(() {
-          _showMigrationForm = false;
-          _migrationEmail = null;
-          _migrationUid = null;
-          _errorMessage = '';
-        });
-
-        // Clear all controllers
-        _emailController.clear();
-        _passwordController.clear();
-      } else {
-        // Show detailed error message
-        String errorMsg = result;
-        if (result.contains('accessToken option')) {
-          errorMsg =
-              'Configuration error. Please contact support. Error: $result';
-        }
-        if (mounted) {
-          setState(() => _errorMessage = errorMsg);
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'An error occurred: $e';
-        });
-      }
-    }
-  }
-
-  // Method for Google users needing migration
-  Future<void> _migrateGoogleUser() async {
+  // Common migration method for all users (Google or email/password)
+  Future<void> _migrateWithGoogle() async {
     setState(() => _isLoading = true);
     final result = await AuthMethods().migrateGoogleUserNative();
     setState(() => _isLoading = false);
 
     if (result == "success" || result == "onboarding_required") {
-      // Migration succeeded – navigate to AuthWrapper (will handle onboarding)
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -331,30 +181,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void _cancelMigration() {
-    if (!mounted) return;
-
-    setState(() {
-      _showMigrationForm = false;
-      _migrationEmail = null;
-      _migrationUid = null;
-      _newPasswordController.clear();
-      _confirmPasswordController.clear();
-      _errorMessage = '';
-    });
-
-    // Go back to normal login
-    _emailController.clear();
-    _passwordController.clear();
-  }
-
   Future<void> loginWithGoogle() async {
-    if (_showMigrationForm) {
-      if (!mounted) return;
-      _showSnackBarSafe('Please complete migration first', isError: true);
-      return;
-    }
-
     if (!mounted) return;
     setState(() {
       _isLoading = true;
@@ -370,8 +197,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (res == "success" || res == "onboarding_required") {
         final user = await AuthMethods().getUserDetails();
         if (user != null) {
-          final userProvider =
-              Provider.of<UserProvider>(context, listen: false);
+          final userProvider = Provider.of<UserProvider>(context, listen: false);
           userProvider.setUser(user);
         }
 
@@ -381,13 +207,10 @@ class _LoginScreenState extends State<LoginScreen> {
           (route) => false,
         );
       } else if (res == "needs_migration") {
-        // For Google users, migrate without asking for password
-        await _migrateGoogleUser();
+        await _migrateWithGoogle();
       } else if (res == "cancelled") {
-        if (!mounted) return;
         _showSnackBarSafe('Google sign-in cancelled', isError: true);
       } else {
-        if (!mounted) return;
         _showSnackBarSafe(res, isError: true);
       }
     } catch (e) {
@@ -401,12 +224,6 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> loginWithApple() async {
-    if (_showMigrationForm) {
-      if (!mounted) return;
-      _showSnackBarSafe('Please complete migration first', isError: true);
-      return;
-    }
-
     if (!mounted) return;
     setState(() {
       _isLoading = true;
@@ -422,8 +239,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (res == "success" || res == "onboarding_required") {
         final user = await AuthMethods().getUserDetails();
         if (user != null) {
-          final userProvider =
-              Provider.of<UserProvider>(context, listen: false);
+          final userProvider = Provider.of<UserProvider>(context, listen: false);
           userProvider.setUser(user);
         }
 
@@ -433,24 +249,12 @@ class _LoginScreenState extends State<LoginScreen> {
           MaterialPageRoute(builder: (context) => const AuthWrapper()),
         );
       } else if (res == "needs_migration") {
-        // For Apple users, we could add similar native migration later
-        // For now, fall back to showing migration form
-        final firebaseUser = FirebaseAuth.instance.currentUser;
-        if (firebaseUser != null && firebaseUser.email != null) {
-          if (mounted) {
-            setState(() {
-              _showMigrationForm = true;
-              _migrationEmail = firebaseUser.email!;
-              _migrationUid = firebaseUser.uid;
-              _emailController.text = firebaseUser.email!;
-            });
-          }
-        }
+        // For Apple users, use the same Google migration for now
+        // (In future, you can add native Apple migration)
+        await _migrateWithGoogle();
       } else if (res == "cancelled") {
-        if (!mounted) return;
         _showSnackBarSafe('Apple sign-in cancelled', isError: true);
       } else {
-        if (!mounted) return;
         _showSnackBarSafe(res, isError: true);
       }
     } catch (e) {
@@ -489,9 +293,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     height: 100,
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    _showMigrationForm ? 'Account Update Required' : 'Log In',
-                    style: const TextStyle(
+                  const Text(
+                    'Log In',
+                    style: TextStyle(
                       color: Color(0xFFd9d9d9),
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -500,267 +304,191 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     textAlign: TextAlign.center,
                   ),
-                  if (_showMigrationForm) ...[
-                    // Migration form (only for email/password users)
-                    const SizedBox(height: 20),
-                    Text(
-                      'We\'re upgrading our security system. Please set a new password for your account to continue.',
-                      style: TextStyle(
-                        color: Colors.grey[400],
-                        fontFamily: 'Inter',
-                        fontSize: 14,
-                      ),
+                  const SizedBox(height: 40),
+
+                  // Email
+                  TextFieldInput(
+                    hintText: 'Enter your email',
+                    textInputType: TextInputType.emailAddress,
+                    textEditingController: _emailController,
+                    hintStyle: TextStyle(
+                      color: Colors.grey[400],
+                      fontFamily: 'Inter',
+                    ),
+                    fillColor: const Color(0xFF333333),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Password
+                  TextFieldInput(
+                    hintText: 'Enter your password',
+                    textInputType: TextInputType.text,
+                    textEditingController: _passwordController,
+                    isPass: true,
+                    hintStyle: TextStyle(
+                      color: Colors.grey[400],
+                      fontFamily: 'Inter',
+                    ),
+                    fillColor: const Color(0xFF333333),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Terms
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16.0),
+                    child: RichText(
                       textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Email: $_migrationEmail',
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontFamily: 'Inter',
-                        fontSize: 14,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 24),
-                    TextFieldInput(
-                      hintText: 'New Password',
-                      textInputType: TextInputType.text,
-                      textEditingController: _newPasswordController,
-                      isPass: true,
-                      hintStyle: TextStyle(
-                        color: Colors.grey[400],
-                        fontFamily: 'Inter',
-                      ),
-                      fillColor: const Color(0xFF333333),
-                    ),
-                    const SizedBox(height: 16),
-                    TextFieldInput(
-                      hintText: 'Confirm New Password',
-                      textInputType: TextInputType.text,
-                      textEditingController: _confirmPasswordController,
-                      isPass: true,
-                      hintStyle: TextStyle(
-                        color: Colors.grey[400],
-                        fontFamily: 'Inter',
-                      ),
-                      fillColor: const Color(0xFF333333),
-                    ),
-                    if (_errorMessage.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                          border:
-                              Border.all(color: Colors.red.withOpacity(0.3)),
+                      text: TextSpan(
+                        style: TextStyle(
+                          color: Colors.grey[400],
+                          fontFamily: 'Inter',
+                          fontSize: 14,
                         ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.error,
-                                color: Colors.red, size: 20),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _errorMessage,
-                                style: const TextStyle(color: Colors.red),
-                              ),
+                        children: [
+                          const TextSpan(text: 'By logging in, you agree to our '),
+                          TextSpan(
+                            text: 'Terms of Service',
+                            style: const TextStyle(
+                              color: Colors.blue,
+                              decoration: TextDecoration.underline,
                             ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 24),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: _isLoading ? null : _cancelMigration,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF444444),
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            child: const Text(
-                              'Cancel',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                                fontFamily: 'Inter',
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: _isLoading ? null : _handleMigration,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF333333),
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            child: _isLoading
-                                ? const CircularProgressIndicator(
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                        Colors.white),
-                                  )
-                                : const Text(
-                                    'Update Account',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w500,
-                                      fontFamily: 'Inter',
-                                    ),
+                            recognizer: TapGestureRecognizer()
+                              ..onTap = () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const TermsOfServiceScreen(),
                                   ),
+                                );
+                              },
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                  ] else ...[
-                    // Normal login form
-                    const SizedBox(height: 40),
-                    TextFieldInput(
-                      hintText: 'Enter your email',
-                      textInputType: TextInputType.emailAddress,
-                      textEditingController: _emailController,
-                      hintStyle: TextStyle(
-                        color: Colors.grey[400],
-                        fontFamily: 'Inter',
-                      ),
-                      fillColor: const Color(0xFF333333),
-                    ),
-                    const SizedBox(height: 24),
-                    TextFieldInput(
-                      hintText: 'Enter your password',
-                      textInputType: TextInputType.text,
-                      textEditingController: _passwordController,
-                      isPass: true,
-                      hintStyle: TextStyle(
-                        color: Colors.grey[400],
-                        fontFamily: 'Inter',
-                      ),
-                      fillColor: const Color(0xFF333333),
-                    ),
-                    const SizedBox(height: 24),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 16.0),
-                      child: RichText(
-                        textAlign: TextAlign.center,
-                        text: TextSpan(
-                          style: TextStyle(
-                            color: Colors.grey[400],
-                            fontFamily: 'Inter',
-                            fontSize: 14,
+                          const TextSpan(text: ' and '),
+                          TextSpan(
+                            text: 'Privacy Policy',
+                            style: const TextStyle(
+                              color: Colors.blue,
+                              decoration: TextDecoration.underline,
+                            ),
+                            recognizer: TapGestureRecognizer()
+                              ..onTap = () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const PrivacyPolicyScreen(),
+                                  ),
+                                );
+                              },
                           ),
-                          children: [
-                            const TextSpan(
-                                text: 'By logging in, you agree to our '),
-                            TextSpan(
-                              text: 'Terms of Service',
-                              style: const TextStyle(
-                                color: Colors.blue,
-                                decoration: TextDecoration.underline,
-                              ),
-                              recognizer: TapGestureRecognizer()
-                                ..onTap = () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          const TermsOfServiceScreen(),
-                                    ),
-                                  );
-                                },
-                            ),
-                            const TextSpan(text: ' and '),
-                            TextSpan(
-                              text: 'Privacy Policy',
-                              style: const TextStyle(
-                                color: Colors.blue,
-                                decoration: TextDecoration.underline,
-                              ),
-                              recognizer: TapGestureRecognizer()
-                                ..onTap = () {
-                                  Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) =>
-                                            const PrivacyPolicyScreen(),
-                                      ));
-                                },
-                            ),
-                          ],
-                        ),
+                        ],
                       ),
                     ),
-                    ElevatedButton(
-                      onPressed: _isLoading ? null : loginUser,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF333333),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                  ),
+
+                  // Login Button
+                  ElevatedButton(
+                    onPressed: _isLoading ? null : loginUser,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF333333),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      child: _isLoading
-                          ? const CircularProgressIndicator(
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.white),
-                            )
-                          : const Text(
-                              'Log In',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                                fontFamily: 'Inter',
-                              ),
-                            ),
                     ),
-                    const SizedBox(height: 24),
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Divider(
-                            color: Colors.grey,
-                            thickness: 1,
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                          child: Text(
-                            'OR',
+                    child: _isLoading
+                        ? const CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          )
+                        : const Text(
+                            'Log In',
                             style: TextStyle(
-                              color: Colors.grey[400],
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
                               fontFamily: 'Inter',
                             ),
                           ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // OR divider
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Divider(
+                          color: Colors.grey,
+                          thickness: 1,
                         ),
-                        const Expanded(
-                          child: Divider(
-                            color: Colors.grey,
-                            thickness: 1,
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                        child: Text(
+                          'OR',
+                          style: TextStyle(
+                            color: Colors.grey[400],
+                            fontFamily: 'Inter',
                           ),
                         ),
-                      ],
+                      ),
+                      const Expanded(
+                        child: Divider(
+                          color: Colors.grey,
+                          thickness: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Google Sign-in
+                  ElevatedButton.icon(
+                    onPressed: _isLoading ? null : loginWithGoogle,
+                    icon: Image.asset(
+                      'assets/logo/google-logo.png',
+                      width: 24,
+                      height: 24,
+                      fit: BoxFit.contain,
                     ),
-                    const SizedBox(height: 24),
+                    label: _isLoading
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Text(
+                            'Log in with Google',
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              fontWeight: FontWeight.w500,
+                              fontSize: 16,
+                            ),
+                          ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF333333),
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size(double.infinity, 56),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Apple Sign-in (if supported)
+                  if (!isAndroid || kIsWeb)
                     ElevatedButton.icon(
-                      onPressed: _isLoading ? null : loginWithGoogle,
+                      onPressed: _isLoading ? null : loginWithApple,
                       icon: Image.asset(
-                        'assets/logo/google-logo.png',
+                        'assets/logo/apple-logo.png',
                         width: 24,
                         height: 24,
                         fit: BoxFit.contain,
+                        color: Colors.white,
                       ),
                       label: _isLoading
                           ? const SizedBox(
@@ -768,12 +496,12 @@ class _LoginScreenState extends State<LoginScreen> {
                               height: 16,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(Colors.white),
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.white),
                               ),
                             )
                           : const Text(
-                              'Log in with Google',
+                              'Log in with Apple',
                               style: TextStyle(
                                 fontFamily: 'Inter',
                                 fontWeight: FontWeight.w500,
@@ -790,62 +518,23 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    if (!isAndroid || kIsWeb)
-                      ElevatedButton.icon(
-                        onPressed: _isLoading ? null : loginWithApple,
-                        icon: Image.asset(
-                          'assets/logo/apple-logo.png',
-                          width: 24,
-                          height: 24,
-                          fit: BoxFit.contain,
-                          color: Colors.white,
-                        ),
-                        label: _isLoading
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white),
-                                ),
-                              )
-                            : const Text(
-                                'Log in with Apple',
-                                style: TextStyle(
-                                  fontFamily: 'Inter',
-                                  fontWeight: FontWeight.w500,
-                                  fontSize: 16,
-                                ),
-                              ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF333333),
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size(double.infinity, 56),
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                    if (!isAndroid || kIsWeb) const SizedBox(height: 16),
-                    TextButton(
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (context) => const SignupScreen()),
-                      ),
-                      child: const Text(
-                        'Don\'t have an account? Signup',
-                        style: TextStyle(
-                          color: Color(0xFFd9d9d9),
-                          fontFamily: 'Inter',
-                          fontWeight: FontWeight.w500,
-                        ),
+                  if (!isAndroid || kIsWeb) const SizedBox(height: 16),
+
+                  // Signup link
+                  TextButton(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const SignupScreen()),
+                    ),
+                    child: const Text(
+                      'Don\'t have an account? Signup',
+                      style: TextStyle(
+                        color: Color(0xFFd9d9d9),
+                        fontFamily: 'Inter',
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
-                  ],
+                  ),
                   const Spacer(flex: 2),
                 ],
               ),
