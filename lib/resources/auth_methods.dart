@@ -16,7 +16,7 @@ import 'package:flutter/foundation.dart'
 class AuthMethods {
   final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
 
-  // ✅ GoogleSignIn with both iOS client ID and Web server client ID
+  // GoogleSignIn with both iOS client ID and Web server client ID
   final GoogleSignIn _googleSignIn;
 
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -53,14 +53,58 @@ class AuthMethods {
   }
 
   // =============================================
+  // 🪵 Logging helper for auth events
+  // =============================================
+  Future<void> _logAuthEvent({
+    required String eventType,
+    String? firebaseUid,
+    String? supabaseUid,
+    String? email,
+    bool? hasFirebaseSession,
+    bool? hasSupabaseSession,
+    bool? existingRecordFound,
+    String? recordSource,
+    bool? onboardingComplete,
+    bool? needsMigration,
+    String? errorDetails,
+    String? stackTrace,
+    String? navigationTarget,
+    Map<String, dynamic>? additionalData,
+  }) async {
+    try {
+      await _supabase.from('login_logs').insert({
+        'event_type': eventType,
+        'firebase_uid': firebaseUid,
+        'supabase_uid': supabaseUid,
+        'email': email,
+        'has_firebase_session': hasFirebaseSession,
+        'has_supabase_session': hasSupabaseSession,
+        'existing_record_found': existingRecordFound,
+        'record_source': recordSource,
+        'onboarding_complete': onboardingComplete,
+        'needs_migration': needsMigration,
+        'error_details': errorDetails,
+        'stack_trace': stackTrace,
+        'navigation_target': navigationTarget,
+        'additional_data': additionalData,
+      });
+    } catch (e) {
+      // Don't let logging failures break the app
+      print('Failed to log auth event: $e');
+    }
+  }
+
+  // =============================================
   // 🆕 NATIVE GOOGLE SIGN‑IN (no browser)
   // =============================================
   Future<String> signInWithGoogleNative() async {
     try {
       print('🚀 Starting native Google Sign‑In...');
+      await _logAuthEvent(eventType: 'GOOGLE_SIGNIN_STARTED');
 
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
+        await _logAuthEvent(eventType: 'GOOGLE_SIGNIN_CANCELLED');
         return "cancelled";
       }
 
@@ -68,8 +112,17 @@ class AuthMethods {
           await googleUser.authentication;
 
       if (googleAuth.idToken == null) {
+        await _logAuthEvent(
+          eventType: 'GOOGLE_SIGNIN_ERROR',
+          errorDetails: 'No ID token',
+        );
         return "Google sign‑in failed: no ID token";
       }
+
+      await _logAuthEvent(
+        eventType: 'GOOGLE_TOKEN_RECEIVED',
+        email: googleUser.email,
+      );
 
       final AuthResponse response = await _supabase.auth.signInWithIdToken(
         provider: OAuthProvider.google,
@@ -78,14 +131,28 @@ class AuthMethods {
       );
 
       if (response.user == null) {
+        await _logAuthEvent(
+          eventType: 'GOOGLE_SIGNIN_ERROR',
+          errorDetails: 'Supabase sign‑in failed',
+        );
         return "Supabase sign‑in failed";
       }
 
       print('✅ Native Google sign‑in successful, user: ${response.user!.id}');
+      await _logAuthEvent(
+        eventType: 'GOOGLE_SIGNIN_SUCCESS',
+        supabaseUid: response.user!.id,
+        email: response.user!.email,
+      );
 
       return await _checkSupabaseUserOnboarding();
-    } catch (e) {
+    } catch (e, stack) {
       print('❌ Native Google sign‑in error: $e');
+      await _logAuthEvent(
+        eventType: 'GOOGLE_SIGNIN_ERROR',
+        errorDetails: e.toString(),
+        stackTrace: stack.toString(),
+      );
       return "Google sign‑in failed: ${e.toString()}";
     }
   }
@@ -95,15 +162,17 @@ class AuthMethods {
   // =============================================
   Future<String> migrateGoogleUserNative() async {
     try {
-      // Use the existing native Google sign-in method
       final result = await signInWithGoogleNative();
       if (result == "success" || result == "onboarding_required") {
-        // After successful native sign-in, we have a Supabase session.
-        // Mark the Firebase user as migrated.
         final firebaseUser = _auth.currentUser;
         final supabaseSession = _supabase.auth.currentSession;
         if (firebaseUser != null && supabaseSession != null) {
           await markAsMigrated(firebaseUser.uid, supabaseSession.user.id);
+          await _logAuthEvent(
+            eventType: 'GOOGLE_MIGRATION_COMPLETED',
+            firebaseUid: firebaseUser.uid,
+            supabaseUid: supabaseSession.user.id,
+          );
         }
       }
       return result;
@@ -119,6 +188,7 @@ class AuthMethods {
   Future<String> signInWithAppleNative() async {
     try {
       print('🚀 Starting native Apple Sign‑In...');
+      await _logAuthEvent(eventType: 'APPLE_SIGNIN_STARTED');
 
       final rawNonce = _generateRawNonce();
       final hashedNonce = _sha256ofString(rawNonce);
@@ -130,8 +200,17 @@ class AuthMethods {
 
       final idToken = appleCredential.identityToken;
       if (idToken == null) {
+        await _logAuthEvent(
+          eventType: 'APPLE_SIGNIN_ERROR',
+          errorDetails: 'No ID token',
+        );
         return "Apple sign‑in failed: no ID token";
       }
+
+      await _logAuthEvent(
+        eventType: 'APPLE_TOKEN_RECEIVED',
+        email: appleCredential.email,
+      );
 
       final AuthResponse response = await _supabase.auth.signInWithIdToken(
         provider: OAuthProvider.apple,
@@ -140,19 +219,39 @@ class AuthMethods {
       );
 
       if (response.user == null) {
+        await _logAuthEvent(
+          eventType: 'APPLE_SIGNIN_ERROR',
+          errorDetails: 'Supabase sign‑in failed',
+        );
         return "Supabase sign‑in failed";
       }
 
       print('✅ Native Apple sign‑in successful, user: ${response.user!.id}');
+      await _logAuthEvent(
+        eventType: 'APPLE_SIGNIN_SUCCESS',
+        supabaseUid: response.user!.id,
+        email: response.user!.email,
+      );
 
       return await _checkSupabaseUserOnboarding();
-    } on SignInWithAppleAuthorizationException catch (e) {
+    } on SignInWithAppleAuthorizationException catch (e, stack) {
       if (e.code == AuthorizationErrorCode.canceled) {
+        await _logAuthEvent(eventType: 'APPLE_SIGNIN_CANCELLED');
         return "cancelled";
       }
+      await _logAuthEvent(
+        eventType: 'APPLE_SIGNIN_ERROR',
+        errorDetails: e.message,
+        stackTrace: stack.toString(),
+      );
       return "Apple sign‑in failed: ${e.message}";
-    } catch (e) {
+    } catch (e, stack) {
       print('❌ Native Apple sign‑in error: $e');
+      await _logAuthEvent(
+        eventType: 'APPLE_SIGNIN_ERROR',
+        errorDetails: e.toString(),
+        stackTrace: stack.toString(),
+      );
       return "Apple sign‑in failed: ${e.toString()}";
     }
   }
@@ -167,12 +266,10 @@ class AuthMethods {
   Future<String> signUpWithGoogleSupabase() async {
     try {
       print('🚀 Starting Supabase Google OAuth...');
-
       await _supabase.auth.signInWithOAuth(
         OAuthProvider.google,
         redirectTo: 'ratedly://login-callback',
       );
-
       print('✅ Supabase Google OAuth initiated');
       return "oauth_initiated";
     } catch (e) {
@@ -190,12 +287,10 @@ class AuthMethods {
   Future<String> signUpWithAppleSupabase() async {
     try {
       print('🚀 Starting Supabase Apple OAuth...');
-
       await _supabase.auth.signInWithOAuth(
         OAuthProvider.apple,
         redirectTo: 'ratedly://login-callback',
       );
-
       print('✅ Supabase Apple OAuth initiated');
       return "oauth_initiated";
     } catch (e) {
@@ -334,7 +429,6 @@ class AuthMethods {
 
       await _supabase.from('users').upsert(payload);
 
-      // Setup country tracking
       await _countryService.setCountryForUser(session.user.id);
 
       return "success";
@@ -384,13 +478,10 @@ class AuthMethods {
   }) async {
     try {
       print('🚀 Starting Google OAuth migration for: $email');
-
-      // Start Supabase Google OAuth - this will open browser
       await _supabase.auth.signInWithOAuth(
         OAuthProvider.google,
         redirectTo: 'ratedly://login-callback',
       );
-
       print('✅ OAuth flow initiated successfully');
       return "oauth_initiated";
     } catch (e) {
@@ -405,18 +496,14 @@ class AuthMethods {
   Future<String> completeMigrationAfterOAuth() async {
     try {
       print('🔄 Checking for migration completion...');
-
-      // Wait a moment for Supabase to process the OAuth response
       await Future.delayed(const Duration(seconds: 1));
 
-      // Get current Supabase session
       final session = _supabase.auth.currentSession;
       if (session == null) {
         print('❌ No Supabase session found');
         return "No Supabase session found. OAuth might have failed.";
       }
 
-      // Get current Firebase user
       final firebaseUser = _auth.currentUser;
       if (firebaseUser == null) {
         print('❌ No Firebase user found');
@@ -426,7 +513,6 @@ class AuthMethods {
       print('✅ Found Firebase UID: ${firebaseUser.uid}');
       print('✅ Found Supabase UID: ${session.user.id}');
 
-      // Check if user is already migrated
       final List<dynamic> userCheck = await _supabase
           .from('users')
           .select('migrated, supabase_uid')
@@ -438,7 +524,6 @@ class AuthMethods {
         return "already_migrated";
       }
 
-      // Update the user record to mark as migrated
       print('📝 Marking user as migrated...');
       await _supabase.from('users').update({
         'migrated': true,
@@ -464,7 +549,6 @@ class AuthMethods {
       final session = _supabase.auth.currentSession;
       if (session == null) return false;
 
-      // Check if already migrated
       final List<dynamic> userCheck = await _supabase
           .from('users')
           .select('migrated')
@@ -474,7 +558,6 @@ class AuthMethods {
       if (userCheck.isEmpty) return false;
 
       if (userCheck[0]['migrated'] != true) {
-        // Not migrated yet - complete it
         await _supabase.from('users').update({
           'migrated': true,
           'supabase_uid': session.user.id,
@@ -482,7 +565,7 @@ class AuthMethods {
         return true;
       }
 
-      return true; // Already migrated
+      return true;
     } catch (e) {
       return false;
     }
@@ -525,7 +608,7 @@ class AuthMethods {
       if (result.isEmpty) return true;
       return result[0]['migrated'] != true;
     } catch (e) {
-      return true; // Assume needs migration on error
+      return true;
     }
   }
 
@@ -881,10 +964,8 @@ class AuthMethods {
       final String userId = cred.user!.uid;
       final String? userEmail = cred.user!.email;
 
-      // Check if user needs migration
       final needsMigration = await this.needsMigration(userId);
 
-      // If user needs migration, return specific status
       if (needsMigration) {
         return "needs_migration";
       }
