@@ -165,6 +165,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
     if (mounted) setState(() => _isLoading = false);
   }
 
+  // 🛠️ CORRECTED: Prioritize Firebase UID, then email, then supabase_uid, and clean up duplicates
   Future<void> _handleSupabaseSession(
       Session session, UserProvider userProvider) async {
     String? recordSource;
@@ -204,6 +205,17 @@ class _AuthWrapperState extends State<AuthWrapper> {
             'supabase_uid': session.user.id,
             'migrated': true,
           }).eq('uid', firebaseUser.uid);
+
+          // 🛠️ After updating, delete any other record that may have been created with this supabase_uid
+          final deleteResult = await _supabase
+              .from('users')
+              .delete()
+              .eq('supabase_uid', session.user.id)
+              .neq('uid', firebaseUser.uid);
+          if (deleteResult != null) {
+            DebugLogger.logEvent('DUPLICATE_CLEANUP',
+                'Deleted duplicate record with supabase_uid ${session.user.id}');
+          }
 
           // Re-fetch the updated record
           userData = await _supabase
@@ -245,6 +257,13 @@ class _AuthWrapperState extends State<AuthWrapper> {
             'supabase_uid': session.user.id,
             'migrated': true,
           }).eq('uid', userData!['uid']);
+
+          // 🛠️ Delete any duplicate record with this supabase_uid
+          await _supabase
+              .from('users')
+              .delete()
+              .eq('supabase_uid', session.user.id)
+              .neq('uid', userData!['uid']);
 
           // Re-fetch the updated record
           userData = await _supabase
