@@ -165,7 +165,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
     if (mounted) setState(() => _isLoading = false);
   }
 
-  // 🛠️ CORRECTED: Prioritize Firebase UID and email lookups for migration
   Future<void> _handleSupabaseSession(
       Session session, UserProvider userProvider) async {
     String? recordSource;
@@ -179,6 +178,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
       // --- STEP 1: If Firebase user exists, try to find record by Firebase UID ---
       if (firebaseUser != null) {
+        DebugLogger.logEvent('FIREBASE_LOOKUP', 'Attempting to find record by Firebase UID: ${firebaseUser.uid}');
         userData = await _supabase
             .from('users')
             .select()
@@ -211,11 +211,14 @@ class _AuthWrapperState extends State<AuthWrapper> {
               .select()
               .eq('uid', firebaseUser.uid)
               .maybeSingle();
+        } else {
+          DebugLogger.logEvent('FIREBASE_LOOKUP', 'No record found by Firebase UID: ${firebaseUser.uid}');
         }
       }
 
       // --- STEP 2: If not found, try by email (migration without current Firebase session) ---
       if (!found && session.user.email != null) {
+        DebugLogger.logEvent('EMAIL_LOOKUP', 'Attempting to find record by email: ${session.user.email}');
         final userByEmail = await _supabase
             .from('users')
             .select()
@@ -249,11 +252,14 @@ class _AuthWrapperState extends State<AuthWrapper> {
               .select()
               .eq('uid', userData!['uid'])
               .maybeSingle();
+        } else {
+          DebugLogger.logEvent('EMAIL_LOOKUP', 'No record found by email with migrated=false: ${session.user.email}');
         }
       }
 
       // --- STEP 3: Try to find by supabase_uid (normal case after migration) ---
       if (!found) {
+        DebugLogger.logEvent('SUPABASE_UID_LOOKUP', 'Attempting to find record by supabase_uid: ${session.user.id}');
         userData = await _supabase
             .from('users')
             .select()
@@ -271,6 +277,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
             recordSource: recordSource,
           );
           DebugLogger.logEvent('USER_RECORD_FOUND', 'User record exists by supabase_uid');
+        } else {
+          DebugLogger.logEvent('SUPABASE_UID_LOOKUP', 'No record found by supabase_uid: ${session.user.id}');
         }
       }
 
@@ -357,50 +365,212 @@ class _AuthWrapperState extends State<AuthWrapper> {
     }
   }
 
-  // The rest of the methods remain exactly as in the original file
   Future<void> _handleFirebaseUser(
       firebase_auth.User firebaseUser, UserProvider userProvider) async {
-    // ... (unchanged)
+    _firebaseUid = firebaseUser.uid;
+    _userEmail = firebaseUser.email;
+    _userName = firebaseUser.displayName;
+    _photoUrl = firebaseUser.photoURL;
+    _isMigrated = false;
+
+    DebugLogger.logEvent(
+        'FIREBASE_USER', 'Handling Firebase user $_firebaseUid');
+
+    final cachedData = await _loadCachedAuthDataInstantly();
+
+    if (cachedData != null && mounted) {
+      setState(() {
+        _onboardingComplete = cachedData['onboardingComplete'] ?? false;
+        _usingCachedData = true;
+        _isLoading = false;
+      });
+
+      await _initializeUserProvider(userProvider);
+      _verifyOnboardingInBackground();
+    } else {
+      if (mounted) setState(() => _isLoading = false);
+      await _checkOnboardingFromDatabase(userProvider);
+    }
+
+    _checkMigrationInBackground();
+    _runCountryChecks(_firebaseUid!);
   }
 
   Future<void> _initializeUserProvider(UserProvider userProvider) async {
-    // ... (unchanged)
+    try {
+      final userData = await _supabase
+          .from('users')
+          .select()
+          .eq('uid', _firebaseUid!)
+          .maybeSingle();
+
+      if (userData != null) {
+        userProvider.initializeUser(userData as Map<String, dynamic>);
+      }
+    } catch (e) {
+      DebugLogger.logError('INIT_USER_PROVIDER', e);
+    }
   }
 
   Future<Map<String, dynamic>?> _loadCachedAuthDataInstantly() async {
-    // ... (unchanged)
+    try {
+      if (_firebaseUid == null) return null;
+
+      final prefs = await prefsInstance;
+      final cachedData = prefs.getString('auth_cache_v4_$_firebaseUid');
+
+      if (cachedData != null) {
+        final data = jsonDecode(cachedData);
+        final lastUpdated = data['lastUpdated'] ?? 0;
+        final cacheAge = DateTime.now().millisecondsSinceEpoch - lastUpdated;
+
+        if (cacheAge < 24 * 60 * 60 * 1000) {
+          return {
+            'onboardingComplete': data['onboardingComplete'] ?? false,
+            'lastUpdated': lastUpdated,
+          };
+        }
+      }
+    } catch (e) {
+      DebugLogger.logError('LOAD_CACHED_AUTH', e);
+    }
+    return null;
   }
 
   Future<void> _verifyOnboardingInBackground() async {
-    // ... (unchanged)
+    if (_firebaseUid == null || !_usingCachedData) return;
+
+    try {
+      final hasCompletedOnboarding =
+          await _checkOnboardingStatus(_firebaseUid!);
+
+      if (hasCompletedOnboarding != _onboardingComplete && mounted) {
+        setState(() => _onboardingComplete = hasCompletedOnboarding);
+        _updateAuthCache(hasCompletedOnboarding);
+      }
+    } catch (e) {
+      DebugLogger.logError('VERIFY_ONBOARDING_BG', e);
+    }
   }
 
   Future<bool> _checkOnboardingStatus(String uid) async {
-    // ... (unchanged)
+    try {
+      final response = await _supabase
+          .from('users')
+          .select('username, dateOfBirth, gender, onboardingComplete')
+          .eq('uid', uid)
+          .maybeSingle();
+
+      if (response == null) return false;
+
+      final data = response as Map<String, dynamic>;
+      final hasCompletedOnboarding = data['onboardingComplete'] == true ||
+          (data['dateOfBirth'] != null &&
+              data['username'] != null &&
+              data['username'].toString().isNotEmpty &&
+              data['gender'] != null &&
+              data['gender'].toString().isNotEmpty);
+
+      return hasCompletedOnboarding;
+    } catch (e) {
+      DebugLogger.logError('CHECK_ONBOARDING_STATUS', e);
+      return false;
+    }
   }
 
   Future<void> _checkOnboardingFromDatabase(UserProvider userProvider) async {
-    // ... (unchanged)
+    if (_firebaseUid == null) return;
+
+    try {
+      await _initializeUserProvider(userProvider);
+
+      final hasCompletedOnboarding =
+          await _checkOnboardingStatus(_firebaseUid!);
+
+      if (mounted) {
+        setState(() => _onboardingComplete = hasCompletedOnboarding);
+      }
+      _updateAuthCache(hasCompletedOnboarding);
+    } catch (e) {
+      DebugLogger.logError('CHECK_ONBOARDING_DB', e);
+    }
   }
 
   Future<void> _checkMigrationInBackground() async {
-    // ... (unchanged)
+    if (_firebaseUid == null || _checkingMigration) return;
+
+    _checkingMigration = true;
+
+    try {
+      final migrationStatus =
+          await _authMethods.getCurrentUserMigrationStatus();
+
+      if (mounted) {
+        setState(() {
+          _needsMigration = migrationStatus['needs_migration'] == true;
+        });
+
+        if (_needsMigration) {
+          await Future.delayed(const Duration(milliseconds: 500));
+          if (mounted) {
+            _showMigrationScreen();
+          }
+        }
+      }
+    } catch (e) {
+      DebugLogger.logError('CHECK_MIGRATION', e);
+    } finally {
+      _checkingMigration = false;
+    }
   }
 
   void _runCountryChecks(String uid) {
-    // ... (unchanged)
+    Future.delayed(const Duration(seconds: 3), () {
+      _countryService.checkAndBackfillCountryForExistingUsers();
+    });
+
+    Future.delayed(const Duration(seconds: 5), () {
+      _countryService.checkAndUpdateCountryIfNeeded();
+    });
   }
 
   Future<void> _updateAuthCache(bool onboardingComplete) async {
-    // ... (unchanged)
+    try {
+      if (_firebaseUid == null) return;
+
+      final prefs = await prefsInstance;
+      final cacheData = {
+        'onboardingComplete': onboardingComplete,
+        'lastUpdated': DateTime.now().millisecondsSinceEpoch,
+        'userId': _firebaseUid,
+      };
+      await prefs.setString(
+        'auth_cache_v4_$_firebaseUid',
+        jsonEncode(cacheData),
+      );
+    } catch (e) {
+      DebugLogger.logError('UPDATE_AUTH_CACHE', e);
+    }
   }
 
   void _showMigrationScreen() {
-    // ... (unchanged)
+    if (_firebaseUid == null) return;
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => LoginScreen(
+          migrationEmail: _userEmail ?? '',
+          migrationUid: _firebaseUid!,
+        ),
+      ),
+    );
   }
 
   void _handleOnboardingComplete() {
-    // ... (unchanged)
+    if (mounted) {
+      setState(() => _onboardingComplete = true);
+    }
+    _updateAuthCache(true);
   }
 
   @override
