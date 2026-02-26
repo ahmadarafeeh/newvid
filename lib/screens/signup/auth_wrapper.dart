@@ -138,7 +138,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
       eventType: 'AUTH_INIT_START',
       firebaseUid: _auth.currentUser?.uid,
       supabaseUid: _supabase.auth.currentSession?.user.id,
-      email: _auth.currentUser?.email ?? _supabase.auth.currentSession?.user.email,
+      email:
+          _auth.currentUser?.email ?? _supabase.auth.currentSession?.user.email,
       hasFirebaseSession: hasFirebase,
       hasSupabaseSession: hasSupabase,
     );
@@ -146,7 +147,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
     // First check Supabase session (for all users)
     final supabaseSession = _supabase.auth.currentSession;
     if (supabaseSession != null) {
-      await DebugLogger.logEvent('AUTH_INIT', 'Supabase session found, handling...');
+      await DebugLogger.logEvent(
+          'AUTH_INIT', 'Supabase session found, handling...');
       await _handleSupabaseSession(supabaseSession, userProvider);
       return;
     }
@@ -154,7 +156,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
     // Then check Firebase (for existing users not yet migrated)
     final firebaseUser = _auth.currentUser;
     if (firebaseUser != null) {
-      await DebugLogger.logEvent('AUTH_INIT', 'Firebase user found, handling...');
+      await DebugLogger.logEvent(
+          'AUTH_INIT', 'Firebase user found, handling...');
       await _handleFirebaseUser(firebaseUser, userProvider);
       return;
     }
@@ -165,7 +168,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
     if (mounted) setState(() => _isLoading = false);
   }
 
-  // 🛠️ CORRECTED: Prioritize Firebase UID, then email, then supabase_uid, and clean up duplicates
+  // 🛠️ Robust handler that cleans up duplicates
   Future<void> _handleSupabaseSession(
       Session session, UserProvider userProvider) async {
     String? recordSource;
@@ -179,7 +182,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
       // --- STEP 1: If Firebase user exists, try to find record by Firebase UID ---
       if (firebaseUser != null) {
-        DebugLogger.logEvent('FIREBASE_LOOKUP', 'Attempting to find record by Firebase UID: ${firebaseUser.uid}');
+        DebugLogger.logEvent('FIREBASE_LOOKUP',
+            'Attempting to find record by Firebase UID: ${firebaseUser.uid}');
         userData = await _supabase
             .from('users')
             .select()
@@ -212,9 +216,12 @@ class _AuthWrapperState extends State<AuthWrapper> {
               .delete()
               .eq('supabase_uid', session.user.id)
               .neq('uid', firebaseUser.uid);
-          if (deleteResult != null) {
+          if (deleteResult != null && deleteResult.isNotEmpty) {
             DebugLogger.logEvent('DUPLICATE_CLEANUP',
-                'Deleted duplicate record with supabase_uid ${session.user.id}');
+                'Deleted ${deleteResult.length} duplicate record(s) with supabase_uid ${session.user.id}');
+          } else {
+            DebugLogger.logEvent('DUPLICATE_CLEANUP',
+                'No duplicates found for supabase_uid ${session.user.id}');
           }
 
           // Re-fetch the updated record
@@ -224,13 +231,15 @@ class _AuthWrapperState extends State<AuthWrapper> {
               .eq('uid', firebaseUser.uid)
               .maybeSingle();
         } else {
-          DebugLogger.logEvent('FIREBASE_LOOKUP', 'No record found by Firebase UID: ${firebaseUser.uid}');
+          DebugLogger.logEvent('FIREBASE_LOOKUP',
+              'No record found by Firebase UID: ${firebaseUser.uid}');
         }
       }
 
       // --- STEP 2: If not found, try by email (migration without current Firebase session) ---
       if (!found && session.user.email != null) {
-        DebugLogger.logEvent('EMAIL_LOOKUP', 'Attempting to find record by email: ${session.user.email}');
+        DebugLogger.logEvent('EMAIL_LOOKUP',
+            'Attempting to find record by email: ${session.user.email}');
         final userByEmail = await _supabase
             .from('users')
             .select()
@@ -259,11 +268,18 @@ class _AuthWrapperState extends State<AuthWrapper> {
           }).eq('uid', userData!['uid']);
 
           // 🛠️ Delete any duplicate record with this supabase_uid
-          await _supabase
+          final deleteResult = await _supabase
               .from('users')
               .delete()
               .eq('supabase_uid', session.user.id)
               .neq('uid', userData!['uid']);
+          if (deleteResult != null && deleteResult.isNotEmpty) {
+            DebugLogger.logEvent('DUPLICATE_CLEANUP',
+                'Deleted ${deleteResult.length} duplicate record(s) with supabase_uid ${session.user.id}');
+          } else {
+            DebugLogger.logEvent('DUPLICATE_CLEANUP',
+                'No duplicates found for supabase_uid ${session.user.id}');
+          }
 
           // Re-fetch the updated record
           userData = await _supabase
@@ -272,22 +288,58 @@ class _AuthWrapperState extends State<AuthWrapper> {
               .eq('uid', userData!['uid'])
               .maybeSingle();
         } else {
-          DebugLogger.logEvent('EMAIL_LOOKUP', 'No record found by email with migrated=false: ${session.user.email}');
+          DebugLogger.logEvent('EMAIL_LOOKUP',
+              'No record found by email with migrated=false: ${session.user.email}');
         }
       }
 
       // --- STEP 3: Try to find by supabase_uid (normal case after migration) ---
+      // Here we handle multiple possible rows robustly.
       if (!found) {
-        DebugLogger.logEvent('SUPABASE_UID_LOOKUP', 'Attempting to find record by supabase_uid: ${session.user.id}');
-        userData = await _supabase
+        DebugLogger.logEvent('SUPABASE_UID_LOOKUP',
+            'Attempting to find records by supabase_uid: ${session.user.id}');
+        final records = await _supabase
             .from('users')
             .select()
-            .eq('supabase_uid', session.user.id)
-            .maybeSingle();
+            .eq('supabase_uid', session.user.id);
 
-        if (userData != null) {
+        if (records.isNotEmpty) {
           found = true;
           recordSource = 'supabase_uid';
+
+          // If there's more than one, we need to pick one and delete the extras.
+          if (records.length > 1) {
+            DebugLogger.logEvent('DUPLICATE_FOUND',
+                'Found ${records.length} records with supabase_uid ${session.user.id}, cleaning up');
+            // Strategy: prefer the one with a non-default username/photo (fully onboarded)
+            Map<String, dynamic>? bestRecord;
+            List<Map<String, dynamic>> others = [];
+            for (var rec in records) {
+              final hasData = rec['username'] != null &&
+                  rec['username'].toString().isNotEmpty &&
+                  rec['dateOfBirth'] != null;
+              if (hasData) {
+                // This looks like the fully onboarded user
+                bestRecord = rec;
+              } else {
+                others.add(rec);
+              }
+            }
+            if (bestRecord == null) {
+              // No fully onboarded one, keep the first
+              bestRecord = records.first;
+              others = records.sublist(1);
+            }
+            userData = bestRecord;
+            // Delete the others
+            for (var rec in others) {
+              await _supabase.from('users').delete().eq('uid', rec['uid']);
+              DebugLogger.logEvent('DUPLICATE_CLEANUP',
+                  'Deleted duplicate record with uid ${rec['uid']}');
+            }
+          } else {
+            userData = records.first as Map<String, dynamic>;
+          }
           await _logLoginEvent(
             eventType: 'USER_RECORD_FOUND_BY_SUPABASE_UID',
             supabaseUid: session.user.id,
@@ -295,9 +347,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
             existingRecordFound: true,
             recordSource: recordSource,
           );
-          DebugLogger.logEvent('USER_RECORD_FOUND', 'User record exists by supabase_uid');
+          DebugLogger.logEvent('USER_RECORD_FOUND',
+              'User record exists by supabase_uid (after cleanup)');
         } else {
-          DebugLogger.logEvent('SUPABASE_UID_LOOKUP', 'No record found by supabase_uid: ${session.user.id}');
+          DebugLogger.logEvent('SUPABASE_UID_LOOKUP',
+              'No record found by supabase_uid: ${session.user.id}');
         }
       }
 
@@ -350,7 +404,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
         ...userData,
       });
 
-      final hasCompletedOnboarding = await _checkOnboardingStatus(_firebaseUid!);
+      final hasCompletedOnboarding =
+          await _checkOnboardingStatus(_firebaseUid!);
       _onboardingComplete = hasCompletedOnboarding;
 
       await _logLoginEvent(
@@ -383,6 +438,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
+
+  // --- The remaining methods are unchanged from your original file ---
 
   Future<void> _handleFirebaseUser(
       firebase_auth.User firebaseUser, UserProvider userProvider) async {
