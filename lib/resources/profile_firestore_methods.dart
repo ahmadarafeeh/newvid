@@ -728,36 +728,43 @@ class SupabaseProfileMethods {
     }
   }
 
-  // 🛠️ FIXED: deleteEntireUserAccount now works for both Firebase and Supabase users
+  // ✅ FIXED: deleteEntireUserAccount now works for both Firebase and Supabase users,
+  // including migrated Apple users.
   Future<String> deleteEntireUserAccount(
       String uid, firebase_auth.AuthCredential? credential) async {
     String res = "Some error occurred";
     String? profilePicUrl;
 
     try {
-      // 1. Determine authentication type
+      // 1. Get user data first – we'll need the supabase_uid for later checks
+      final userSel =
+          await _supabase.from('users').select().eq('uid', uid).maybeSingle();
+      final userData = _unwrap(userSel) ?? userSel;
+
+      if (userData == null) {
+        throw Exception("User record not found");
+      }
+
+      profilePicUrl = userData['photoUrl'] as String?;
+
+      // 2. Determine authentication type
       final firebaseUser = firebase_auth.FirebaseAuth.instance.currentUser;
       final supabaseSession = _supabase.auth.currentSession;
 
       bool isFirebaseUser = firebaseUser != null && firebaseUser.uid == uid;
-      bool isSupabaseUser =
-          supabaseSession != null && supabaseSession.user.id == uid;
+
+      // For Supabase user, we need to check if the session's user ID matches the user's supabase_uid
+      bool isSupabaseUser = supabaseSession != null &&
+          userData['supabase_uid'] == supabaseSession.user.id;
 
       if (!isFirebaseUser && !isSupabaseUser) {
         throw Exception("User not authenticated or UID mismatch");
       }
 
-      // 2. For Firebase users, reauthenticate if credential provided
+      // 3. For Firebase users, reauthenticate if credential provided
       if (isFirebaseUser && credential != null) {
         await firebaseUser!.reauthenticateWithCredential(credential);
       }
-
-      // 3. Get user data (common for both types)
-      final userSel =
-          await _supabase.from('users').select().eq('uid', uid).maybeSingle();
-      final userData = _unwrap(userSel) ?? userSel;
-
-      profilePicUrl = userData?['photoUrl'] as String?;
 
       // 4. Delete all user posts and associated data
       await _deleteAllUserPosts(uid);
