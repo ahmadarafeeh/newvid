@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 import 'package:Ratedly/models/user.dart';
@@ -20,29 +21,78 @@ class UserProvider with ChangeNotifier {
   bool get isMigrated => _isMigrated;
 
   // ===========================================================================
-  // ERROR LOGGING HELPER
+  // LOGGING HELPER
   // ===========================================================================
-  Future<void> _logProviderError({
-    required String operation,
-    required dynamic error,
+  Future<void> _logEvent({
+    required String eventType,
+    String? errorDetails,
     StackTrace? stack,
     Map<String, dynamic>? additionalData,
   }) async {
     try {
       await _supabase.from('login_logs').insert({
-        'event_type': 'PROVIDER_ERROR',
+        'event_type': eventType,
         'firebase_uid': _firebaseUid,
         'supabase_uid': _supabaseUid,
-        'error_details': error.toString(),
+        'error_details': errorDetails,
         'stack_trace': stack?.toString(),
-        'additional_data': {
-          'operation': operation,
-          if (additionalData != null) ...additionalData,
-        },
+        'additional_data': additionalData,
       });
-    } catch (_) {
-      // Silently ignore logging failures
+    } catch (_) {}
+  }
+
+  // ===========================================================================
+  // SAFE DATA SANITIZER
+  // Fixes triple-escaped blockedUsers like """[]""" → []
+  // Also handles any other malformed JSON fields
+  // ===========================================================================
+  Map<String, dynamic> _sanitizeUserData(Map<String, dynamic> raw) {
+    final data = Map<String, dynamic>.from(raw);
+
+    // Fix blockedUsers: could be """[]""", "[]", [], or null
+    if (data.containsKey('blockedUsers')) {
+      final val = data['blockedUsers'];
+      if (val == null) {
+        data['blockedUsers'] = <dynamic>[];
+      } else if (val is List) {
+        // Already correct
+        data['blockedUsers'] = val;
+      } else if (val is String) {
+        // Strip all wrapping quotes/escapes until we get valid JSON
+        String cleaned = val.trim();
+        // Remove surrounding quotes repeatedly until clean
+        while (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+          try {
+            final decoded = jsonDecode(cleaned);
+            if (decoded is String) {
+              cleaned = decoded.trim();
+            } else {
+              // Successfully decoded to non-string (e.g. List) — use it
+              data['blockedUsers'] = decoded;
+              cleaned = ''; // signal we're done
+              break;
+            }
+          } catch (_) {
+            // Not valid JSON with quotes, try removing one layer manually
+            cleaned = cleaned.substring(1, cleaned.length - 1);
+          }
+        }
+        if (cleaned.isNotEmpty) {
+          try {
+            final decoded = jsonDecode(cleaned);
+            data['blockedUsers'] = decoded is List ? decoded : <dynamic>[];
+          } catch (_) {
+            data['blockedUsers'] = <dynamic>[];
+          }
+        }
+      } else {
+        data['blockedUsers'] = <dynamic>[];
+      }
+    } else {
+      data['blockedUsers'] = <dynamic>[];
     }
+
+    return data;
   }
 
   // ===========================================================================
@@ -59,11 +109,50 @@ class UserProvider with ChangeNotifier {
       appUserData.remove('supabase_uid');
       appUserData.remove('migrated');
 
-      _user = AppUser.fromMap(appUserData);
+      // ✅ FIX: Sanitize before parsing to handle malformed blockedUsers
+      final sanitized = _sanitizeUserData(appUserData);
 
+      _user = AppUser.fromMap(sanitized);
       notifyListeners();
+
+      _logEvent(
+        eventType: 'PROVIDER_INIT_SUCCESS',
+        additionalData: {
+          'uid': _firebaseUid,
+          'supabase_uid': _supabaseUid,
+          'is_pure_supabase_user': _firebaseUid == _supabaseUid,
+          'username': sanitized['username'],
+          'onboardingComplete': sanitized['onboardingComplete'],
+        },
+      );
     } catch (e, stack) {
-      _logProviderError(operation: 'initializeUser', error: e, stack: stack);
+      _logEvent(
+        eventType: 'PROVIDER_INIT_ERROR',
+        errorDetails: e.toString(),
+        stack: stack,
+        additionalData: {
+          'raw_uid': userData['uid'],
+          'raw_supabase_uid': userData['supabase_uid'],
+          'raw_blockedUsers': userData['blockedUsers'].toString(),
+        },
+      );
+      // Do NOT rethrow — but also do NOT silently leave _user as null
+      // Try again with a minimal safe map so the user can at least navigate
+      try {
+        final fallback = _sanitizeUserData(userData);
+        fallback.remove('supabase_uid');
+        fallback.remove('migrated');
+        // Ensure required fields have safe defaults
+        fallback['blockedUsers'] = <dynamic>[];
+        _user = AppUser.fromMap(fallback);
+        notifyListeners();
+      } catch (e2, stack2) {
+        _logEvent(
+          eventType: 'PROVIDER_INIT_FALLBACK_ERROR',
+          errorDetails: e2.toString(),
+          stack: stack2,
+        );
+      }
     }
   }
 
@@ -73,10 +162,12 @@ class UserProvider with ChangeNotifier {
       _firebaseUid = user.uid;
       _supabaseUid = supabaseUid;
       _isMigrated = migrated;
-
       notifyListeners();
     } catch (e, stack) {
-      _logProviderError(operation: 'setUser', error: e, stack: stack);
+      _logEvent(
+          eventType: 'PROVIDER_SET_USER_ERROR',
+          errorDetails: e.toString(),
+          stack: stack);
     }
   }
 
@@ -91,12 +182,15 @@ class UserProvider with ChangeNotifier {
       appUserData.remove('supabase_uid');
       appUserData.remove('migrated');
 
-      _user = AppUser.fromMap(appUserData);
-
+      // ✅ FIX: Sanitize before parsing
+      final sanitized = _sanitizeUserData(appUserData);
+      _user = AppUser.fromMap(sanitized);
       notifyListeners();
     } catch (e, stack) {
-      _logProviderError(
-          operation: 'setUserFromCompleteData', error: e, stack: stack);
+      _logEvent(
+          eventType: 'PROVIDER_SET_COMPLETE_ERROR',
+          errorDetails: e.toString(),
+          stack: stack);
     }
   }
 
@@ -106,70 +200,68 @@ class UserProvider with ChangeNotifier {
   Future<void> refreshUser() async {
     try {
       final firebase_auth.User? firebaseUser = _firebaseAuth.currentUser;
-      if (firebaseUser == null) {
-        try {
-          final supabaseUser = _supabase.auth.currentUser;
-          if (supabaseUser != null) {
-            await _refreshFromSupabase(supabaseUser.id);
-            return;
-          }
-        } catch (e, stack) {
-          await _logProviderError(
-              operation: 'refreshUser/supabaseCheck', error: e, stack: stack);
-        }
 
-        _user = null;
-        _firebaseUid = null;
-        _supabaseUid = null;
-        _isMigrated = false;
-        notifyListeners();
+      if (firebaseUser == null) {
+        // Pure Supabase user path
+        final supabaseUser = _supabase.auth.currentUser;
+        if (supabaseUser != null) {
+          await _refreshFromSupabase(supabaseUser.id);
+          return;
+        }
+        _clearUserState();
         return;
       }
 
+      // Firebase/migrated user path
       final Map<String, dynamic>? userData =
           await _getUserDataByFirebaseUid(firebaseUser.uid);
 
       if (userData != null) {
         setUserFromCompleteData(userData);
-
-        final results = await Future.wait([
-          _authMethods.getUserFollowers(firebaseUser.uid),
-          _authMethods.getUserFollowing(firebaseUser.uid),
-          _authMethods.getFollowRequests(firebaseUser.uid),
-        ]);
-
-        final List<String> followers = results[0] as List<String>;
-        final List<String> following = results[1] as List<String>;
-        final List<String> requests = results[2] as List<String>;
-
-        if (_user != null) {
-          _user = _user!.withRelationships(
-            followers: followers,
-            following: following,
-            followRequests: requests,
-          );
-          notifyListeners();
-        }
+        await _loadRelationships(firebaseUser.uid);
       } else {
-        _user = null;
-        _firebaseUid = null;
-        _supabaseUid = null;
-        _isMigrated = false;
-        notifyListeners();
+        _clearUserState();
       }
     } catch (e, stack) {
-      await _logProviderError(operation: 'refreshUser', error: e, stack: stack);
-      _user = null;
-      _firebaseUid = null;
-      _supabaseUid = null;
-      _isMigrated = false;
-      notifyListeners();
+      await _logEvent(
+          eventType: 'PROVIDER_REFRESH_ERROR',
+          errorDetails: e.toString(),
+          stack: stack);
+      _clearUserState();
     }
   }
 
   // ===========================================================================
-  // HELPER METHODS
+  // HELPERS
   // ===========================================================================
+
+  /// Loads followers/following/requests and updates _user in place.
+  /// Uses the DB uid (which for pure Supabase users = their Supabase UUID).
+  Future<void> _loadRelationships(String uid) async {
+    try {
+      final results = await Future.wait([
+        _authMethods.getUserFollowers(uid),
+        _authMethods.getUserFollowing(uid),
+        _authMethods.getFollowRequests(uid),
+      ]);
+
+      if (_user != null) {
+        _user = _user!.withRelationships(
+          followers: results[0] as List<String>,
+          following: results[1] as List<String>,
+          followRequests: results[2] as List<String>,
+        );
+        notifyListeners();
+      }
+    } catch (e, stack) {
+      await _logEvent(
+          eventType: 'PROVIDER_LOAD_RELATIONSHIPS_ERROR',
+          errorDetails: e.toString(),
+          stack: stack,
+          additionalData: {'uid': uid});
+    }
+  }
+
   Future<Map<String, dynamic>?> _getUserDataByFirebaseUid(
       String firebaseUid) async {
     try {
@@ -178,14 +270,11 @@ class UserProvider with ChangeNotifier {
           .select()
           .eq('uid', firebaseUid)
           .limit(1);
-
-      if (response.isNotEmpty) {
-        return response[0] as Map<String, dynamic>;
-      }
+      if (response.isNotEmpty) return response[0] as Map<String, dynamic>;
     } catch (e, stack) {
-      await _logProviderError(
-          operation: '_getUserDataByFirebaseUid',
-          error: e,
+      await _logEvent(
+          eventType: 'PROVIDER_GET_BY_FIREBASE_UID_ERROR',
+          errorDetails: e.toString(),
           stack: stack,
           additionalData: {'firebaseUid': firebaseUid});
     }
@@ -198,35 +287,30 @@ class UserProvider with ChangeNotifier {
       if (userData != null) {
         setUserFromCompleteData(userData);
 
-        if (_firebaseUid != null) {
-          final results = await Future.wait([
-            _authMethods.getUserFollowers(_firebaseUid!),
-            _authMethods.getUserFollowing(_firebaseUid!),
-            _authMethods.getFollowRequests(_firebaseUid!),
-          ]);
+        // For pure Supabase users, uid column = supabase UUID
+        // Use the uid from the DB record (not supabaseUid param) for relationship queries
+        final dbUid = userData['uid'] as String? ?? supabaseUid;
+        await _loadRelationships(dbUid);
 
-          final List<String> followers = results[0] as List<String>;
-          final List<String> following = results[1] as List<String>;
-          final List<String> requests = results[2] as List<String>;
-
-          if (_user != null) {
-            _user = _user!.withRelationships(
-              followers: followers,
-              following: following,
-              followRequests: requests,
-            );
-            notifyListeners();
-          }
-        }
+        await _logEvent(
+          eventType: 'PROVIDER_REFRESH_SUPABASE_SUCCESS',
+          additionalData: {
+            'supabase_uid': supabaseUid,
+            'db_uid': dbUid,
+            'is_pure_supabase_user': dbUid == supabaseUid,
+          },
+        );
       } else {
-        await _logProviderError(
-            operation: '_refreshFromSupabase',
-            error: 'No user data found for supabaseUid $supabaseUid');
+        await _logEvent(
+          eventType: 'PROVIDER_REFRESH_SUPABASE_NO_RECORD',
+          errorDetails: 'No user data found for supabaseUid $supabaseUid',
+        );
+        _clearUserState();
       }
     } catch (e, stack) {
-      await _logProviderError(
-          operation: '_refreshFromSupabase',
-          error: e,
+      await _logEvent(
+          eventType: 'PROVIDER_REFRESH_FROM_SUPABASE_ERROR',
+          errorDetails: e.toString(),
           stack: stack,
           additionalData: {'supabaseUid': supabaseUid});
     }
@@ -240,24 +324,18 @@ class UserProvider with ChangeNotifier {
           .select()
           .eq('supabase_uid', supabaseUid)
           .limit(1);
-
-      if (response.isNotEmpty) {
-        return response[0] as Map<String, dynamic>;
-      }
+      if (response.isNotEmpty) return response[0] as Map<String, dynamic>;
     } catch (e, stack) {
-      await _logProviderError(
-          operation: '_getUserDataBySupabaseUid',
-          error: e,
+      await _logEvent(
+          eventType: 'PROVIDER_GET_BY_SUPABASE_UID_ERROR',
+          errorDetails: e.toString(),
           stack: stack,
           additionalData: {'supabaseUid': supabaseUid});
     }
     return null;
   }
 
-  // ===========================================================================
-  // CLEAR / UPDATE
-  // ===========================================================================
-  void clearUser() {
+  void _clearUserState() {
     _user = null;
     _firebaseUid = null;
     _supabaseUid = null;
@@ -265,39 +343,49 @@ class UserProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  // ===========================================================================
+  // CLEAR / UPDATE
+  // ===========================================================================
+  void clearUser() {
+    _clearUserState();
+  }
+
   void updateUser(Map<String, dynamic> updates) {
     if (_user != null) {
       try {
         final updatedMap = _user!.toMap();
         updatedMap.addAll(updates);
-        _user = AppUser.fromMap(updatedMap);
+        final sanitized = _sanitizeUserData(updatedMap);
+        _user = AppUser.fromMap(sanitized);
 
-        if (updates.containsKey('uid')) {
-          _firebaseUid = updates['uid'] as String?;
-        }
-        if (updates.containsKey('supabase_uid')) {
+        if (updates.containsKey('uid')) _firebaseUid = updates['uid'] as String?;
+        if (updates.containsKey('supabase_uid'))
           _supabaseUid = updates['supabase_uid'] as String?;
-        }
-        if (updates.containsKey('migrated')) {
+        if (updates.containsKey('migrated'))
           _isMigrated = updates['migrated'] == true;
-        }
 
         notifyListeners();
       } catch (e, stack) {
-        _logProviderError(operation: 'updateUser', error: e, stack: stack);
+        _logEvent(
+            eventType: 'PROVIDER_UPDATE_ERROR',
+            errorDetails: e.toString(),
+            stack: stack);
       }
     }
   }
 
-  // Safe UID getter – returns Firebase UID for data operations, but logs if both are missing
+  /// Returns the uid to use for DB queries.
+  /// For Firebase/migrated users: Firebase UID (stored in uid column).
+  /// For pure Supabase users: Supabase UUID (also stored in uid column).
+  /// Both cases are handled correctly because uid column always holds
+  /// the correct value to query against.
   String? get safeUID {
-    if (_firebaseUid == null && _supabaseUid == null) {
-      _logProviderError(operation: 'safeUID', error: 'Both UIDs are null');
+    final uid = _firebaseUid ?? _supabaseUid;
+    if (uid == null) {
+      _logEvent(
+          eventType: 'PROVIDER_SAFE_UID_NULL',
+          errorDetails: 'Both _firebaseUid and _supabaseUid are null');
     }
-    return _firebaseUid ?? _supabaseUid;
-  }
-
-  void debugInfo() {
-    // Debug functionality removed – use logging service instead
+    return uid;
   }
 }
