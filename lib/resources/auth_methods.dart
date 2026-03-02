@@ -16,28 +16,23 @@ import 'package:flutter/foundation.dart'
 class AuthMethods {
   final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
 
-  // GoogleSignIn with both iOS client ID and Web server client ID
   final GoogleSignIn _googleSignIn;
 
   final SupabaseClient _supabase = Supabase.instance.client;
   final CountryService _countryService = CountryService();
   final CountryDetector _detector = CountryDetector();
 
-  // Constructor with platform-specific configuration
   AuthMethods()
       : _googleSignIn = GoogleSignIn(
           scopes: ['email', 'profile'],
-          // iOS Client ID – used by the native SDK on the device
           clientId: defaultTargetPlatform == TargetPlatform.iOS
               ? '411393947451-dci447kne3aglou6qf8qqgh053sn1rps.apps.googleusercontent.com'
               : null,
-          // Web Client ID – used by Supabase to verify the token
           serverClientId: defaultTargetPlatform == TargetPlatform.iOS
               ? '411393947451-3h179hgbbhh3oqv8nm8ndbhc43j00rhc.apps.googleusercontent.com'
               : null,
         );
 
-  // Nonce helpers for Apple sign-in
   String _generateRawNonce([int length = 32]) {
     const charset =
         '0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._';
@@ -52,7 +47,6 @@ class AuthMethods {
     return digest.toString();
   }
 
-  // Helper to log only error events
   Future<void> _logError({
     required String eventType,
     String? firebaseUid,
@@ -72,20 +66,16 @@ class AuthMethods {
         'stack_trace': stackTrace,
         'additional_data': additionalData,
       });
-    } catch (_) {
-      // Silently ignore logging failures
-    }
+    } catch (_) {}
   }
 
   // =============================================
-  // NATIVE GOOGLE SIGN‑IN (no browser)
+  // NATIVE GOOGLE SIGN‑IN
   // =============================================
   Future<String> signInWithGoogleNative() async {
     try {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) {
-        return "cancelled";
-      }
+      if (googleUser == null) return "cancelled";
 
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
@@ -100,9 +90,7 @@ class AuthMethods {
         accessToken: googleAuth.accessToken,
       );
 
-      if (response.user == null) {
-        return "Supabase sign‑in failed";
-      }
+      if (response.user == null) return "Supabase sign‑in failed";
 
       return await _checkSupabaseUserOnboarding();
     } catch (e, stack) {
@@ -116,7 +104,7 @@ class AuthMethods {
   }
 
   // =============================================
-  // NATIVE GOOGLE MIGRATION (for users coming from Firebase)
+  // NATIVE GOOGLE MIGRATION
   // =============================================
   Future<String> migrateGoogleUserNative() async {
     try {
@@ -139,7 +127,7 @@ class AuthMethods {
   }
 
   // =============================================
-  // NATIVE APPLE SIGN‑IN (no browser)
+  // NATIVE APPLE SIGN‑IN
   // =============================================
   Future<String> signInWithAppleNative() async {
     try {
@@ -152,9 +140,7 @@ class AuthMethods {
       );
 
       final idToken = appleCredential.identityToken;
-      if (idToken == null) {
-        return "Apple sign‑in failed: no ID token";
-      }
+      if (idToken == null) return "Apple sign‑in failed: no ID token";
 
       final AuthResponse response = await _supabase.auth.signInWithIdToken(
         provider: OAuthProvider.apple,
@@ -162,15 +148,11 @@ class AuthMethods {
         nonce: rawNonce,
       );
 
-      if (response.user == null) {
-        return "Supabase sign‑in failed";
-      }
+      if (response.user == null) return "Supabase sign‑in failed";
 
       return await _checkSupabaseUserOnboarding();
     } on SignInWithAppleAuthorizationException catch (e, stack) {
-      if (e.code == AuthorizationErrorCode.canceled) {
-        return "cancelled";
-      }
+      if (e.code == AuthorizationErrorCode.canceled) return "cancelled";
       await _logError(
         eventType: 'APPLE_SIGNIN_ERROR',
         errorDetails: e.message,
@@ -188,12 +170,8 @@ class AuthMethods {
   }
 
   // =============================================
-  // SUPABASE-ONLY METHODS (No Firebase)
+  // SUPABASE OAUTH (web)
   // =============================================
-
-  // ----------------------
-  // Supabase Google Sign-up/Sign-in (OAuth – kept for web)
-  // ----------------------
   Future<String> signUpWithGoogleSupabase() async {
     try {
       await _supabase.auth.signInWithOAuth(
@@ -202,16 +180,11 @@ class AuthMethods {
       );
       return "oauth_initiated";
     } catch (e) {
-      if (e is AuthException) {
-        return "Google sign-up failed: ${e.message}";
-      }
+      if (e is AuthException) return "Google sign-up failed: ${e.message}";
       return "Google sign-up failed: $e";
     }
   }
 
-  // ----------------------
-  // Supabase Apple Sign-up/Sign-in
-  // ----------------------
   Future<String> signUpWithAppleSupabase() async {
     try {
       await _supabase.auth.signInWithOAuth(
@@ -220,22 +193,18 @@ class AuthMethods {
       );
       return "oauth_initiated";
     } catch (e) {
-      if (e is AuthException) {
-        return "Apple sign-up failed: ${e.message}";
-      }
+      if (e is AuthException) return "Apple sign-up failed: ${e.message}";
       return "Apple sign-up failed: $e";
     }
   }
 
-  // ----------------------
-  // Check Supabase User Onboarding Status
-  // ----------------------
+  // =============================================
+  // CHECK SUPABASE USER ONBOARDING
+  // =============================================
   Future<String> _checkSupabaseUserOnboarding() async {
     try {
       final session = _supabase.auth.currentSession;
-      if (session == null) {
-        return "no_session";
-      }
+      if (session == null) return "no_session";
 
       final List<dynamic> userRecords = await _supabase
           .from('users')
@@ -244,7 +213,7 @@ class AuthMethods {
           .limit(1);
 
       if (userRecords.isEmpty) {
-        // First time user - create user record
+        // First time — create user record
         try {
           await _supabase.from('users').upsert({
             'uid': session.user.id,
@@ -258,19 +227,24 @@ class AuthMethods {
             'dateOfBirth': null,
             'gender': null,
             'isVerified': false,
-            'blockedUsers': jsonEncode([]),
+            // ✅ Store as a proper JSON array, not a string
+            'blockedUsers': <dynamic>[],
             'country': null,
             'migrated': true,
             'supabase_uid': session.user.id,
-          });
+          }, onConflict: 'uid');
         } catch (e) {
-          // Silently ignore – record will be created later if needed
+          await _logError(
+            eventType: 'CREATE_USER_RECORD_ERROR',
+            supabaseUid: session.user.id,
+            email: session.user.email,
+            errorDetails: e.toString(),
+          );
         }
         return "onboarding_required";
       }
 
       final Map<String, dynamic> data = userRecords[0];
-
       final hasCompletedOnboarding = data['onboardingComplete'] == true ||
           (data['username'] != null &&
               data['username'].toString().isNotEmpty &&
@@ -284,9 +258,9 @@ class AuthMethods {
     }
   }
 
-  // ----------------------
-  // Complete Profile for Supabase User
-  // ----------------------
+  // =============================================
+  // COMPLETE PROFILE — SUPABASE USER
+  // =============================================
   Future<String> completeProfileSupabase({
     required String username,
     required String bio,
@@ -300,7 +274,6 @@ class AuthMethods {
       if (session == null) return "User not authenticated";
 
       final processedUsername = username.trim();
-
       if (processedUsername.isEmpty) return "Username cannot be empty";
       if (processedUsername.length < 3)
         return "Username must be at least 3 characters";
@@ -310,7 +283,6 @@ class AuthMethods {
         return "Username can only contain letters, numbers, and underscores";
       }
 
-      // Check if username is already taken
       final List<dynamic> usernameRes = await _supabase
           .from('users')
           .select('uid')
@@ -325,10 +297,8 @@ class AuthMethods {
       }
 
       String photoUrl = 'default';
-
       if (file != null) {
-        String fileName =
-            'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        String fileName = 'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
         photoUrl = await StorageMethods().uploadImageToSupabase(
           file,
           fileName,
@@ -348,10 +318,14 @@ class AuthMethods {
         'dateOfBirth': dateOfBirth.toIso8601String(),
         'gender': gender,
         'isVerified': true,
+        // ✅ FIX: Always include these so upsert never wipes them
+        'migrated': true,
+        'supabase_uid': session.user.id,
+        // ✅ FIX: Store as proper array, not escaped string
+        'blockedUsers': <dynamic>[],
       };
 
-      await _supabase.from('users').upsert(payload);
-
+      await _supabase.from('users').upsert(payload, onConflict: 'uid');
       await _countryService.setCountryForUser(session.user.id);
 
       return "success";
@@ -360,9 +334,9 @@ class AuthMethods {
     }
   }
 
-  // ----------------------
-  // Get Current Supabase User Details
-  // ----------------------
+  // =============================================
+  // GET SUPABASE USER DETAILS
+  // =============================================
   Future<AppUser?> getSupabaseUserDetails() async {
     try {
       final session = _supabase.auth.currentSession;
@@ -375,11 +349,9 @@ class AuthMethods {
           .limit(1);
 
       if (data.isEmpty) return null;
-      return AppUser.fromMap(data[0]);
+      return AppUser.fromMap(_sanitizeBlockedUsers(data[0]));
     } on PostgrestException catch (e) {
-      if (e.code == 'PGRST116') {
-        // No results - user hasn't completed onboarding
-      }
+      if (e.code == 'PGRST116') return null;
       return null;
     } catch (e) {
       return null;
@@ -387,12 +359,8 @@ class AuthMethods {
   }
 
   // =============================================
-  // FIREBASE METHODS (For Migration)
+  // FIREBASE MIGRATION HELPERS
   // =============================================
-
-  // ----------------------
-  // SIMPLIFIED Google user migration
-  // ----------------------
   Future<String> migrateGoogleUser({
     required String firebaseUid,
     required String email,
@@ -408,9 +376,6 @@ class AuthMethods {
     }
   }
 
-  // ----------------------
-  // Complete migration after OAuth success
-  // ----------------------
   Future<String> completeMigrationAfterOAuth() async {
     try {
       await Future.delayed(const Duration(seconds: 1));
@@ -446,9 +411,6 @@ class AuthMethods {
     }
   }
 
-  // ----------------------
-  // Check if user needs migration (call this after OAuth)
-  // ----------------------
   Future<bool> checkAndCompleteMigration() async {
     try {
       final firebaseUser = _auth.currentUser;
@@ -470,18 +432,16 @@ class AuthMethods {
           'migrated': true,
           'supabase_uid': session.user.id,
         }).eq('uid', firebaseUser.uid);
-        return true;
       }
-
       return true;
     } catch (e) {
       return false;
     }
   }
 
-  // ----------------------
-  // Get user details (from Supabase, based on Firebase UID)
-  // ----------------------
+  // =============================================
+  // GET USER DETAILS (Firebase UID based)
+  // =============================================
   Future<AppUser?> getUserDetails() async {
     try {
       final user = _auth.currentUser;
@@ -491,20 +451,15 @@ class AuthMethods {
           await _supabase.from('users').select().eq('uid', user.uid).limit(1);
 
       if (data.isEmpty) return null;
-      return AppUser.fromMap(data[0]);
+      return AppUser.fromMap(_sanitizeBlockedUsers(data[0]));
     } on PostgrestException catch (e) {
-      if (e.code == 'PGRST116') {
-        // No results - user hasn't completed onboarding
-      }
+      if (e.code == 'PGRST116') return null;
       return null;
     } catch (e) {
       return null;
     }
   }
 
-  // ----------------------
-  // Check if user needs migration
-  // ----------------------
   Future<bool> needsMigration(String uid) async {
     try {
       final List<dynamic> result = await _supabase
@@ -520,9 +475,6 @@ class AuthMethods {
     }
   }
 
-  // ----------------------
-  // Mark user as migrated
-  // ----------------------
   Future<void> markAsMigrated(String uid, String? supabaseUid) async {
     try {
       await _supabase.from('users').update({
@@ -534,9 +486,9 @@ class AuthMethods {
     }
   }
 
-  // ----------------------
-  // Email/password signup (Firebase Auth) - sets migrated = false
-  // ----------------------
+  // =============================================
+  // EMAIL/PASSWORD SIGNUP (Firebase)
+  // =============================================
   Future<String> signUpUser({
     required String email,
     required String password,
@@ -556,55 +508,50 @@ class AuthMethods {
         return "User with this email already exists. Please log in instead.";
       }
 
+      final firebase_auth.UserCredential cred =
+          await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      if (cred.user == null) return "Registration failed - please try again";
+
+      await cred.user!.sendEmailVerification();
+
       try {
-        final firebase_auth.UserCredential cred =
-            await _auth.createUserWithEmailAndPassword(
-          email: email,
-          password: password,
-        );
+        await _supabase.from('users').upsert({
+          'uid': cred.user!.uid,
+          'email': cred.user!.email,
+          'username': '',
+          'bio': '',
+          'photoUrl': 'default',
+          'isPrivate': false,
+          'onboardingComplete': false,
+          'createdAt': DateTime.now().toIso8601String(),
+          'dateOfBirth': null,
+          'gender': null,
+          'isVerified': false,
+          // ✅ FIX: Proper array
+          'blockedUsers': <dynamic>[],
+          'country': null,
+          'migrated': false,
+        });
+      } catch (_) {}
 
-        if (cred.user == null) {
-          return "Registration failed - please try again";
-        }
-
-        await cred.user!.sendEmailVerification();
-
-        try {
-          await _supabase.from('users').upsert({
-            'uid': cred.user!.uid,
-            'email': cred.user!.email,
-            'username': '',
-            'bio': '',
-            'photoUrl': 'default',
-            'isPrivate': false,
-            'onboardingComplete': false,
-            'createdAt': DateTime.now().toIso8601String(),
-            'dateOfBirth': null,
-            'gender': null,
-            'isVerified': false,
-            'blockedUsers': jsonEncode([]),
-            'country': null,
-            'migrated': false,
-          });
-        } catch (_) {
-          // ignore DB errors for now
-        }
-
-        return "success";
-      } on firebase_auth.FirebaseAuthException catch (e) {
-        if (e.code == 'email-already-in-use') {
-          return "Email already registered. Please log in instead.";
-        }
-        return e.message ?? "Registration failed";
+      return "success";
+    } on firebase_auth.FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        return "Email already registered. Please log in instead.";
       }
+      return e.message ?? "Registration failed";
     } catch (err) {
       return err.toString();
     }
   }
 
-  // ----------------------
-  // Complete profile (for both email and social users)
-  // ----------------------
+  // =============================================
+  // COMPLETE PROFILE (Firebase user)
+  // =============================================
   Future<String> completeProfile({
     required String username,
     required String bio,
@@ -620,12 +567,9 @@ class AuthMethods {
       final isSocialUser = user.providerData
           .any((userInfo) => userInfo.providerId != 'password');
 
-      if (!isSocialUser && !user.emailVerified) {
-        return "Email not verified";
-      }
+      if (!isSocialUser && !user.emailVerified) return "Email not verified";
 
       final processedUsername = username.trim();
-
       if (processedUsername.isEmpty) return "Username cannot be empty";
       if (processedUsername.length < 3)
         return "Username must be at least 3 characters";
@@ -646,10 +590,8 @@ class AuthMethods {
       }
 
       String photoUrl = 'default';
-
       if (file != null) {
-        String fileName =
-            'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        String fileName = 'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
         photoUrl = await StorageMethods().uploadImageToSupabase(
           file,
           fileName,
@@ -680,18 +622,16 @@ class AuthMethods {
         'gender': gender,
         'isVerified': true,
         'migrated': false,
+        // ✅ FIX: Proper array
+        'blockedUsers': <dynamic>[],
       };
 
-      try {
-        await _supabase.from('users').upsert(payload);
+      await _supabase.from('users').upsert(payload);
 
-        if (existingCountry == null) {
-          await _countryService.setCountryForUser(user.uid);
-        } else {
-          await _countryService.setupCountryTimer(user.uid);
-        }
-      } catch (e) {
-        return "Failed to save profile: ${e.toString()}";
+      if (existingCountry == null) {
+        await _countryService.setCountryForUser(user.uid);
+      } else {
+        await _countryService.setupCountryTimer(user.uid);
       }
 
       return "success";
@@ -700,9 +640,9 @@ class AuthMethods {
     }
   }
 
-  // ----------------------
-  // UNIFIED LOGIN - Checks both Firebase and Supabase
-  // ----------------------
+  // =============================================
+  // UNIFIED LOGIN
+  // =============================================
   Future<String> loginUser({
     required String email,
     required String password,
@@ -715,10 +655,6 @@ class AuthMethods {
 
       if (userRecords.isEmpty) {
         return await _loginWithFirebase(email, password, null);
-      }
-
-      if (userRecords.length > 1) {
-        // Log the issue but continue with most recent
       }
 
       userRecords.sort((a, b) {
@@ -743,7 +679,7 @@ class AuthMethods {
           if (supabaseResponse.user != null) {
             return await _checkOnboardingStatus(firebaseUid);
           }
-        } on AuthException catch (supabaseError) {
+        } on AuthException catch (_) {
           return await _loginWithFirebase(email, password, firebaseUid);
         }
       } else {
@@ -756,7 +692,6 @@ class AuthMethods {
     }
   }
 
-  // Helper method for Firebase login
   Future<String> _loginWithFirebase(
     String email,
     String password,
@@ -768,9 +703,7 @@ class AuthMethods {
         password: password,
       );
 
-      if (firebaseCred.user == null) {
-        return "Login failed";
-      }
+      if (firebaseCred.user == null) return "Login failed";
 
       final firebaseUid = firebaseCred.user!.uid;
 
@@ -779,9 +712,7 @@ class AuthMethods {
       }
 
       final needsMigration = await this.needsMigration(firebaseUid);
-      if (needsMigration) {
-        return "needs_migration";
-      }
+      if (needsMigration) return "needs_migration";
 
       return await _checkOnboardingStatus(firebaseUid);
     } on firebase_auth.FirebaseAuthException catch (e) {
@@ -801,7 +732,6 @@ class AuthMethods {
     }
   }
 
-  // Check onboarding status (Firebase)
   Future<String> _checkOnboardingStatus(String uid) async {
     try {
       final List<dynamic> userRecords = await _supabase
@@ -813,7 +743,6 @@ class AuthMethods {
       if (userRecords.isEmpty) return "onboarding_required";
 
       final Map<String, dynamic> data = userRecords[0];
-
       final hasCompletedOnboarding = data['onboardingComplete'] == true ||
           (data['username'] != null &&
               data['username'].toString().isNotEmpty &&
@@ -827,9 +756,6 @@ class AuthMethods {
     }
   }
 
-  // ----------------------
-  // Helper to make firebase auth error messages readable
-  // ----------------------
   String _handleFirebaseAuthError(firebase_auth.FirebaseAuthException e) {
     switch (e.code) {
       case 'account-exists-with-different-credential':
@@ -849,9 +775,9 @@ class AuthMethods {
     }
   }
 
-  // ----------------------
-  // Google sign-in (Firebase auth) - sets migrated = false
-  // ----------------------
+  // =============================================
+  // GOOGLE SIGN-IN (Firebase)
+  // =============================================
   Future<String> signInWithGoogle() async {
     try {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
@@ -873,10 +799,7 @@ class AuthMethods {
       final String? userEmail = cred.user!.email;
 
       final needsMigration = await this.needsMigration(userId);
-
-      if (needsMigration) {
-        return "needs_migration";
-      }
+      if (needsMigration) return "needs_migration";
 
       final List<dynamic> res = await _supabase
           .from('users')
@@ -899,18 +822,15 @@ class AuthMethods {
             'dateOfBirth': null,
             'gender': null,
             'isVerified': false,
-            'blockedUsers': jsonEncode([]),
+            'blockedUsers': <dynamic>[],
             'country': null,
             'migrated': false,
           });
-        } catch (e) {
-          // Error creating user record
-        }
+        } catch (e) {}
         return "onboarding_required";
       }
 
       final Map<String, dynamic> data = res[0];
-
       final hasCompletedOnboarding = data['onboardingComplete'] == true ||
           (data['username'] != null &&
               data['username'].toString().isNotEmpty &&
@@ -926,13 +846,12 @@ class AuthMethods {
     }
   }
 
-  // ----------------------
-  // Apple sign-in (Firebase auth) - sets migrated = false
-  // ----------------------
+  // =============================================
+  // APPLE SIGN-IN (Firebase)
+  // =============================================
   Future<String> signInWithApple() async {
     String? rawNonce;
     String? hashedNonce;
-    String? identityToken;
 
     try {
       rawNonce = _generateRawNonce();
@@ -943,8 +862,7 @@ class AuthMethods {
         nonce: hashedNonce,
       );
 
-      identityToken = appleCredential.identityToken;
-
+      final identityToken = appleCredential.identityToken;
       final oauthProvider = firebase_auth.OAuthProvider('apple.com');
       final oauthCredential = oauthProvider.credential(
         idToken: identityToken,
@@ -979,21 +897,16 @@ class AuthMethods {
             'dateOfBirth': null,
             'gender': null,
             'isVerified': false,
-            'blockedUsers': jsonEncode([]),
+            'blockedUsers': <dynamic>[],
             'country': null,
             'migrated': false,
           });
-        } catch (e) {
-          // Error creating user record
-        }
+        } catch (e) {}
         return "onboarding_required";
       }
 
       final Map<String, dynamic> data = res[0];
-
-      if (data['migrated'] != true) {
-        return "needs_migration";
-      }
+      if (data['migrated'] != true) return "needs_migration";
 
       final hasCompletedOnboarding = data['onboardingComplete'] == true ||
           (data['username'] != null &&
@@ -1009,14 +922,14 @@ class AuthMethods {
           : "Apple sign-in failed: ${e.message}";
     } on firebase_auth.FirebaseAuthException catch (e) {
       return _handleFirebaseAuthError(e);
-    } catch (e, st) {
+    } catch (e) {
       return "Unexpected error: ${e.toString()}";
     }
   }
 
-  // ----------------------
-  // Get current user's migration status
-  // ----------------------
+  // =============================================
+  // MIGRATION STATUS
+  // =============================================
   Future<Map<String, dynamic>> getCurrentUserMigrationStatus() async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -1040,7 +953,6 @@ class AuthMethods {
       }
 
       final isMigrated = result[0]['migrated'] == true;
-
       return {
         'needs_migration': !isMigrated,
         'reason': isMigrated ? 'already_migrated' : 'needs_migration',
@@ -1058,16 +970,11 @@ class AuthMethods {
     }
   }
 
-  // ----------------------
-  // Get Google credential for reauthentication (for account deletion)
-  // ----------------------
   Future<firebase_auth.OAuthCredential?> getCurrentUserCredential() async {
     try {
       final GoogleSignInAccount? googleUser =
           await _googleSignIn.signInSilently();
-      if (googleUser == null) {
-        return null;
-      }
+      if (googleUser == null) return null;
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
       return firebase_auth.GoogleAuthProvider.credential(
@@ -1079,38 +986,65 @@ class AuthMethods {
     }
   }
 
-  // ----------------------
-  // Sign out from all services
-  // ----------------------
   Future<void> signOut() async {
     await _auth.signOut();
     await _googleSignIn.signOut();
     try {
       await _supabase.auth.signOut();
-    } catch (e) {
-      // Supabase sign out error
-    }
+    } catch (e) {}
   }
 
-  // ----------------------
-  // Method to check country
-  // ----------------------
   Future<void> checkCountryPeriodically() async {
     await _countryService.checkAndUpdateCountryIfNeeded();
   }
 
-  // ----------------------
-  // Backfill country for existing users
-  // ----------------------
   Future<void> backfillCountryForExistingUsers() async {
     await _countryService.checkAndBackfillCountryForExistingUsers();
   }
 
   // =============================================
-  // UTILITY METHODS
+  // UTILITY
   // =============================================
 
-  // Generic helper to normalise various supabase returns
+  /// Sanitizes blockedUsers field from any format to a proper List.
+  /// Handles: null, List, """[]""", "[]", etc.
+  static Map<String, dynamic> _sanitizeBlockedUsers(Map<String, dynamic> raw) {
+    final data = Map<String, dynamic>.from(raw);
+    final val = data['blockedUsers'];
+
+    if (val == null || val is List) {
+      data['blockedUsers'] = val ?? <dynamic>[];
+    } else if (val is String) {
+      String cleaned = val.trim();
+      // Unwrap nested JSON string encoding
+      while (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+        try {
+          final decoded = jsonDecode(cleaned);
+          if (decoded is List) {
+            data['blockedUsers'] = decoded;
+            return data;
+          } else if (decoded is String) {
+            cleaned = decoded.trim();
+          } else {
+            break;
+          }
+        } catch (_) {
+          cleaned = cleaned.substring(1, cleaned.length - 1);
+        }
+      }
+      try {
+        final decoded = jsonDecode(cleaned);
+        data['blockedUsers'] = decoded is List ? decoded : <dynamic>[];
+      } catch (_) {
+        data['blockedUsers'] = <dynamic>[];
+      }
+    } else {
+      data['blockedUsers'] = <dynamic>[];
+    }
+
+    return data;
+  }
+
   static dynamic _unwrapSupabaseResponse(dynamic res) {
     try {
       if (res == null) return null;
@@ -1120,7 +1054,6 @@ class AuthMethods {
     return res;
   }
 
-  // User relational queries (Supabase)
   Future<List<String>> getUserFollowers(String uid) async {
     try {
       final dynamic res = await _supabase
@@ -1129,7 +1062,6 @@ class AuthMethods {
           .eq('user_id', uid);
 
       final dynamic data = _unwrapSupabaseResponse(res) ?? res;
-
       if (data is List) {
         return data
             .map<String>(
@@ -1139,9 +1071,8 @@ class AuthMethods {
       } else if (data is Map) {
         final id = (data['follower_id'] ?? data['followerId'])?.toString();
         return id != null ? [id] : [];
-      } else {
-        return [];
       }
+      return [];
     } catch (e) {
       return [];
     }
@@ -1155,7 +1086,6 @@ class AuthMethods {
           .eq('user_id', uid);
 
       final dynamic data = _unwrapSupabaseResponse(res) ?? res;
-
       if (data is List) {
         return data
             .map<String>((e) =>
@@ -1165,9 +1095,8 @@ class AuthMethods {
       } else if (data is Map) {
         final id = (data['following_id'] ?? data['followingId'])?.toString();
         return id != null ? [id] : [];
-      } else {
-        return [];
       }
+      return [];
     } catch (e) {
       return [];
     }
@@ -1181,7 +1110,6 @@ class AuthMethods {
           .eq('user_id', uid);
 
       final dynamic data = _unwrapSupabaseResponse(res) ?? res;
-
       if (data is List) {
         return data
             .map<String>((e) =>
@@ -1191,15 +1119,14 @@ class AuthMethods {
       } else if (data is Map) {
         final id = (data['requester_id'] ?? data['requesterId'])?.toString();
         return id != null ? [id] : [];
-      } else {
-        return [];
       }
+      return [];
     } catch (e) {
       return [];
     }
   }
 
-  // ✅ MIGRATION METHOD (email/password migration)
+  // ✅ MIGRATION METHOD (email/password)
   Future<String> migrateUser({
     required String email,
     required String newPassword,
@@ -1207,29 +1134,19 @@ class AuthMethods {
   }) async {
     try {
       final firebaseUser = _auth.currentUser;
-      if (firebaseUser == null) {
-        return "User not logged in. Please log in first.";
-      }
-
-      if (firebaseUser.uid != firebaseUid) {
+      if (firebaseUser == null) return "User not logged in. Please log in first.";
+      if (firebaseUser.uid != firebaseUid)
         return "UID mismatch. Please log in with the correct account.";
-      }
-
-      if (firebaseUser.email != email) {
+      if (firebaseUser.email != email)
         return "Email mismatch. Please log in with the correct account.";
-      }
 
       final AuthResponse response = await _supabase.auth.signUp(
         email: email,
         password: newPassword,
-        data: {
-          'firebase_uid': firebaseUid,
-        },
+        data: {'firebase_uid': firebaseUid},
       );
 
-      if (response.user == null) {
-        return "Failed to create Supabase account";
-      }
+      if (response.user == null) return "Failed to create Supabase account";
 
       await _supabase.from('users').update({
         'migrated': true,
@@ -1251,9 +1168,8 @@ class AuthMethods {
               'supabase_uid': signInResponse.user!.id,
             }).eq('uid', firebaseUid);
             return "success";
-          } else {
-            return "Account exists but could not sign in. Please try a different password.";
           }
+          return "Account exists but could not sign in. Please try a different password.";
         } catch (signInError) {
           return "Account exists but could not sign in. Please try a different password or contact support.";
         }
