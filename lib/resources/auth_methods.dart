@@ -779,54 +779,173 @@ class AuthMethods {
   // GOOGLE SIGN-IN (Firebase)
   // =============================================
   Future<String> signInWithGoogle() async {
-    try {
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return "cancelled";
+  try {
+    // 1. Get Google account
+    final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+    if (googleUser == null) {
+      await _logError(
+        eventType: 'GOOGLE_SIGNIN_CANCELLED',
+        email: googleUser?.email,
+      );
+      return "cancelled";
+    }
 
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
+    final GoogleSignInAuthentication googleAuth =
+        await googleUser.authentication;
+    final String email = googleUser.email;
+    final String? idToken = googleAuth.idToken;
+    final String? accessToken = googleAuth.accessToken;
 
-      final firebase_auth.OAuthCredential credential =
-          firebase_auth.GoogleAuthProvider.credential(
-        idToken: googleAuth.idToken,
-        accessToken: googleAuth.accessToken,
+    if (idToken == null) {
+      await _logError(
+        eventType: 'GOOGLE_SIGNIN_NO_ID_TOKEN',
+        email: email,
+        errorDetails: 'ID token missing',
+      );
+      return "Google sign‑in failed: no ID token";
+    }
+
+    // Log start of decision process
+    await _logError(
+      eventType: 'GOOGLE_SIGNIN_START',
+      email: email,
+      additionalData: {'has_id_token': true},
+    );
+
+    // 2. Query Supabase users by email
+    final List<dynamic> userRecords = await _supabase
+        .from('users')
+        .select('uid, migrated, supabase_uid')
+        .eq('email', email);
+
+    await _logError(
+      eventType: 'GOOGLE_SIGNIN_USER_LOOKUP',
+      email: email,
+      additionalData: {
+        'records_found': userRecords.length,
+        'records': userRecords.map((r) {
+          return {
+            'uid': r['uid'],
+            'migrated': r['migrated'],
+            'supabase_uid': r['supabase_uid'],
+          };
+        }).toList(),
+      },
+    );
+
+    // 3. Check for a Supabase Auth user (has supabase_uid)
+    final supabaseUserRecord = userRecords.firstWhere(
+      (record) => record['supabase_uid'] != null,
+      orElse: () => null,
+    );
+
+    if (supabaseUserRecord != null) {
+      // User exists in Supabase Auth → use Supabase sign‑in
+      await _logError(
+        eventType: 'GOOGLE_SIGNIN_SUPABASE_USER',
+        email: email,
+        additionalData: {
+          'uid': supabaseUserRecord['uid'],
+          'supabase_uid': supabaseUserRecord['supabase_uid'],
+        },
       );
 
-      final firebase_auth.UserCredential cred =
-          await _auth.signInWithCredential(credential);
+      final AuthResponse response = await _supabase.auth.signInWithIdToken(
+        provider: OAuthProvider.google,
+        idToken: idToken,
+        accessToken: accessToken,
+      );
+      if (response.user == null) {
+        await _logError(
+          eventType: 'GOOGLE_SIGNIN_SUPABASE_FAILED',
+          email: email,
+          errorDetails: 'Supabase signInWithIdToken returned null user',
+        );
+        return "Supabase sign‑in failed";
+      }
+
+      // Success – now check onboarding
+      return await _checkSupabaseUserOnboarding();
+    }
+
+    // 4. Check for a Firebase user (migrated == false)
+    final firebaseUserRecord = userRecords.firstWhere(
+      (record) => record['migrated'] == false,
+      orElse: () => null,
+    );
+
+    if (firebaseUserRecord != null) {
+      // Use Firebase sign‑in
+      await _logError(
+        eventType: 'GOOGLE_SIGNIN_FIREBASE_USER',
+        email: email,
+        additionalData: {
+          'uid': firebaseUserRecord['uid'],
+        },
+      );
+
+      final credential = firebase_auth.GoogleAuthProvider.credential(
+        idToken: idToken,
+        accessToken: accessToken,
+      );
+      final firebase_auth.UserCredential cred;
+      try {
+        cred = await _auth.signInWithCredential(credential);
+      } on firebase_auth.FirebaseAuthException catch (e) {
+        await _logError(
+          eventType: 'GOOGLE_SIGNIN_FIREBASE_ERROR',
+          email: email,
+          errorDetails: e.message,
+          stackTrace: e.stackTrace?.toString(),
+        );
+        return _handleFirebaseAuthError(e);
+      }
 
       final String userId = cred.user!.uid;
-      final String? userEmail = cred.user!.email;
 
+      // Check if migration is needed
       final needsMigration = await this.needsMigration(userId);
-      if (needsMigration) return "needs_migration";
+      if (needsMigration) {
+        await _logError(
+          eventType: 'GOOGLE_SIGNIN_FIREBASE_NEEDS_MIGRATION',
+          email: email,
+          firebaseUid: userId,
+        );
+        return "needs_migration";
+      }
 
+      // Check onboarding status
       final List<dynamic> res = await _supabase
           .from('users')
-          .select(
-              'username, "dateOfBirth", gender, "onboardingComplete", migrated')
+          .select('username, dateOfBirth, gender, onboardingComplete')
           .eq('uid', userId)
           .limit(1);
 
       if (res.isEmpty) {
-        try {
-          await _supabase.from('users').upsert({
-            'uid': userId,
-            'email': userEmail,
-            'username': '',
-            'bio': '',
-            'photoUrl': 'default',
-            'isPrivate': false,
-            'onboardingComplete': false,
-            'createdAt': DateTime.now().toIso8601String(),
-            'dateOfBirth': null,
-            'gender': null,
-            'isVerified': false,
-            'blockedUsers': <dynamic>[],
-            'country': null,
-            'migrated': false,
-          });
-        } catch (e) {}
+        // Should not happen because we found a record, but create one if missing
+        await _logError(
+          eventType: 'GOOGLE_SIGNIN_FIREBASE_RECORD_MISSING',
+          email: email,
+          firebaseUid: userId,
+          errorDetails: 'User record missing after Firebase sign-in, recreating',
+        );
+
+        await _supabase.from('users').upsert({
+          'uid': userId,
+          'email': email,
+          'username': '',
+          'bio': '',
+          'photoUrl': 'default',
+          'isPrivate': false,
+          'onboardingComplete': false,
+          'createdAt': DateTime.now().toIso8601String(),
+          'dateOfBirth': null,
+          'gender': null,
+          'isVerified': false,
+          'blockedUsers': <dynamic>[],
+          'country': null,
+          'migrated': false,
+        }, onConflict: 'uid');
         return "onboarding_required";
       }
 
@@ -838,13 +957,65 @@ class AuthMethods {
               data['gender'] != null &&
               data['gender'].toString().isNotEmpty);
 
+      await _logError(
+        eventType: 'GOOGLE_SIGNIN_FIREBASE_SUCCESS',
+        email: email,
+        firebaseUid: userId,
+        onboardingComplete: hasCompletedOnboarding,
+      );
+
       return hasCompletedOnboarding ? "success" : "onboarding_required";
-    } on firebase_auth.FirebaseAuthException catch (e) {
-      return _handleFirebaseAuthError(e);
-    } catch (e) {
-      return "Google sign-in failed: ${e.toString()}";
     }
+
+    // 5. No existing user → sign up with Supabase (new user)
+    await _logError(
+      eventType: 'GOOGLE_SIGNIN_NEW_USER',
+      email: email,
+      additionalData: {'action': 'create_supabase_user'},
+    );
+
+    final AuthResponse response = await _supabase.auth.signInWithIdToken(
+      provider: OAuthProvider.google,
+      idToken: idToken,
+      accessToken: accessToken,
+    );
+    if (response.user == null) {
+      await _logError(
+        eventType: 'GOOGLE_SIGNIN_NEW_USER_FAILED',
+        email: email,
+        errorDetails: 'Supabase signInWithIdToken returned null user',
+      );
+      return "Supabase sign‑up failed";
+    }
+
+    // The _checkSupabaseUserOnboarding method will create the user record if needed
+    return await _checkSupabaseUserOnboarding();
+  } on firebase_auth.FirebaseAuthException catch (e, stack) {
+    await _logError(
+      eventType: 'GOOGLE_SIGNIN_FIREBASE_EXCEPTION',
+      email: googleUser?.email,
+      errorDetails: e.message,
+      stackTrace: stack.toString(),
+    );
+    return _handleFirebaseAuthError(e);
+  } on AuthException catch (e, stack) {
+    await _logError(
+      eventType: 'GOOGLE_SIGNIN_SUPABASE_EXCEPTION',
+      email: googleUser?.email,
+      errorDetails: e.message,
+      stackTrace: stack.toString(),
+    );
+    return "Supabase auth error: ${e.message}";
+  } catch (e, stack) {
+    await _logError(
+      eventType: 'GOOGLE_SIGNIN_UNEXPECTED_ERROR',
+      email: googleUser?.email,
+      errorDetails: e.toString(),
+      stackTrace: stack.toString(),
+    );
+    return "Google sign‑in failed: ${e.toString()}";
   }
+}
 
   // =============================================
   // APPLE SIGN-IN (Firebase)
