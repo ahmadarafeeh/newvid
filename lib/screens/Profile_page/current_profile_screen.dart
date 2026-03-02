@@ -1,4 +1,4 @@
-// lib/screens/Profile_page/profile_page.dart
+// lib/screens/Profile_page/current_profile_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:Ratedly/utils/utils.dart';
@@ -15,7 +15,6 @@ import 'package:flutter/gestures.dart';
 import 'package:Ratedly/screens/Profile_page/gallery_detail_screen.dart';
 import 'package:country_flags/country_flags.dart';
 
-// Define color schemes for both themes at top level (same as in feed_screen)
 class _ColorSet {
   final Color textColor;
   final Color backgroundColor;
@@ -50,7 +49,6 @@ class _LightColors extends _ColorSet {
         );
 }
 
-// Reusable flag widget
 class CountryFlagWidget extends StatelessWidget {
   final String countryCode;
   final double width;
@@ -69,19 +67,13 @@ class CountryFlagWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool hasCountryFlag =
         countryCode.isNotEmpty && countryCode.length == 2;
-
-    if (!hasCountryFlag) {
-      return const SizedBox.shrink();
-    }
-
+    if (!hasCountryFlag) return const SizedBox.shrink();
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
       child: SizedBox(
         width: width,
         height: height,
-        child: CountryFlag.fromCountryCode(
-          countryCode,
-        ),
+        child: CountryFlag.fromCountryCode(countryCode),
       ),
     );
   }
@@ -113,36 +105,27 @@ class _ExpandableBioTextState extends State<ExpandableBioText> {
     final shouldTruncate = widget.text.length > widget.maxLength;
 
     if (!shouldTruncate || _isExpanded) {
-      return Text(
-        widget.text,
-        style: widget.style,
-      );
+      return Text(widget.text, style: widget.style);
     }
 
     final truncatedText = widget.text.substring(0, widget.maxLength);
 
     return RichText(
-        text: TextSpan(
-      children: [
-        TextSpan(
-          text: '$truncatedText... ',
-          style: widget.style,
-        ),
-        TextSpan(
-          text: 'more',
-          style: widget.style.copyWith(
-            color: widget.expandColor,
-            fontWeight: FontWeight.w600,
+      text: TextSpan(
+        children: [
+          TextSpan(text: '$truncatedText... ', style: widget.style),
+          TextSpan(
+            text: 'more',
+            style: widget.style.copyWith(
+              color: widget.expandColor,
+              fontWeight: FontWeight.w600,
+            ),
+            recognizer: TapGestureRecognizer()
+              ..onTap = () => setState(() => _isExpanded = true),
           ),
-          recognizer: TapGestureRecognizer()
-            ..onTap = () {
-              setState(() {
-                _isExpanded = true;
-              });
-            },
-        ),
-      ],
-    ));
+        ],
+      ),
+    );
   }
 }
 
@@ -171,20 +154,16 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   String errorMessage = '';
   final SupabaseProfileMethods _profileMethods = SupabaseProfileMethods();
 
-  // New gallery variables
   List<dynamic> _galleries = [];
   int _selectedTabIndex = 0;
 
-  // Video player controllers cache for posts
   final Map<String, VideoPlayerController> _videoControllers = {};
   final Map<String, bool> _videoControllersInitialized = {};
 
-  // Video player controller for profile picture
   VideoPlayerController? _profileVideoController;
   bool _isProfileVideoInitialized = false;
-  bool _isProfileVideoMuted = false; // Track mute state for profile video
+  bool _isProfileVideoMuted = false;
 
-  // Pagination variables
   List<dynamic> _displayedPosts = [];
   int _postsOffset = 0;
   final int _initialPostsLimit = 9;
@@ -193,19 +172,15 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   bool _isLoadingMore = false;
   bool _isFirstLoad = true;
 
-  // Scroll controller
   late ScrollController _scrollController;
 
-  // Helper method to get the appropriate color scheme
   _ColorSet _getColors(ThemeProvider themeProvider) {
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
     return isDarkMode ? _DarkColors() : _LightColors();
   }
 
-  // Helper method to check if a URL is a video
   bool _isVideoFile(String url) {
     if (url.isEmpty || url == 'default') return false;
-
     final lowerUrl = url.toLowerCase();
     return lowerUrl.endsWith('.mp4') ||
         lowerUrl.endsWith('.mov') ||
@@ -224,7 +199,6 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-
     _scrollController = ScrollController();
     _scrollController.addListener(_scrollListener);
     getData();
@@ -236,72 +210,51 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
     WidgetsBinding.instance.removeObserver(this);
     _scrollController.removeListener(_scrollListener);
     _scrollController.dispose();
-
-    // Dispose all video controllers
     for (final controller in _videoControllers.values) {
       controller.dispose();
     }
     _videoControllers.clear();
     _videoControllersInitialized.clear();
-
-    // Dispose profile video controller
     if (_profileVideoController != null) {
       _profileVideoController!.dispose();
       _profileVideoController = null;
     }
-
     super.dispose();
   }
 
-  // Handle app lifecycle changes
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
-      // App is going to background or losing focus
       _muteProfileVideo();
     } else if (state == AppLifecycleState.resumed) {
-      // App is coming back to foreground
       _unmuteProfileVideo();
     }
   }
 
-  // Mute profile video
   void _muteProfileVideo() {
     if (_profileVideoController != null && _isProfileVideoInitialized) {
       try {
         _profileVideoController!.setVolume(0.0);
-      } catch (e) {
-        // Handle error silently
-      }
+      } catch (_) {}
     }
   }
 
-  // Unmute profile video
   void _unmuteProfileVideo() {
     if (_profileVideoController != null && _isProfileVideoInitialized) {
       try {
         _profileVideoController!.setVolume(_isProfileVideoMuted ? 0.0 : 1.0);
-      } catch (e) {
-        // Handle error silently
-      }
+      } catch (_) {}
     }
   }
 
-  // Toggle profile video mute state
   void _toggleProfileVideoMute() {
     if (_profileVideoController != null && _isProfileVideoInitialized) {
-      setState(() {
-        _isProfileVideoMuted = !_isProfileVideoMuted;
-      });
-
+      setState(() => _isProfileVideoMuted = !_isProfileVideoMuted);
       try {
         _profileVideoController!.setVolume(_isProfileVideoMuted ? 0.0 : 1.0);
-      } catch (e) {
-        // Handle error silently
-      }
+      } catch (_) {}
     }
   }
 
@@ -312,69 +265,50 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         _hasMorePosts &&
         _selectedTabIndex == 0) {
       Future.delayed(const Duration(milliseconds: 15), () {
-        if (mounted) {
-          _loadMorePosts();
-        }
+        if (mounted) _loadMorePosts();
       });
     }
   }
 
-  // ========== PROFILE VIDEO HANDLING ==========
+  // ========== PROFILE VIDEO ==========
   Future<void> _initializeProfileVideo(String videoUrl) async {
     if (_profileVideoController != null) {
       await _profileVideoController!.dispose();
-      setState(() {
-        _profileVideoController = null;
-        _isProfileVideoInitialized = false;
-      });
+      if (mounted) {
+        setState(() {
+          _profileVideoController = null;
+          _isProfileVideoInitialized = false;
+        });
+      }
     }
-
     try {
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(videoUrl),
-        videoPlayerOptions: VideoPlayerOptions(
-          mixWithOthers: true,
-        ),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
       );
-
       await controller.initialize();
-      // Play with sound by default (volume 1.0)
       await controller.setVolume(1.0);
       await controller.setLooping(true);
       await controller.play();
-
       if (mounted) {
         setState(() {
           _profileVideoController = controller;
           _isProfileVideoInitialized = true;
-          _isProfileVideoMuted =
-              false; // Reset mute state when initializing new video
+          _isProfileVideoMuted = false;
         });
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isProfileVideoInitialized = false;
-        });
-      }
+    } catch (_) {
+      if (mounted) setState(() => _isProfileVideoInitialized = false);
     }
   }
 
   Widget _buildProfileVideoPlayer(_ColorSet colors) {
     if (_profileVideoController == null || !_isProfileVideoInitialized) {
       return Container(
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: colors.cardColor,
-        ),
-        child: Center(
-          child: CircularProgressIndicator(
-            color: colors.textColor,
-          ),
-        ),
+        decoration: BoxDecoration(shape: BoxShape.circle, color: colors.cardColor),
+        child: Center(child: CircularProgressIndicator(color: colors.textColor)),
       );
     }
-
     return Stack(
       children: [
         ClipOval(
@@ -391,7 +325,6 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
             ),
           ),
         ),
-        // Mute button overlay
         Positioned(
           top: 4,
           right: 4,
@@ -425,19 +358,11 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
       return CircleAvatar(
         radius: 40,
         backgroundColor: colors.cardColor,
-        child: Icon(
-          Icons.account_circle,
-          size: 80,
-          color: colors.textColor,
-        ),
+        child: Icon(Icons.account_circle, size: 80, color: colors.textColor),
       );
     }
+    if (isVideo) return _buildProfileVideoPlayer(colors);
 
-    if (isVideo) {
-      return _buildProfileVideoPlayer(colors);
-    }
-
-    // Regular image - use ClipOval instead of CircleAvatar to handle errors properly
     return ClipOval(
       child: Container(
         width: 80,
@@ -446,57 +371,39 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         child: Image.network(
           photoUrl,
           fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return Center(
-              child: Icon(
-                Icons.account_circle,
-                size: 80,
-                color: colors.textColor,
-              ),
-            );
-          },
+          errorBuilder: (_, __, ___) => Center(
+            child: Icon(Icons.account_circle, size: 80, color: colors.textColor),
+          ),
         ),
       ),
     );
   }
-  // ============================================
 
-  // ========== POST VIDEO HANDLING ==========
+  // ========== POST VIDEOS ==========
   Future<void> _initializeVideoController(String videoUrl) async {
     if (_videoControllers.containsKey(videoUrl) ||
-        _videoControllersInitialized[videoUrl] == true) {
-      return;
-    }
+        _videoControllersInitialized[videoUrl] == true) return;
 
     try {
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(videoUrl),
-        videoPlayerOptions: VideoPlayerOptions(
-          mixWithOthers: true,
-        ),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
       );
-
       _videoControllers[videoUrl] = controller;
       _videoControllersInitialized[videoUrl] = false;
 
       controller.addListener(() {
         if (controller.value.isInitialized &&
-            !_videoControllersInitialized[videoUrl]!) {
+            !(_videoControllersInitialized[videoUrl] ?? false)) {
           _videoControllersInitialized[videoUrl] = true;
-
-          // Configure loop for first second
           _configureVideoLoop(controller);
-
-          if (mounted) {
-            setState(() {});
-          }
+          if (mounted) setState(() {});
         }
       });
 
       await controller.initialize();
-      // KEEP muted for post videos (grid view)
       await controller.setVolume(0.0);
-    } catch (e) {
+    } catch (_) {
       _videoControllers.remove(videoUrl)?.dispose();
       _videoControllersInitialized.remove(videoUrl);
     }
@@ -506,42 +413,31 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
     final duration = controller.value.duration;
     final endPosition =
         duration.inSeconds > 0 ? const Duration(seconds: 1) : duration;
-
     controller.addListener(() {
       if (controller.value.isInitialized && controller.value.isPlaying) {
-        final currentPosition = controller.value.position;
-        if (currentPosition >= endPosition) {
+        if (controller.value.position >= endPosition) {
           controller.seekTo(Duration.zero);
         }
       }
     });
-
     controller.play();
   }
 
-  VideoPlayerController? _getVideoController(String videoUrl) {
-    return _videoControllers[videoUrl];
-  }
+  VideoPlayerController? _getVideoController(String videoUrl) =>
+      _videoControllers[videoUrl];
 
-  bool _isVideoControllerInitialized(String videoUrl) {
-    return _videoControllersInitialized[videoUrl] == true;
-  }
+  bool _isVideoControllerInitialized(String videoUrl) =>
+      _videoControllersInitialized[videoUrl] == true;
 
   Widget _buildPostVideoPlayer(String videoUrl, _ColorSet colors) {
     final controller = _getVideoController(videoUrl);
     final isInitialized = _isVideoControllerInitialized(videoUrl);
-
     if (!isInitialized || controller == null) {
       return Container(
         color: colors.cardColor,
-        child: Center(
-          child: CircularProgressIndicator(
-            color: colors.textColor,
-          ),
-        ),
+        child: Center(child: CircularProgressIndicator(color: colors.textColor)),
       );
     }
-
     return ClipRRect(
       borderRadius: BorderRadius.circular(4),
       child: Stack(
@@ -565,18 +461,12 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   Widget _buildGalleryVideoPlayer(String videoUrl, _ColorSet colors) {
     final controller = _getVideoController(videoUrl);
     final isInitialized = _isVideoControllerInitialized(videoUrl);
-
     if (!isInitialized || controller == null) {
       return Container(
         color: colors.cardColor,
-        child: Center(
-          child: CircularProgressIndicator(
-            color: colors.textColor,
-          ),
-        ),
+        child: Center(child: CircularProgressIndicator(color: colors.textColor)),
       );
     }
-
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: Stack(
@@ -600,24 +490,26 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   void _preInitializeVideoControllers(List<dynamic> posts) {
     for (final post in posts) {
       final postUrl = post['postUrl'] ?? '';
-      if (_isVideoFile(postUrl)) {
-        _initializeVideoController(postUrl);
-      }
+      if (_isVideoFile(postUrl)) _initializeVideoController(postUrl);
     }
   }
-  // =========================================
 
+  // ========== DATA FETCHING ==========
   Future<void> _fetchViewCount() async {
     try {
       final count = await _profileMethods.getProfileViewCount(widget.uid);
-      if (mounted) {
-        setState(() {
-          viewCount = count;
-        });
-      }
-    } catch (e) {}
+      if (mounted) setState(() => viewCount = count);
+    } catch (_) {}
   }
 
+  /// FIX: Previously used .single() which throws a PostgrestException when
+  /// 0 rows are found, crashing the entire Future.wait and showing
+  /// "Something went wrong". Now uses .maybeSingle() which returns null
+  /// on no match, letting us handle the case gracefully.
+  ///
+  /// Also removed the dependency on FirebaseAuth in ProfileScreen —
+  /// pure Supabase users have no Firebase session so currentUser was null,
+  /// causing a 500ms delay and potential misidentification of "my profile".
   Future<void> getData() async {
     if (!mounted) return;
 
@@ -628,12 +520,12 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
     });
 
     try {
-      // Get total post count
+      // Total post count
       final totalPostsResponse =
           await _supabase.from('posts').select('postId').eq('uid', widget.uid);
       final totalPostCount = totalPostsResponse.length;
 
-      // Get initial posts
+      // Initial posts batch
       final postsLimit =
           _isFirstLoad ? _initialPostsLimit : _subsequentPostsLimit;
       final initialPosts = await _supabase
@@ -643,35 +535,64 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
           .order('datePublished', ascending: false)
           .range(0, postsLimit - 1);
 
-      final List<Future<dynamic>> queries = [
-        _supabase.from('users').select().eq('uid', widget.uid).single(),
-        Future.value(initialPosts),
-        _supabase
-            .from('user_followers')
-            .select('follower_id, followed_at')
-            .eq('user_id', widget.uid),
-        _supabase
-            .from('user_following')
-            .select('following_id, followed_at')
-            .eq('user_id', widget.uid),
-        _supabase.from('galleries').select('''
+      // ✅ FIX: .maybeSingle() returns null instead of throwing when 0 rows found
+      final userResponse = await _supabase
+          .from('users')
+          .select()
+          .eq('uid', widget.uid)
+          .maybeSingle();
+
+      // ✅ FIX: Handle missing user gracefully instead of crashing
+      if (userResponse == null) {
+        // Log so we can investigate in Supabase
+        try {
+          await _supabase.from('login_logs').insert({
+            'event_type': 'PROFILE_USER_NOT_FOUND',
+            'firebase_uid': widget.uid,
+            'error_details': 'maybeSingle() returned null for uid: ${widget.uid}',
+          });
+        } catch (_) {}
+
+        if (mounted) {
+          setState(() {
+            hasError = true;
+            errorMessage = 'User profile not found';
+            isLoading = false;
+            _isFirstLoad = false;
+          });
+        }
+        return;
+      }
+
+      // Remaining queries in parallel — each wrapped so one failure
+      // cannot bring down the whole profile load
+      final followersResponse = await _supabase
+          .from('user_followers')
+          .select('follower_id, followed_at')
+          .eq('user_id', widget.uid)
+          .then<List>((v) => v)
+          .catchError((_) => <dynamic>[]);
+
+      final followingResponse = await _supabase
+          .from('user_following')
+          .select('following_id, followed_at')
+          .eq('user_id', widget.uid)
+          .then<List>((v) => v)
+          .catchError((_) => <dynamic>[]);
+
+      // ✅ FIX: Galleries query wrapped with catchError so a join/schema
+      // issue cannot crash the whole profile screen
+      final galleriesResponse = await _supabase
+          .from('galleries')
+          .select('''
             *,
             gallery_posts(count),
             posts!cover_post_id(postUrl)
-          ''').eq('uid', widget.uid).order('created_at', ascending: false),
-      ];
-
-      final results = await Future.wait(queries);
-
-      final userResponse = results[0];
-      final postsResponse = results[1] as List;
-      final followersResponse = results[2] as List;
-      final followingResponse = results[3] as List;
-      final galleriesResponse = results[4] as List;
-
-      if (userResponse.isEmpty) {
-        throw Exception('User data not found for UID: ${widget.uid}');
-      }
+          ''')
+          .eq('uid', widget.uid)
+          .order('created_at', ascending: false)
+          .then<List>((v) => v)
+          .catchError((_) => <dynamic>[]);
 
       // Initialize profile video if needed
       final photoUrl = userResponse['photoUrl'] ?? '';
@@ -679,8 +600,8 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         _initializeProfileVideo(photoUrl);
       }
 
-      // Pre-initialize video controllers for posts and galleries
-      _preInitializeVideoControllers(postsResponse);
+      // Pre-initialize video controllers for posts
+      _preInitializeVideoControllers(initialPosts);
       for (final gallery in galleriesResponse) {
         final coverImageUrl =
             gallery['posts'] != null ? gallery['posts']['postUrl'] ?? '' : '';
@@ -703,13 +624,23 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
           _followersList = processedData[0];
           _followingList = processedData[1];
           _galleries = galleriesResponse;
-          _displayedPosts = postsResponse;
-          _postsOffset = postsResponse.length;
-          _hasMorePosts = totalPostCount > postsResponse.length;
+          _displayedPosts = initialPosts;
+          _postsOffset = initialPosts.length;
+          _hasMorePosts = totalPostCount > initialPosts.length;
           _isFirstLoad = false;
         });
       }
     } catch (e, stackTrace) {
+      // Log the real error to Supabase so we can debug remotely
+      try {
+        await _supabase.from('login_logs').insert({
+          'event_type': 'PROFILE_LOAD_ERROR',
+          'firebase_uid': widget.uid,
+          'error_details': e.toString(),
+          'stack_trace': stackTrace.toString(),
+        });
+      } catch (_) {}
+
       if (mounted) {
         setState(() {
           hasError = true;
@@ -720,25 +651,20 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
             context, "Please try again or contact us at ratedly9@gmail.com");
       }
     } finally {
-      if (mounted) {
-        setState(() => isLoading = false);
-      }
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
   Future<void> _loadMorePosts() async {
     if (!_hasMorePosts || _isLoadingMore) return;
-
     setState(() => _isLoadingMore = true);
-
     try {
-      final postsLimit = _subsequentPostsLimit;
       final newPosts = await _supabase
           .from('posts')
           .select('postId, postUrl, description, datePublished, uid')
           .eq('uid', widget.uid)
           .order('datePublished', ascending: false)
-          .range(_postsOffset, _postsOffset + postsLimit - 1);
+          .range(_postsOffset, _postsOffset + _subsequentPostsLimit - 1);
 
       _preInitializeVideoControllers(newPosts);
 
@@ -749,33 +675,24 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
           _hasMorePosts = newPosts.length == _subsequentPostsLimit;
         });
       } else {
-        if (mounted) {
-          setState(() => _hasMorePosts = false);
-        }
+        if (mounted) setState(() => _hasMorePosts = false);
       }
     } catch (e) {
-      if (mounted) {
-        showSnackBar(context, 'Failed to load more posts');
-      }
+      if (mounted) showSnackBar(context, 'Failed to load more posts');
     } finally {
-      if (mounted) {
-        setState(() => _isLoadingMore = false);
-      }
+      if (mounted) setState(() => _isLoadingMore = false);
     }
   }
 
   Future<List<dynamic>> _processUserList(
       List<dynamic> userList, String idKey) async {
     if (userList.isEmpty) return [];
-
     final userIds = userList.map((user) => user[idKey] as String).toList();
     final usersData = await _supabase
         .from('users')
         .select('uid, username, photoUrl')
         .inFilter('uid', userIds);
-
     final userMap = {for (var user in usersData) user['uid'] as String: user};
-
     return userList
         .map((entry) {
           final userInfo = userMap[entry[idKey]];
@@ -793,57 +710,41 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   }
 
   void _navigateToSettings() {
-    // Mute video before navigation
     _muteProfileVideo();
-
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const SettingsScreen()),
     ).then((_) {
-      // Unmute when returning (after a small delay)
       Future.delayed(const Duration(milliseconds: 300), () {
-        if (mounted) {
-          _unmuteProfileVideo();
-        }
+        if (mounted) _unmuteProfileVideo();
       });
     });
   }
 
-  // Build username with flag
   Widget _buildUsernameWithFlag(
       String username, bool isVerified, String? countryCode, _ColorSet colors) {
     final bool hasCountryFlag = countryCode != null &&
         countryCode.isNotEmpty &&
         countryCode.length == 2;
-
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(username,
             style: TextStyle(
-              color: colors.textColor,
-              fontWeight: FontWeight.bold,
-            )),
+                color: colors.textColor, fontWeight: FontWeight.bold)),
         if (hasCountryFlag) ...[
           const SizedBox(width: 4),
-          CountryFlagWidget(
-            countryCode: countryCode!,
-            width: 16,
-            height: 12,
-          ),
+          CountryFlagWidget(countryCode: countryCode!),
         ],
         if (isVerified) ...[
           const SizedBox(width: 4),
-          Icon(
-            Icons.verified,
-            color: Colors.blue,
-            size: 16,
-          ),
+          const Icon(Icons.verified, color: Colors.blue, size: 16),
         ],
       ],
     );
   }
 
+  // ========== BUILD ==========
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
@@ -874,7 +775,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
           IconButton(
             icon: Icon(Icons.menu, color: colors.textColor),
             onPressed: _navigateToSettings,
-          )
+          ),
         ],
       ),
       backgroundColor: colors.backgroundColor,
@@ -923,19 +824,14 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.error_outline,
-            color: colors.textColor,
-            size: 64,
-          ),
+          Icon(Icons.error_outline, color: colors.textColor, size: 64),
           const SizedBox(height: 16),
           Text(
             'Something went wrong',
             style: TextStyle(
-              color: colors.textColor,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
+                color: colors.textColor,
+                fontSize: 18,
+                fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
           Text(
@@ -962,9 +858,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
       children: [
         SizedBox(
           height: 80,
-          child: Center(
-            child: _buildProfilePicture(colors),
-          ),
+          child: Center(child: _buildProfilePicture(colors)),
         ),
         Column(
           children: [
@@ -982,9 +876,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
               ),
             ),
             const SizedBox(height: 5),
-            Center(
-              child: _buildEditProfileButton(colors),
-            ),
+            Center(child: _buildEditProfileButton(colors)),
           ],
         ),
       ],
@@ -995,23 +887,16 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
       int value, String label, List<dynamic> userList, _ColorSet colors) {
     return GestureDetector(
       onTap: () {
-        // Mute video before navigation
         _muteProfileVideo();
-
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => UserListScreen(
-              title: label,
-              userEntries: userList,
-            ),
+            builder: (context) =>
+                UserListScreen(title: label, userEntries: userList),
           ),
         ).then((_) {
-          // Unmute when returning (after a small delay to ensure video is ready)
           Future.delayed(const Duration(milliseconds: 300), () {
-            if (mounted) {
-              _unmuteProfileVideo();
-            }
+            if (mounted) _unmuteProfileVideo();
           });
         });
       },
@@ -1022,27 +907,20 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   Widget _buildEditProfileButton(_ColorSet colors) {
     return ElevatedButton(
       onPressed: () async {
-        // Mute video before navigation
         _muteProfileVideo();
-
         final result = await Navigator.push(
           context,
           MaterialPageRoute(builder: (context) => const EditProfileScreen()),
         );
-
-        // Unmute when returning (after a small delay to ensure video is ready)
         Future.delayed(const Duration(milliseconds: 300), () {
-          if (mounted) {
-            _unmuteProfileVideo();
-          }
+          if (mounted) _unmuteProfileVideo();
         });
-
         if (result != null && mounted) {
           setState(() {
             userData['bio'] = result['bio'] ?? userData['bio'];
-            userData['photoUrl'] = result['photoUrl'] ?? userData['photoUrl'];
+            userData['photoUrl'] =
+                result['photoUrl'] ?? userData['photoUrl'];
           });
-
           await getData();
         }
       },
@@ -1075,7 +953,6 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
 
   Widget _buildBioSection(_ColorSet colors) {
     final String bio = userData['bio'] ?? '';
-
     return Align(
       alignment: Alignment.centerLeft,
       child: Column(
@@ -1102,9 +979,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   Widget _buildTabButtons(_ColorSet colors) {
     return Container(
       decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: colors.cardColor, width: 1),
-        ),
+        border: Border(bottom: BorderSide(color: colors.cardColor, width: 1)),
       ),
       child: Row(
         children: [
@@ -1115,9 +990,8 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
                 foregroundColor: _selectedTabIndex == 0
                     ? colors.textColor
                     : colors.textColor.withOpacity(0.5),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.zero,
-                ),
+                shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.zero),
               ),
               child: Column(
                 children: [
@@ -1137,10 +1011,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
                     ),
                   ),
                   if (_selectedTabIndex == 0)
-                    Container(
-                      height: 1,
-                      color: colors.textColor,
-                    ),
+                    Container(height: 1, color: colors.textColor),
                 ],
               ),
             ),
@@ -1152,9 +1023,8 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
                 foregroundColor: _selectedTabIndex == 1
                     ? colors.textColor
                     : colors.textColor.withOpacity(0.5),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.zero,
-                ),
+                shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.zero),
               ),
               child: Column(
                 children: [
@@ -1174,10 +1044,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
                     ),
                   ),
                   if (_selectedTabIndex == 1)
-                    Container(
-                      height: 1,
-                      color: colors.textColor,
-                    ),
+                    Container(height: 1, color: colors.textColor),
                 ],
               ),
             ),
@@ -1199,17 +1066,12 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         childAspectRatio: 0.8,
       ),
       itemBuilder: (context, index) {
-        if (index == 0) {
-          return _buildAddPostButton(colors);
-        }
-
+        if (index == 0) return _buildAddPostButton(colors);
         final postIndex = index - 1;
         if (postIndex < 0 || postIndex >= _displayedPosts.length) {
           return Container();
         }
-
-        final post = _displayedPosts[postIndex];
-        return _buildPostItem(post, colors);
+        return _buildPostItem(_displayedPosts[postIndex], colors);
       },
     );
   }
@@ -1217,25 +1079,17 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   Widget _buildAddPostButton(_ColorSet colors) {
     return GestureDetector(
       onTap: () {
-        // Mute video before navigation
         _muteProfileVideo();
-
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => AddPostScreen(
-              onPostUploaded: () async {
-                // Refresh data
-                await getData();
-              },
+              onPostUploaded: () async => getData(),
             ),
           ),
         ).then((_) {
-          // Unmute when returning (after a small delay to ensure video is ready)
           Future.delayed(const Duration(milliseconds: 300), () {
-            if (mounted) {
-              _unmuteProfileVideo();
-            }
+            if (mounted) _unmuteProfileVideo();
           });
         });
       },
@@ -1245,11 +1099,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
           borderRadius: BorderRadius.circular(4),
           color: colors.cardColor,
         ),
-        child: Icon(
-          Icons.add_circle_outline,
-          size: 40,
-          color: colors.textColor,
-        ),
+        child: Icon(Icons.add_circle_outline, size: 40, color: colors.textColor),
       ),
     );
   }
@@ -1260,16 +1110,10 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
 
     return GestureDetector(
       onTap: () {
-        // Pause any currently playing video before navigation
         for (final controller in _videoControllers.values) {
-          if (controller.value.isPlaying) {
-            controller.pause();
-          }
+          if (controller.value.isPlaying) controller.pause();
         }
-
-        // Mute profile video before navigation to ImageViewScreen
         _muteProfileVideo();
-
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -1280,19 +1124,13 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
               userId: post['uid']?.toString() ?? '',
               username: userData['username']?.toString() ?? '',
               profImage: userData['photoUrl']?.toString() ?? '',
-              onPostDeleted: () async {
-                // Refresh data when returning from deleted post
-                await getData();
-              },
+              onPostDeleted: () async => getData(),
               datePublished: post['datePublished']?.toString() ?? '',
             ),
           ),
         ).then((_) {
-          // Unmute when returning (after a small delay to ensure video is ready)
           Future.delayed(const Duration(milliseconds: 300), () {
-            if (mounted) {
-              _unmuteProfileVideo();
-            }
+            if (mounted) _unmuteProfileVideo();
           });
         });
       },
@@ -1309,16 +1147,11 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
                 child: Image.network(
                   postUrl,
                   fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      color: colors.cardColor,
-                      child: Icon(
-                        Icons.broken_image,
-                        color: colors.iconColor,
-                        size: 20,
-                      ),
-                    );
-                  },
+                  errorBuilder: (_, __, ___) => Container(
+                    color: colors.cardColor,
+                    child: Icon(Icons.broken_image,
+                        color: colors.iconColor, size: 20),
+                  ),
                 ),
               ),
       ),
@@ -1331,26 +1164,20 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         padding: const EdgeInsets.all(40.0),
         child: Column(
           children: [
-            Icon(
-              Icons.collections,
-              size: 64,
-              color: colors.textColor.withOpacity(0.5),
-            ),
+            Icon(Icons.collections,
+                size: 64, color: colors.textColor.withOpacity(0.5)),
             const SizedBox(height: 16),
             Text(
               'No Galleries Yet',
               style: TextStyle(
-                color: colors.textColor,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+                  color: colors.textColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(
               'Create your first gallery to organize your posts',
-              style: TextStyle(
-                color: colors.textColor.withOpacity(0.7),
-              ),
+              style: TextStyle(color: colors.textColor.withOpacity(0.7)),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
@@ -1378,17 +1205,12 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         childAspectRatio: 1,
       ),
       itemBuilder: (context, index) {
-        if (index == 0) {
-          return _buildAddGalleryButton(colors);
-        }
-
+        if (index == 0) return _buildAddGalleryButton(colors);
         final galleryIndex = index - 1;
         if (galleryIndex < 0 || galleryIndex >= _galleries.length) {
           return Container();
         }
-
-        final gallery = _galleries[galleryIndex];
-        return _buildGalleryItem(gallery, colors);
+        return _buildGalleryItem(_galleries[galleryIndex], colors);
       },
     );
   }
@@ -1405,18 +1227,13 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.add_photo_alternate,
-              size: 40,
-              color: colors.textColor.withOpacity(0.7),
-            ),
+            Icon(Icons.add_photo_alternate,
+                size: 40, color: colors.textColor.withOpacity(0.7)),
             const SizedBox(height: 8),
             Text(
               'New Gallery',
               style: TextStyle(
-                color: colors.textColor.withOpacity(0.7),
-                fontSize: 12,
-              ),
+                  color: colors.textColor.withOpacity(0.7), fontSize: 12),
             ),
           ],
         ),
@@ -1429,16 +1246,13 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         gallery['gallery_posts'] != null && gallery['gallery_posts'].isNotEmpty
             ? gallery['gallery_posts'][0]['count'] ?? 0
             : 0;
-
     final coverImageUrl =
         gallery['posts'] != null ? gallery['posts']['postUrl'] ?? '' : '';
     final isVideoCover = _isVideoFile(coverImageUrl);
 
     return GestureDetector(
       onTap: () {
-        // Mute video before navigation
         _muteProfileVideo();
-
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -1449,11 +1263,8 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
             ),
           ),
         ).then((_) {
-          // Unmute when returning
           Future.delayed(const Duration(milliseconds: 300), () {
-            if (mounted) {
-              _unmuteProfileVideo();
-            }
+            if (mounted) _unmuteProfileVideo();
           });
           getData();
         });
@@ -1474,19 +1285,15 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
                     : Image.network(
                         coverImageUrl,
                         fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(8),
-                              color: colors.cardColor.withOpacity(0.5),
-                            ),
-                            child: Icon(
-                              Icons.collections,
+                        errorBuilder: (_, __, ___) => Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            color: colors.cardColor.withOpacity(0.5),
+                          ),
+                          child: Icon(Icons.collections,
                               size: 40,
-                              color: colors.textColor.withOpacity(0.5),
-                            ),
-                          );
-                        },
+                              color: colors.textColor.withOpacity(0.5)),
+                        ),
                       ),
               )
             else
@@ -1495,11 +1302,8 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
                   borderRadius: BorderRadius.circular(8),
                   color: colors.cardColor.withOpacity(0.5),
                 ),
-                child: Icon(
-                  Icons.collections,
-                  size: 40,
-                  color: colors.textColor.withOpacity(0.5),
-                ),
+                child: Icon(Icons.collections,
+                    size: 40, color: colors.textColor.withOpacity(0.5)),
               ),
             Container(
               decoration: BoxDecoration(
@@ -1534,9 +1338,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
                       Text(
                         '$postCount ${postCount == 1 ? 'post' : 'posts'}',
                         style: TextStyle(
-                          color: Colors.white.withOpacity(0.8),
-                          fontSize: 12,
-                        ),
+                            color: Colors.white.withOpacity(0.8), fontSize: 12),
                       ),
                     ],
                   ),
@@ -1552,16 +1354,13 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   void _createNewGallery() {
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     final colors = _getColors(themeProvider);
-
     showDialog(
       context: context,
       builder: (context) {
         final TextEditingController nameController = TextEditingController();
         return AlertDialog(
-          title: Text(
-            'Create New Gallery',
-            style: TextStyle(color: colors.textColor),
-          ),
+          title:
+              Text('Create New Gallery', style: TextStyle(color: colors.textColor)),
           backgroundColor: colors.backgroundColor,
           content: TextField(
             controller: nameController,
@@ -1599,20 +1398,15 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         'uid': widget.uid,
         'name': name,
       }).select();
-
       if (mounted) {
-        setState(() {
-          _galleries = [response.first, ..._galleries];
-        });
+        setState(() => _galleries = [response.first, ..._galleries]);
       }
     } catch (e) {
-      if (mounted) {
-        showSnackBar(context, 'Failed to create gallery: $e');
-      }
+      if (mounted) showSnackBar(context, 'Failed to create gallery: $e');
     }
   }
 
-  // Skeleton widgets (keep your existing skeleton methods)
+  // ========== SKELETONS ==========
   Widget _buildProfileSkeleton(_ColorSet colors) {
     return SingleChildScrollView(
       controller: _scrollController,
@@ -1678,25 +1472,28 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   }
 
   Widget _buildMetricSkeleton(_ColorSet colors) {
-    return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Container(
-        height: 16,
-        width: 30,
-        decoration: BoxDecoration(
-          color: colors.cardColor.withOpacity(0.8),
-          borderRadius: BorderRadius.circular(4),
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          height: 16,
+          width: 30,
+          decoration: BoxDecoration(
+            color: colors.cardColor.withOpacity(0.8),
+            borderRadius: BorderRadius.circular(4),
+          ),
         ),
-      ),
-      const SizedBox(height: 6),
-      Container(
-        height: 12,
-        width: 50,
-        decoration: BoxDecoration(
-          color: colors.cardColor.withOpacity(0.6),
-          borderRadius: BorderRadius.circular(4),
+        const SizedBox(height: 6),
+        Container(
+          height: 12,
+          width: 50,
+          decoration: BoxDecoration(
+            color: colors.cardColor.withOpacity(0.6),
+            borderRadius: BorderRadius.circular(4),
+          ),
         ),
-      ),
-    ]);
+      ],
+    );
   }
 
   Widget _buildBioSectionSkeleton(_ColorSet colors) {
@@ -1756,59 +1553,12 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         mainAxisSpacing: 2,
         childAspectRatio: 0.8,
       ),
-      itemBuilder: (context, index) {
-        return Container(
-          margin: const EdgeInsets.all(1),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(4),
-            color: colors.cardColor.withOpacity(0.5),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildErrorWidgetSkeleton(_ColorSet colors) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: colors.cardColor.withOpacity(0.6),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            height: 20,
-            width: 200,
-            decoration: BoxDecoration(
-              color: colors.cardColor.withOpacity(0.5),
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            height: 16,
-            width: 150,
-            decoration: BoxDecoration(
-              color: colors.cardColor.withOpacity(0.4),
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            width: 100,
-            height: 40,
-            decoration: BoxDecoration(
-              color: colors.cardColor.withOpacity(0.6),
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        ],
+      itemBuilder: (context, index) => Container(
+        margin: const EdgeInsets.all(1),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(4),
+          color: colors.cardColor.withOpacity(0.5),
+        ),
       ),
     );
   }
