@@ -1,6 +1,6 @@
 name: Ratedly
 description: A new Flutter project.
-version: 1.0.21+96
+version: 1.0.21+98
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
