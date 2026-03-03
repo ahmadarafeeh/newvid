@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'package:Ratedly/services/ads.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:Ratedly/providers/user_provider.dart';
 import 'package:Ratedly/resources/supabase_posts_methods.dart';
@@ -187,7 +186,6 @@ class ImageViewScreen extends StatefulWidget {
 
 class _ImageViewScreenState extends State<ImageViewScreen>
     with WidgetsBindingObserver {
-  // UPDATED: Changed from commentLen to _commentCount for consistency
   late int _commentCount;
   bool _isBlocked = false;
   bool _viewRecorded = false;
@@ -205,7 +203,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
   bool _isLoadingRatings = true;
   late RealtimeChannel _postChannel;
 
-  // ADDED: Comment realtime channels
+  // Comment realtime channels
   late RealtimeChannel _commentsChannel;
   late RealtimeChannel _repliesChannel;
 
@@ -216,11 +214,10 @@ class _ImageViewScreenState extends State<ImageViewScreen>
   bool _isMuted = false;
   final VideoManager _videoManager = VideoManager();
 
-  // ========== VIDEO PLAYER CONTROLLER FOR PROFILE PICTURE ==========
+  // Video player for profile picture
   VideoPlayerController? _profileVideoController;
   bool _isProfileVideoInitialized = false;
-  bool _isProfileVideoMuted = true; // Muted by default as requested
-  // ================================================================
+  bool _isProfileVideoMuted = true;
 
   // Local ratings list
   late List<Map<String, dynamic>> _localRatings;
@@ -237,7 +234,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     'Misinformation',
   ];
 
-  // Check if URL is a video
   bool get _isVideo {
     final url = widget.imageUrl.toLowerCase();
     return url.endsWith('.mp4') ||
@@ -247,7 +243,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
         url.contains('video');
   }
 
-  // Check if profile image URL is a video
   bool get _isProfileVideo {
     final url = widget.profImage.toLowerCase();
     return url.isNotEmpty &&
@@ -259,10 +254,15 @@ class _ImageViewScreenState extends State<ImageViewScreen>
             url.contains('video'));
   }
 
-  // Get video playing state from VideoManager
   bool get _isVideoPlaying =>
       _videoController != null &&
       _videoManager.isCurrentlyPlaying(_videoController!);
+
+  // ✅ FIX: Uses UserProvider — works for both Firebase and Supabase users
+  bool get _isCurrentUserOwner {
+    final user = Provider.of<UserProvider>(context, listen: false).user;
+    return user != null && user.uid == widget.userId;
+  }
 
   @override
   void initState() {
@@ -270,12 +270,11 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     WidgetsBinding.instance.addObserver(this);
 
     _localRatings = [];
-    // UPDATED: Initialize comment count
     _commentCount = 0;
     _fetchCommentsCount();
     _checkBlockStatus();
     _setupRealtime();
-    _setupCommentsRealtime(); // ADDED: Setup comment realtime
+    _setupCommentsRealtime();
     _fetchInitialRatings();
     _loadBannerAd();
     _recordView();
@@ -284,7 +283,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
       _initializeVideoPlayer();
     }
 
-    // Initialize profile video if needed
     if (_isProfileVideo) {
       _initializeProfileVideo();
     }
@@ -318,7 +316,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
       );
 
       await controller.initialize();
-      // Muted by default as requested
       await controller.setVolume(0.0);
       await controller.setLooping(true);
       await controller.play();
@@ -327,7 +324,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
         setState(() {
           _profileVideoController = controller;
           _isProfileVideoInitialized = true;
-          _isProfileVideoMuted = true; // Ensure it's muted
+          _isProfileVideoMuted = true;
         });
       }
     } catch (e) {
@@ -374,9 +371,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     if (_profileVideoController != null && _isProfileVideoInitialized) {
       try {
         _profileVideoController!.pause();
-      } catch (e) {
-        // Handle error silently
-      }
+      } catch (e) {}
     }
   }
 
@@ -384,16 +379,12 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     if (_profileVideoController != null && _isProfileVideoInitialized) {
       try {
         _profileVideoController!.play();
-      } catch (e) {
-        // Handle error silently
-      }
+      } catch (e) {}
     }
   }
   // ============================================
 
-  // ADDED: Setup realtime for comments and replies (same as PostCard)
   void _setupCommentsRealtime() {
-    // Comments channel
     _commentsChannel =
         Supabase.instance.client.channel('comments_${widget.postId}');
     _commentsChannel.onPostgresChanges(
@@ -410,7 +401,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
       },
     );
 
-    // Replies channel
     _repliesChannel =
         Supabase.instance.client.channel('replies_${widget.postId}');
     _repliesChannel.onPostgresChanges(
@@ -477,7 +467,8 @@ class _ImageViewScreenState extends State<ImageViewScreen>
             _totalRatingsCount++;
             _updateAverageRating();
 
-            final user = Provider.of<UserProvider>(context, listen: false).user;
+            final user =
+                Provider.of<UserProvider>(context, listen: false).user;
             if (user != null && newRecord['userid'] == user.uid) {
               _showSlider = false;
               _userRating = (newRecord['rating'] as num).toDouble();
@@ -492,7 +483,8 @@ class _ImageViewScreenState extends State<ImageViewScreen>
             if (index != -1) _localRatings[index] = newRecord;
             _updateAverageRating();
 
-            final user = Provider.of<UserProvider>(context, listen: false).user;
+            final user =
+                Provider.of<UserProvider>(context, listen: false).user;
             if (user != null && newRecord['userid'] == user.uid) {
               _userRating = (newRecord['rating'] as num).toDouble();
             }
@@ -506,7 +498,8 @@ class _ImageViewScreenState extends State<ImageViewScreen>
             _totalRatingsCount--;
             _updateAverageRating();
 
-            final user = Provider.of<UserProvider>(context, listen: false).user;
+            final user =
+                Provider.of<UserProvider>(context, listen: false).user;
             if (user != null && oldRecord['userid'] == user.uid) {
               _showSlider = true;
               _userRating = null;
@@ -659,7 +652,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     });
   }
 
-  // UPDATED: Video initialization
   void _initializeVideoPlayer() async {
     if (_isVideoLoading || _isVideoInitialized) return;
 
@@ -671,7 +663,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
       );
 
-      // ADD: Listener for video state changes
       _videoController!.addListener(_videoListener);
 
       await _videoController!.initialize();
@@ -683,7 +674,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
           _isVideoLoading = false;
         });
 
-        // AUTO-PLAY the video when it first opens
         _playVideo();
       }
     } catch (e) {
@@ -693,7 +683,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     }
   }
 
-  // UPDATED: Video listener
   void _videoListener() {
     if (!mounted) return;
 
@@ -703,13 +692,10 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     if (wasPlaying != isNowPlaying) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        setState(() {
-          // No state update needed for play button visibility
-        });
+        setState(() {});
       });
     }
 
-    // Handle video looping
     if (_videoController != null &&
         _videoController!.value.position == _videoController!.value.duration &&
         _videoController!.value.duration != Duration.zero) {
@@ -720,7 +706,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     }
   }
 
-  // UPDATED: Toggle video playback
   void _toggleVideoPlayback() {
     if (_isVideoPlaying) {
       _pauseVideo();
@@ -729,14 +714,12 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     }
   }
 
-  // UPDATED: Play video
   void _playVideo() {
     if (_videoController != null && _isVideoInitialized && mounted) {
       _videoManager.playVideo(_videoController!, widget.postId);
     }
   }
 
-  // UPDATED: Pause video
   void _pauseVideo() {
     if (_videoController != null && _isVideoInitialized && mounted) {
       _videoManager.pauseVideo(_videoController!);
@@ -752,7 +735,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     }
   }
 
-  // ADDED: Proper video controller disposal
   void _disposeVideoController() {
     if (_videoController != null) {
       _videoController!.removeListener(_videoListener);
@@ -762,7 +744,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     _isVideoInitialized = false;
   }
 
-  // ADDED: Dispose profile video controller
   void _disposeProfileVideoController() {
     if (_profileVideoController != null) {
       _profileVideoController!.dispose();
@@ -778,7 +759,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     _disposeProfileVideoController();
     _bannerAd?.dispose();
     _postChannel.unsubscribe();
-    // ADDED: Unsubscribe from comment channels
     _commentsChannel.unsubscribe();
     _repliesChannel.unsubscribe();
     super.dispose();
@@ -803,7 +783,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     ).load();
   }
 
-  // Helper method to get the appropriate color scheme
   _ImageViewColorSet _getColors(ThemeProvider themeProvider) {
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
     return isDarkMode ? _ImageViewDarkColors() : _ImageViewLightColors();
@@ -816,7 +795,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     return null;
   }
 
-  // ADDED: Helper method to count items (same as PostCard)
   int _countItems(dynamic value) {
     try {
       if (value == null) return 0;
@@ -828,7 +806,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     }
   }
 
-  // UPDATED: Comment count method to match PostCard implementation
   Future<void> _fetchCommentsCount() async {
     try {
       final commentsResponse = await Supabase.instance.client
@@ -843,7 +820,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
 
       final int commentsCount = _countItems(commentsResponse);
       final int repliesCount = _countItems(repliesResponse);
-
       final int totalCount = commentsCount + repliesCount;
 
       if (mounted) {
@@ -872,12 +848,9 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     if (mounted) setState(() => _isBlocked = isBlocked);
   }
 
-  // UPDATED: Delete post with loading indicator overlay
   void deletePost(String postId) async {
-    // First close the delete options dialog
     Navigator.of(context).pop();
 
-    // Then show loading indicator
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -885,7 +858,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
         final colors =
             _getColors(Provider.of<ThemeProvider>(context, listen: false));
         return WillPopScope(
-          onWillPop: () async => false, // Prevent back button during deletion
+          onWillPop: () async => false,
           child: Dialog(
             backgroundColor: colors.dialogBackgroundColor,
             child: Padding(
@@ -916,18 +889,13 @@ class _ImageViewScreenState extends State<ImageViewScreen>
       await _postsMethods.deletePost(postId);
 
       if (mounted) {
-        // Close loading dialog
         Navigator.of(context).pop();
-        // Notify parent about deletion
         widget.onPostDeleted?.call();
-        // Close the image view screen
         Navigator.of(context).pop();
       }
     } catch (err) {
       if (mounted) {
-        // Close loading dialog
         Navigator.of(context).pop();
-        // Show error message
         showSnackBar(context, 'Failed to delete post: $err');
       }
     }
@@ -1010,7 +978,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     );
   }
 
-  // ADDED: Comment button matching PostCard styling
   Widget _buildCommentButton(_ImageViewColorSet colors) {
     return Stack(
       clipBehavior: Clip.none,
@@ -1058,17 +1025,16 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     }
   }
 
-  // UPDATED: Video player with pause button removed
   Widget _buildVideoPlayer(_ImageViewColorSet colors) {
     return AspectRatio(
       aspectRatio:
           _isVideoInitialized ? _videoController!.value.aspectRatio : 1,
       child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: 600, // Maximum height for videos
+        constraints: const BoxConstraints(
+          maxHeight: 600,
         ),
         child: GestureDetector(
-          onTap: _toggleVideoPlayback, // Tap anywhere to toggle play/pause
+          onTap: _toggleVideoPlayback,
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -1088,7 +1054,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        // Icon instead of spinner
                         Icons.videocam,
                         color: Colors.grey[300]!,
                         size: 24,
@@ -1105,7 +1070,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                       children: [
                         Icon(Icons.videocam,
                             size: 50, color: colors.errorIconColor),
-                        SizedBox(height: 8),
+                        const SizedBox(height: 8),
                         Text(
                           'Video not available',
                           style: TextStyle(color: colors.errorIconColor),
@@ -1114,10 +1079,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                     ),
                   ),
                 ),
-
-              // REMOVED: The persistent pause button overlay
-
-              // Mute button stays in video overlay for ImageViewScreen
               if (_isVideoInitialized)
                 Positioned(
                   bottom: 16,
@@ -1127,7 +1088,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                     child: Container(
                       width: 36,
                       height: 36,
-                      decoration: BoxDecoration(
+                      decoration: const BoxDecoration(
                         color: Colors.black54,
                         shape: BoxShape.circle,
                       ),
@@ -1165,7 +1126,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                 height: 250,
                 child: Center(
                   child: Container(
-                    // Skeleton instead of spinner
                     color: colors.backgroundColor.withOpacity(0.1),
                   ),
                 ),
@@ -1183,9 +1143,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
         ));
   }
 
-  // UPDATED: Navigate to comments using the proper CommentsBottomSheet
   void _navigateToComments(_ImageViewColorSet colors) {
-    // Pause video before opening comments
     _pauseVideo();
     _pauseProfileVideo();
 
@@ -1198,7 +1156,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
         postImage: widget.imageUrl,
         isVideo: _isVideo,
         onClose: () {
-          // Resume profile video when returning
           _resumeProfileVideo();
         },
         videoController: _videoController,
@@ -1208,13 +1165,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     });
   }
 
-  // ADDED: Check if current user is the post owner
-  bool get _isCurrentUserOwner {
-    final user = Provider.of<UserProvider>(context, listen: false).user;
-    return user != null && user.uid == widget.userId;
-  }
-
-  // ADDED: Build rating summary widget with owner-only clickability
   Widget _buildRatingSummary(_ImageViewColorSet colors) {
     final containerContent = Container(
       decoration: BoxDecoration(
@@ -1224,7 +1174,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: _isLoadingRatings
           ? Container(
-              // Skeleton instead of spinner
               width: 120,
               height: 20,
               color: colors.backgroundColor.withOpacity(0.3),
@@ -1239,11 +1188,10 @@ class _ImageViewScreenState extends State<ImageViewScreen>
             ),
     );
 
-    // Only make it clickable if current user is the post owner
     if (_isCurrentUserOwner) {
       return InkWell(
         onTap: () {
-          _pauseVideo(); // Pause video before navigation
+          _pauseVideo();
           _pauseProfileVideo();
           Navigator.push(
             context,
@@ -1257,12 +1205,10 @@ class _ImageViewScreenState extends State<ImageViewScreen>
         child: containerContent,
       );
     } else {
-      // Non-owners see a non-clickable container
       return containerContent;
     }
   }
 
-  // ADDED: Build profile picture widget
   Widget _buildProfilePicture(_ImageViewColorSet colors) {
     final isDefault = widget.profImage.isEmpty || widget.profImage == 'default';
     final isVideo = !isDefault && _isProfileVideo;
@@ -1283,7 +1229,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
       return _buildProfileVideoPlayer(colors);
     }
 
-    // Regular image
     return CircleAvatar(
       radius: 21,
       backgroundColor: colors.avatarBackgroundColor,
@@ -1335,7 +1280,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
         iconTheme: IconThemeData(color: colors.appBarIconColor),
         backgroundColor: colors.appBarBackgroundColor,
         title: VerifiedUsernameWidget(
-          // UPDATED: Use VerifiedUsernameWidget here
           username: widget.username,
           uid: widget.userId,
           style: TextStyle(
@@ -1352,7 +1296,10 @@ class _ImageViewScreenState extends State<ImageViewScreen>
           IconButton(
             icon: Icon(Icons.more_vert, color: colors.appBarIconColor),
             onPressed: () {
-              if (FirebaseAuth.instance.currentUser?.uid == widget.userId) {
+              // ✅ FIX: Use _isCurrentUserOwner (UserProvider) instead of
+              // FirebaseAuth.instance.currentUser?.uid — which is null for
+              // Supabase-only users and always showed "Report Post" to owners.
+              if (_isCurrentUserOwner) {
                 showDialog(
                   context: context,
                   builder: (context) => Dialog(
@@ -1361,7 +1308,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shrinkWrap: true,
                       children: [
-                        // Show progress indicator if deleting, otherwise show delete button
                         if (_isDeleting)
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -1375,8 +1321,8 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                                 const SizedBox(width: 16),
                                 Text(
                                   'Deleting...',
-                                  style:
-                                      TextStyle(color: colors.dialogTextColor),
+                                  style: TextStyle(
+                                      color: colors.dialogTextColor),
                                 ),
                               ],
                             ),
@@ -1389,7 +1335,8 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                                   vertical: 12, horizontal: 16),
                               child: Text(
                                 'Delete',
-                                style: TextStyle(color: colors.dialogTextColor),
+                                style:
+                                    TextStyle(color: colors.dialogTextColor),
                               ),
                             ),
                           ),
@@ -1415,7 +1362,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                 children: [
                   GestureDetector(
                     onTap: () {
-                      // Pause both videos before navigating to profile
                       _pauseVideo();
                       _pauseProfileVideo();
                       Navigator.push(
@@ -1436,7 +1382,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                         children: [
                           GestureDetector(
                             onTap: () {
-                              // Pause both videos before navigating to profile
                               _pauseVideo();
                               _pauseProfileVideo();
                               Navigator.push(
@@ -1448,7 +1393,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                               );
                             },
                             child: VerifiedUsernameWidget(
-                              // UPDATED: Use VerifiedUsernameWidget here
                               username: widget.username,
                               uid: widget.userId,
                               style: TextStyle(
@@ -1506,12 +1450,11 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Row(
                       children: [
-                        // UPDATED: Use the new comment button
                         _buildCommentButton(colors),
                         IconButton(
                           icon: Icon(Icons.send, color: colors.iconColor),
                           onPressed: () {
-                            _pauseVideo(); // Pause video before sharing
+                            _pauseVideo();
                             _pauseProfileVideo();
                             showDialog(
                               context: context,
@@ -1523,7 +1466,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                           },
                         ),
                         const Spacer(),
-                        // UPDATED: Use the new owner-only clickable rating summary
                         _buildRatingSummary(colors),
                       ],
                     ),
