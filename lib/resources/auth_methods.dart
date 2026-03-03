@@ -779,20 +779,22 @@ class AuthMethods {
   // GOOGLE SIGN-IN (Firebase)
   // =============================================
   Future<String> signInWithGoogle() async {
+  String? email; // capture email for error logging
   try {
     // 1. Get Google account
     final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
     if (googleUser == null) {
       await _logError(
         eventType: 'GOOGLE_SIGNIN_CANCELLED',
-        email: googleUser?.email,
+        email: null,
       );
       return "cancelled";
     }
 
+    email = googleUser.email; // store for later use in catch
+
     final GoogleSignInAuthentication googleAuth =
         await googleUser.authentication;
-    final String email = googleUser.email;
     final String? idToken = googleAuth.idToken;
     final String? accessToken = googleAuth.accessToken;
 
@@ -993,7 +995,7 @@ class AuthMethods {
   } on firebase_auth.FirebaseAuthException catch (e, stack) {
     await _logError(
       eventType: 'GOOGLE_SIGNIN_FIREBASE_EXCEPTION',
-      email: googleUser?.email,
+      email: email,
       errorDetails: e.message,
       stackTrace: stack.toString(),
     );
@@ -1001,7 +1003,7 @@ class AuthMethods {
   } on AuthException catch (e, stack) {
     await _logError(
       eventType: 'GOOGLE_SIGNIN_SUPABASE_EXCEPTION',
-      email: googleUser?.email,
+      email: email,
       errorDetails: e.message,
       stackTrace: stack.toString(),
     );
@@ -1009,14 +1011,14 @@ class AuthMethods {
   } catch (e, stack) {
     await _logError(
       eventType: 'GOOGLE_SIGNIN_UNEXPECTED_ERROR',
-      email: googleUser?.email,
+      email: email,
       errorDetails: e.toString(),
       stackTrace: stack.toString(),
     );
     return "Google sign‑in failed: ${e.toString()}";
   }
 }
-
+    
   // =============================================
   // APPLE SIGN-IN (Firebase)
   // =============================================
