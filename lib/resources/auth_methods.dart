@@ -213,7 +213,6 @@ class AuthMethods {
           .limit(1);
 
       if (userRecords.isEmpty) {
-        // First time — create user record
         try {
           await _supabase.from('users').upsert({
             'uid': session.user.id,
@@ -297,7 +296,8 @@ class AuthMethods {
 
       String photoUrl = 'default';
       if (file != null) {
-        String fileName = 'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        String fileName =
+            'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
         photoUrl = await StorageMethods().uploadImageToSupabase(
           file,
           fileName,
@@ -587,7 +587,8 @@ class AuthMethods {
 
       String photoUrl = 'default';
       if (file != null) {
-        String fileName = 'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        String fileName =
+            'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
         photoUrl = await StorageMethods().uploadImageToSupabase(
           file,
           fileName,
@@ -771,7 +772,7 @@ class AuthMethods {
   }
 
   // =============================================
-  // GOOGLE SIGN-IN (Firebase)
+  // GOOGLE SIGN-IN (Firebase + Supabase)
   // =============================================
   Future<String> signInWithGoogle() async {
     String? email;
@@ -779,10 +780,7 @@ class AuthMethods {
       // 1. Get Google account
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
-        await _logError(
-          eventType: 'GOOGLE_SIGNIN_CANCELLED',
-          email: null,
-        );
+        await _logError(eventType: 'GOOGLE_SIGNIN_CANCELLED', email: null);
         return "cancelled";
       }
 
@@ -830,10 +828,12 @@ class AuthMethods {
       );
 
       // 3. Check for a Supabase Auth user (has supabase_uid)
-      final supabaseUserRecord = userRecords.firstWhere(
-        (record) => record['supabase_uid'] != null,
-        orElse: () => null,
-      );
+      // ✅ FIX: cast to nullable so orElse can return null
+      final Map<String, dynamic>? supabaseUserRecord =
+          userRecords.cast<Map<String, dynamic>?>().firstWhere(
+                (record) => record?['supabase_uid'] != null,
+                orElse: () => null,
+              );
 
       if (supabaseUserRecord != null) {
         await _logError(
@@ -863,18 +863,18 @@ class AuthMethods {
       }
 
       // 4. Check for a Firebase user (migrated == false)
-      final firebaseUserRecord = userRecords.firstWhere(
-        (record) => record['migrated'] == false,
-        orElse: () => null,
-      );
+      // ✅ FIX: cast to nullable so orElse can return null
+      final Map<String, dynamic>? firebaseUserRecord =
+          userRecords.cast<Map<String, dynamic>?>().firstWhere(
+                (record) => record?['migrated'] == false,
+                orElse: () => null,
+              );
 
       if (firebaseUserRecord != null) {
         await _logError(
           eventType: 'GOOGLE_SIGNIN_FIREBASE_USER',
           email: email,
-          additionalData: {
-            'uid': firebaseUserRecord['uid'],
-          },
+          additionalData: {'uid': firebaseUserRecord['uid']},
         );
 
         final credential = firebase_auth.GoogleAuthProvider.credential(
@@ -917,7 +917,8 @@ class AuthMethods {
             eventType: 'GOOGLE_SIGNIN_FIREBASE_RECORD_MISSING',
             email: email,
             firebaseUid: userId,
-            errorDetails: 'User record missing after Firebase sign-in, recreating',
+            errorDetails:
+                'User record missing after Firebase sign-in, recreating',
           );
 
           await _supabase.from('users').upsert({
@@ -947,7 +948,6 @@ class AuthMethods {
                 data['gender'] != null &&
                 data['gender'].toString().isNotEmpty);
 
-        // ✅ FIX: moved onboardingComplete into additionalData
         await _logError(
           eventType: 'GOOGLE_SIGNIN_FIREBASE_SUCCESS',
           email: email,
@@ -1286,7 +1286,9 @@ class AuthMethods {
     }
   }
 
-  // ✅ MIGRATION METHOD (email/password)
+  // =============================================
+  // MIGRATION METHOD (email/password)
+  // =============================================
   Future<String> migrateUser({
     required String email,
     required String newPassword,
@@ -1294,7 +1296,8 @@ class AuthMethods {
   }) async {
     try {
       final firebaseUser = _auth.currentUser;
-      if (firebaseUser == null) return "User not logged in. Please log in first.";
+      if (firebaseUser == null)
+        return "User not logged in. Please log in first.";
       if (firebaseUser.uid != firebaseUid)
         return "UID mismatch. Please log in with the correct account.";
       if (firebaseUser.email != email)
