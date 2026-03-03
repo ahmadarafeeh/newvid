@@ -28,7 +28,11 @@ const String supabaseAnonKey =
 void main() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
+
+    // ✅ FIX: Initialize Firebase AND Supabase before runApp so that
+    // auth sessions are available immediately when AuthWrapper builds.
     await _initializeFirebase();
+    await _initializeSupabase();
 
     runApp(
       ChangeNotifierProvider(
@@ -37,6 +41,7 @@ void main() async {
       ),
     );
 
+    // Everything else (ads, analytics, notifications) can still be lazy
     _initializeNonEssentialServicesInBackground();
   } catch (e) {
     runApp(const ErrorApp());
@@ -61,10 +66,20 @@ Future<void> _initializeFirebase() async {
   }
 }
 
+// ✅ Extracted from background into a top-level awaited function
+Future<void> _initializeSupabase() async {
+  await Supabase.initialize(
+    url: supabaseUrl,
+    anonKey: supabaseAnonKey,
+    authOptions: const FlutterAuthClientOptions(
+      autoRefreshToken: true,
+    ),
+  );
+}
+
 Future<void> _initializeNonEssentialServicesInBackground() async {
   try {
     await Future.wait([
-      _initializeSupabaseInBackground(),
       _initializeMobileAdsInBackground(),
       _initializeOtherServicesInBackground(),
     ], eagerError: false);
@@ -73,29 +88,9 @@ Future<void> _initializeNonEssentialServicesInBackground() async {
   }
 }
 
-Future<void> _initializeSupabaseInBackground() async {
-  try {
-    // ✅ CORRECTED: Initialize Supabase WITHOUT redirect URL
-    await Supabase.initialize(
-      url: supabaseUrl,
-      anonKey: supabaseAnonKey,
-      authOptions: const FlutterAuthClientOptions(
-        autoRefreshToken: true,
-        // ❌ DO NOT set redirectTo or redirectUrl here
-      ),
-    );
-
-    print('✅ Supabase initialized');
-  } catch (e) {
-    print('❌ Supabase initialization error: $e');
-  }
-}
-
 Future<void> _initializeMobileAdsInBackground() async {
   try {
-    if (kIsWeb) {
-      return;
-    }
+    if (kIsWeb) return;
     await MobileAds.instance.initialize();
   } catch (e) {
     // Ads can fail without breaking app
