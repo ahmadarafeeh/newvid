@@ -779,10 +779,7 @@ class AuthMethods {
     try {
       // 1. Get Google account
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) {
-        await _logError(eventType: 'GOOGLE_SIGNIN_CANCELLED', email: null);
-        return "cancelled";
-      }
+      if (googleUser == null) return "cancelled";
 
       email = googleUser.email;
 
@@ -800,35 +797,13 @@ class AuthMethods {
         return "Google sign‑in failed: no ID token";
       }
 
-      await _logError(
-        eventType: 'GOOGLE_SIGNIN_START',
-        email: email,
-        additionalData: {'has_id_token': true},
-      );
-
       // 2. Query Supabase users by email
       final List<dynamic> userRecords = await _supabase
           .from('users')
           .select('uid, migrated, supabase_uid')
           .eq('email', email);
 
-      await _logError(
-        eventType: 'GOOGLE_SIGNIN_USER_LOOKUP',
-        email: email,
-        additionalData: {
-          'records_found': userRecords.length,
-          'records': userRecords.map((r) {
-            return {
-              'uid': r['uid'],
-              'migrated': r['migrated'],
-              'supabase_uid': r['supabase_uid'],
-            };
-          }).toList(),
-        },
-      );
-
       // 3. Check for a Supabase Auth user (has supabase_uid)
-      // ✅ FIX: cast to nullable so orElse can return null
       final Map<String, dynamic>? supabaseUserRecord =
           userRecords.cast<Map<String, dynamic>?>().firstWhere(
                 (record) => record?['supabase_uid'] != null,
@@ -836,15 +811,6 @@ class AuthMethods {
               );
 
       if (supabaseUserRecord != null) {
-        await _logError(
-          eventType: 'GOOGLE_SIGNIN_SUPABASE_USER',
-          email: email,
-          additionalData: {
-            'uid': supabaseUserRecord['uid'],
-            'supabase_uid': supabaseUserRecord['supabase_uid'],
-          },
-        );
-
         final AuthResponse response = await _supabase.auth.signInWithIdToken(
           provider: OAuthProvider.google,
           idToken: idToken,
@@ -863,7 +829,6 @@ class AuthMethods {
       }
 
       // 4. Check for a Firebase user (migrated == false)
-      // ✅ FIX: cast to nullable so orElse can return null
       final Map<String, dynamic>? firebaseUserRecord =
           userRecords.cast<Map<String, dynamic>?>().firstWhere(
                 (record) => record?['migrated'] == false,
@@ -871,12 +836,6 @@ class AuthMethods {
               );
 
       if (firebaseUserRecord != null) {
-        await _logError(
-          eventType: 'GOOGLE_SIGNIN_FIREBASE_USER',
-          email: email,
-          additionalData: {'uid': firebaseUserRecord['uid']},
-        );
-
         final credential = firebase_auth.GoogleAuthProvider.credential(
           idToken: idToken,
           accessToken: accessToken,
@@ -897,14 +856,7 @@ class AuthMethods {
         final String userId = cred.user!.uid;
 
         final needsMigration = await this.needsMigration(userId);
-        if (needsMigration) {
-          await _logError(
-            eventType: 'GOOGLE_SIGNIN_FIREBASE_NEEDS_MIGRATION',
-            email: email,
-            firebaseUid: userId,
-          );
-          return "needs_migration";
-        }
+        if (needsMigration) return "needs_migration";
 
         final List<dynamic> res = await _supabase
             .from('users')
@@ -948,23 +900,10 @@ class AuthMethods {
                 data['gender'] != null &&
                 data['gender'].toString().isNotEmpty);
 
-        await _logError(
-          eventType: 'GOOGLE_SIGNIN_FIREBASE_SUCCESS',
-          email: email,
-          firebaseUid: userId,
-          additionalData: {'onboardingComplete': hasCompletedOnboarding},
-        );
-
         return hasCompletedOnboarding ? "success" : "onboarding_required";
       }
 
       // 5. No existing user → sign up with Supabase (new user)
-      await _logError(
-        eventType: 'GOOGLE_SIGNIN_NEW_USER',
-        email: email,
-        additionalData: {'action': 'create_supabase_user'},
-      );
-
       final AuthResponse response = await _supabase.auth.signInWithIdToken(
         provider: OAuthProvider.google,
         idToken: idToken,
@@ -1166,9 +1105,6 @@ class AuthMethods {
   // =============================================
   // UTILITY
   // =============================================
-
-  /// Sanitizes blockedUsers field from any format to a proper List.
-  /// Handles: null, List, """[]""", "[]", etc.
   static Map<String, dynamic> _sanitizeBlockedUsers(Map<String, dynamic> raw) {
     final data = Map<String, dynamic>.from(raw);
     final val = data['blockedUsers'];
