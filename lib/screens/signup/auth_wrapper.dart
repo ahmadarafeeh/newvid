@@ -16,20 +16,13 @@ import 'package:Ratedly/screens/login.dart';
 import 'package:Ratedly/providers/user_provider.dart';
 import 'package:Ratedly/services/debug_logger.dart';
 
-Future<void> _logEvent({
+Future<void> _logError({
   required String eventType,
   String? firebaseUid,
   String? supabaseUid,
   String? email,
-  bool? hasFirebaseSession,
-  bool? hasSupabaseSession,
-  bool? existingRecordFound,
-  String? recordSource,
-  bool? onboardingComplete,
-  bool? needsMigration,
   String? errorDetails,
   String? stackTrace,
-  String? navigationTarget,
   Map<String, dynamic>? additionalData,
 }) async {
   try {
@@ -38,15 +31,8 @@ Future<void> _logEvent({
       'firebase_uid': firebaseUid,
       'supabase_uid': supabaseUid,
       'email': email,
-      'has_firebase_session': hasFirebaseSession,
-      'has_supabase_session': hasSupabaseSession,
-      'existing_record_found': existingRecordFound,
-      'record_source': recordSource,
-      'onboarding_complete': onboardingComplete,
-      'needs_migration': needsMigration,
       'error_details': errorDetails,
       'stack_trace': stackTrace,
-      'navigation_target': navigationTarget,
       'additional_data': additionalData,
     });
   } catch (_) {}
@@ -93,28 +79,13 @@ class _AuthWrapperState extends State<AuthWrapper> {
     _initializeAuth();
 
     _authSubscription = _supabase.auth.onAuthStateChange.listen((data) async {
-      await _logEvent(
-        eventType: 'AUTH_STATE_CHANGE',
-        supabaseUid: data.session?.user.id,
-        email: data.session?.user.email,
-        hasSupabaseSession: data.session != null,
-        additionalData: {'auth_event': data.event.name},
-      );
-
       if (data.event == AuthChangeEvent.signedIn ||
           data.event == AuthChangeEvent.tokenRefreshed) {
         if (!_isInitializing) {
           _isInitializing = true;
-          // ✅ FIX: whenComplete always resets the guard, even on error
           _initializeAuth().whenComplete(() {
             _isInitializing = false;
           });
-        } else {
-          await _logEvent(
-            eventType: 'INIT_SKIPPED_ALREADY_RUNNING',
-            supabaseUid: data.session?.user.id,
-            additionalData: {'auth_event': data.event.name},
-          );
         }
       } else if (data.event == AuthChangeEvent.signedOut && mounted) {
         setState(() {
@@ -138,15 +109,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
     final supabaseSession = _supabase.auth.currentSession;
     final firebaseUser = _auth.currentUser;
 
-    await _logEvent(
-      eventType: 'INIT_AUTH_START',
-      supabaseUid: supabaseSession?.user.id,
-      firebaseUid: firebaseUser?.uid,
-      email: supabaseSession?.user.email ?? firebaseUser?.email,
-      hasSupabaseSession: supabaseSession != null,
-      hasFirebaseSession: firebaseUser != null,
-    );
-
     if (supabaseSession != null) {
       await _handleSupabaseSession(supabaseSession, userProvider);
       return;
@@ -157,11 +119,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
       return;
     }
 
-    await _logEvent(
-      eventType: 'NO_SESSION_FOUND',
-      navigationTarget: 'GetStartedPage',
-    );
-
     if (mounted) setState(() => _isLoading = false);
   }
 
@@ -171,15 +128,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
     bool found = false;
     Map<String, dynamic>? userData;
     final firebaseUser = _auth.currentUser;
-
-    await _logEvent(
-      eventType: 'HANDLE_SUPABASE_SESSION_START',
-      supabaseUid: session.user.id,
-      firebaseUid: firebaseUser?.uid,
-      email: session.user.email,
-      hasFirebaseSession: firebaseUser != null,
-      hasSupabaseSession: true,
-    );
 
     try {
       // --- STEP 1: Find by Firebase UID (migration path) ---
@@ -199,7 +147,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
             'migrated': true,
           }).eq('uid', firebaseUser.uid);
 
-          // Clean up any orphan record that had this supabase_uid
           await _supabase
               .from('users')
               .delete()
@@ -212,14 +159,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
               .eq('uid', firebaseUser.uid)
               .maybeSingle();
         }
-
-        await _logEvent(
-          eventType: 'STEP1_FIREBASE_UID_LOOKUP',
-          supabaseUid: session.user.id,
-          firebaseUid: firebaseUser.uid,
-          existingRecordFound: found,
-          recordSource: found ? recordSource : null,
-        );
       }
 
       // --- STEP 2: Find by email (unmigrated user) ---
@@ -253,14 +192,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
               .eq('uid', userData!['uid'])
               .maybeSingle();
         }
-
-        await _logEvent(
-          eventType: 'STEP2_EMAIL_LOOKUP',
-          supabaseUid: session.user.id,
-          email: session.user.email,
-          existingRecordFound: found,
-          recordSource: found ? recordSource : null,
-        );
       }
 
       // --- STEP 3: Find by supabase_uid (returning Supabase user) ---
@@ -270,28 +201,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
             .select()
             .eq('supabase_uid', session.user.id);
 
-        await _logEvent(
-          eventType: 'STEP3_SUPABASE_UID_LOOKUP',
-          supabaseUid: session.user.id,
-          existingRecordFound: records.isNotEmpty,
-          additionalData: {
-            'records_found': records.length,
-            'found_uids': records.map((r) => r['uid']).toList(),
-            'onboarding_flags':
-                records.map((r) => r['onboardingComplete']).toList(),
-            'migrated_flags': records.map((r) => r['migrated']).toList(),
-            // ✅ Key: log the raw blockedUsers so we can see its format
-            'blocked_users_raw':
-                records.map((r) => r['blockedUsers'].toString()).toList(),
-          },
-        );
-
         if (records.isNotEmpty) {
           found = true;
           recordSource = 'supabase_uid';
 
           if (records.length > 1) {
-            // Keep the record with the most complete data
             Map<String, dynamic>? bestRecord;
             List<Map<String, dynamic>> others = [];
             for (var rec in records) {
@@ -312,15 +226,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
             for (var rec in others) {
               await _supabase.from('users').delete().eq('uid', rec['uid']);
             }
-
-            await _logEvent(
-              eventType: 'STEP3_DUPLICATE_RECORDS_RESOLVED',
-              supabaseUid: session.user.id,
-              additionalData: {
-                'kept_uid': userData!['uid'],
-                'deleted_count': others.length,
-              },
-            );
           } else {
             userData = records.first as Map<String, dynamic>;
           }
@@ -330,15 +235,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
       // --- STEP 4: No record found — create new user ---
       if (!found) {
         recordSource = 'none_created_new';
-
-        await _logEvent(
-          eventType: 'STEP4_CREATING_NEW_USER',
-          supabaseUid: session.user.id,
-          email: session.user.email,
-          additionalData: {
-            'reason': 'no_existing_record_found_in_steps_1_2_3',
-          },
-        );
 
         final newUser = {
           'uid': session.user.id,
@@ -352,7 +248,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
           'dateOfBirth': null,
           'gender': null,
           'isVerified': false,
-          // ✅ FIX: Store as proper array, never a string
           'blockedUsers': <dynamic>[],
           'country': null,
           'migrated': true,
@@ -370,25 +265,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       _photoUrl = userData['photoUrl'] as String?;
       _isMigrated = userData['migrated'] == true;
 
-      await _logEvent(
-        eventType: 'USER_RECORD_RESOLVED',
-        supabaseUid: _supabaseUid,
-        firebaseUid: _firebaseUid,
-        email: _userEmail,
-        recordSource: recordSource,
-        additionalData: {
-          'username': _userName,
-          'onboardingComplete': userData['onboardingComplete'],
-          'migrated': _isMigrated,
-          'has_dob': userData['dateOfBirth'] != null,
-          'has_gender': userData['gender'] != null,
-          // ✅ This tells us if uid == supabase_uid (pure Supabase user)
-          'uid_equals_supabase_uid': _firebaseUid == _supabaseUid,
-          'raw_blocked_users': userData['blockedUsers'].toString(),
-        },
-      );
-
-      // Initialize UserProvider — provider now sanitizes blockedUsers internally
+      // Initialize UserProvider
       try {
         userProvider.initializeUser({
           'uid': _firebaseUid,
@@ -397,7 +274,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
           ...userData,
         });
       } catch (e, stack) {
-        await _logEvent(
+        await _logError(
           eventType: 'USER_PROVIDER_INIT_ERROR',
           firebaseUid: _firebaseUid,
           supabaseUid: _supabaseUid,
@@ -412,16 +289,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
           await _checkOnboardingStatus(_firebaseUid!);
       _onboardingComplete = hasCompletedOnboarding;
 
-      await _logEvent(
-        eventType: 'ONBOARDING_STATUS_CHECKED',
-        supabaseUid: _supabaseUid,
-        firebaseUid: _firebaseUid,
-        email: _userEmail,
-        onboardingComplete: hasCompletedOnboarding,
-        recordSource: recordSource,
-        navigationTarget: hasCompletedOnboarding ? 'Home' : 'OnboardingFlow',
-      );
-
       if (mounted) {
         setState(() {
           _onboardingComplete = hasCompletedOnboarding;
@@ -432,14 +299,13 @@ class _AuthWrapperState extends State<AuthWrapper> {
       _updateAuthCache(hasCompletedOnboarding);
       _runCountryChecks(_firebaseUid!);
     } catch (e, stack) {
-      await _logEvent(
+      await _logError(
         eventType: 'ERROR_SUPABASE_SESSION_HANDLING',
         firebaseUid: firebaseUser?.uid,
         supabaseUid: session.user.id,
         email: session.user.email,
         errorDetails: e.toString(),
         stackTrace: stack.toString(),
-        recordSource: recordSource,
       );
       DebugLogger.logError('SUPABASE_SESSION_HANDLING', e);
       if (mounted) setState(() => _isLoading = false);
@@ -632,27 +498,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
     if (_isLoading) return _buildSimpleLoadingScreen();
 
     final bool hasUser = _firebaseUid != null || _supabaseUid != null;
-
-    String targetScreen;
-    if (hasUser && _onboardingComplete && !_needsMigration) {
-      targetScreen = 'Home';
-    } else if (hasUser) {
-      targetScreen = 'OnboardingFlow';
-    } else {
-      targetScreen = 'GetStartedPage';
-    }
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _logEvent(
-        eventType: 'NAVIGATION_DECISION',
-        firebaseUid: _firebaseUid,
-        supabaseUid: _supabaseUid,
-        email: _userEmail,
-        onboardingComplete: _onboardingComplete,
-        needsMigration: _needsMigration,
-        navigationTarget: targetScreen,
-      );
-    });
 
     if (hasUser && _onboardingComplete && !_needsMigration) {
       return const ResponsiveLayout(mobileScreenLayout: MobileScreenLayout());
