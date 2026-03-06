@@ -792,7 +792,6 @@ class SupabasePostsMethods {
           .eq('custom_data->>postId', postId)
           .eq('custom_data->>raterUid', raterUid);
     } catch (e) {
-      // Log error but don't throw, as we still want to create the new notification
       await _logPostError(
         operationType: 'delete_previous_rating_notification',
         userId: raterUid,
@@ -954,11 +953,11 @@ class SupabasePostsMethods {
         'chat_id': chatId,
         'sender_id': senderId,
         'receiver_id': receiverId,
-        'message': 'Shared a post: $postCaption', // Regular message text
+        'message': 'Shared a post: $postCaption',
         'timestamp': DateTime.now().toUtc().toIso8601String(),
         'is_read': false,
         'delivered': false,
-        'post_share': postShareData, // JSONB data
+        'post_share': postShareData,
       };
 
       await _supabase.from('messages').insert(payload);
@@ -987,15 +986,19 @@ class SupabasePostsMethods {
   }
 
   // ----------------------
-  // Record post view
+  // Record post view — uses upsert to silently ignore duplicates
   // ----------------------
   Future<void> recordPostView(String postId, String userId) async {
     try {
-      await _supabase.from('user_post_views').insert({
-        'post_id': postId,
-        'user_id': userId,
-        'viewed_at': DateTime.now().toUtc().toIso8601String()
-      });
+      await _supabase.from('user_post_views').upsert(
+        {
+          'post_id': postId,
+          'user_id': userId,
+          'viewed_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        onConflict: 'user_id,post_id',
+        ignoreDuplicates: true,
+      );
     } catch (e) {
       await _logPostError(
         operationType: 'record_post_view',
