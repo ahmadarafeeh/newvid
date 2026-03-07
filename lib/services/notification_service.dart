@@ -1,12 +1,13 @@
 import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_messaging/firebase_messaging.dart' as firebase_messaging;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class NotificationService {
-  final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
+  final firebase_messaging.FirebaseMessaging _firebaseMessaging = firebase_messaging.FirebaseMessaging.instance;
   static final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
 
@@ -20,8 +21,7 @@ class NotificationService {
 
   Future<void> init() async {
     try {
-      final NotificationSettings settings =
-          await _firebaseMessaging.requestPermission(
+      await _firebaseMessaging.requestPermission(
         alert: true,
         badge: true,
         criticalAlert: true,
@@ -29,23 +29,22 @@ class NotificationService {
         sound: true,
       );
 
-      // Disable system-level foreground notifications
-      await FirebaseMessaging.instance
+      await firebase_messaging.FirebaseMessaging.instance
           .setForegroundNotificationPresentationOptions(
-        alert: false, // Changed to false
-        badge: false, // Changed to false
-        sound: false, // Changed to false
+        alert: false,
+        badge: false,
+        sound: false,
       );
 
-      FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
-      FirebaseMessaging.onMessageOpenedApp.listen(_handleBackgroundMessage);
+      firebase_messaging.FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+      firebase_messaging.FirebaseMessaging.onMessageOpenedApp.listen(_handleBackgroundMessage);
 
       await _handleTokenRetrieval();
       _firebaseMessaging.onTokenRefresh.listen((newToken) async {
-        await _saveTokenToFirestore(newToken);
+        await _saveToken(newToken);
       });
 
-      final DarwinInitializationSettings initializationSettingsIOS =
+      const DarwinInitializationSettings initializationSettingsIOS =
           DarwinInitializationSettings();
 
       await _notifications.initialize(
@@ -54,7 +53,7 @@ class NotificationService {
             (NotificationResponse response) async {
           if (response.payload != null) {
             try {
-              final data = jsonDecode(response.payload!);
+              jsonDecode(response.payload!);
             } catch (e) {}
           }
         },
@@ -62,15 +61,15 @@ class NotificationService {
 
       await _configureNotificationChannels();
       _setupAuthListener();
-    } catch (e, st) {}
+    } catch (e) {}
   }
 
   Future<void> _setupAuthListener() async {
-    FirebaseAuth.instance.authStateChanges().listen((User? user) async {
+    firebase_auth.FirebaseAuth.instance.authStateChanges().listen((firebase_auth.User? user) async {
       if (user != null) {
         final token = await _firebaseMessaging.getToken();
         if (token != null) {
-          await _saveTokenToFirestore(token);
+          await _saveToken(token);
         }
       }
     });
@@ -80,16 +79,15 @@ class NotificationService {
     try {
       final token = await _firebaseMessaging.getToken();
       if (token != null) {
-        await _saveTokenToFirestore(token);
+        await _saveToken(token);
       }
-    } catch (e, st) {}
+    } catch (e) {}
   }
 
   Future<void> _configureNotificationChannels() async {
     try {
       final iOSPlugin = _notifications.resolvePlatformSpecificImplementation<
           IOSFlutterLocalNotificationsPlugin>();
-
       if (iOSPlugin != null) {
         await iOSPlugin.requestPermissions(
           alert: true,
@@ -100,23 +98,66 @@ class NotificationService {
     } catch (e) {}
   }
 
+  // ─── UNIFIED TOKEN SAVER ────────────────────────────────────────────────
+  // Saves to BOTH Supabase (primary) and Firestore (fallback).
+  // This ensures the Cloud Function can always find the token regardless
+  // of whether the user authenticated via Firebase or Supabase.
+  Future<void> _saveToken(String token) async {
+    await Future.wait([
+      _saveTokenToSupabase(token),
+      _saveTokenToFirestore(token),
+    ]);
+  }
+
+  Future<void> _saveTokenToSupabase(String token) async {
+    try {
+      final supabase = Supabase.instance.client;
+
+      // Try Supabase auth session first
+      final supabaseUser = supabase.auth.currentUser;
+      if (supabaseUser != null) {
+        await supabase
+            .from('users')
+            .update({'fcmToken': token})
+            .eq('supabase_uid', supabaseUser.id);
+        print('[NotificationService] FCM token saved to Supabase via supabase_uid');
+        return;
+      }
+
+      // Fall back to Firebase UID
+      final firebaseUser = firebase_auth.FirebaseAuth.instance.currentUser;
+      if (firebaseUser != null) {
+        await supabase
+            .from('users')
+            .update({'fcmToken': token})
+            .eq('uid', firebaseUser.uid);
+        print('[NotificationService] FCM token saved to Supabase via firebase uid');
+        return;
+      }
+
+      print('[NotificationService] No auth session — storing token as pending');
+      await _storePendingToken(token);
+    } catch (e) {
+      print('[NotificationService] Supabase token save error: $e');
+    }
+  }
+
   Future<void> _saveTokenToFirestore(String token) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      return _storePendingToken(token);
-    }
+    try {
+      final user = firebase_auth.FirebaseAuth.instance.currentUser;
+      if (user == null) return; // Firestore only for Firebase users
 
-    // **NEW GUARD**: only write to `users` once they've verified
-    await user.reload();
-    if (!user.emailVerified) {
-      return _storePendingToken(token);
-    }
+      await user.reload();
+      if (!user.emailVerified) return;
 
-    // Safe to merge into the real user doc now
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .set({'fcmToken': token}, SetOptions(merge: true));
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .set({'fcmToken': token}, SetOptions(merge: true));
+      print('[NotificationService] FCM token saved to Firestore');
+    } catch (e) {
+      print('[NotificationService] Firestore token save error: $e');
+    }
   }
 
   Future<void> _storePendingToken(String token) async {
@@ -129,15 +170,14 @@ class NotificationService {
         'createdAt': FieldValue.serverTimestamp(),
         'associated': false,
       }, SetOptions(merge: true));
-    } catch (e, st) {}
+    } catch (e) {}
   }
 
-  // Empty handler for foreground messages (no notification shown)
-  Future<void> _handleForegroundMessage(RemoteMessage message) async {
-    // Foreground notifications disabled - no action taken
+  Future<void> _handleForegroundMessage(firebase_messaging.RemoteMessage message) async {
+    // Foreground notifications disabled
   }
 
-  static Future<void> _handleBackgroundMessage(RemoteMessage message) async {
+  static Future<void> _handleBackgroundMessage(firebase_messaging.RemoteMessage message) async {
     try {
       await Firebase.initializeApp();
       final title = message.data['title'] ?? message.notification?.title ?? '';
@@ -151,7 +191,7 @@ class NotificationService {
           data: message.data,
         );
       }
-    } catch (e, st) {}
+    } catch (e) {}
   }
 
   Future<void> _showNotification({
@@ -181,21 +221,6 @@ class NotificationService {
     );
   }
 
-  Future<void> showTestNotification() async {
-    try {
-      await _notifications.show(
-        _getNotificationId(),
-        'Test Notification',
-        'This is a test notification from Ratedly!',
-        const NotificationDetails(iOS: DarwinNotificationDetails()),
-        payload: jsonEncode({
-          'type': 'test',
-          'source': 'debug',
-        }),
-      );
-    } catch (e, st) {}
-  }
-
   Future<void> triggerServerNotification({
     required String type,
     required String targetUserId,
@@ -214,8 +239,8 @@ class NotificationService {
       };
 
       await FirebaseFirestore.instance
-          .collection('notifications')
+          .collection('Push Not')
           .add(notificationData);
-    } catch (e, st) {}
+    } catch (e) {}
   }
 }
