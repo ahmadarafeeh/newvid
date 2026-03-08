@@ -62,7 +62,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   void _advanceStep(String newStep) {
     final elapsed = DateTime.now().difference(_stepStart).inSeconds;
-    DebugLogger.log(
+    DebugLogger.logEvent(
         'ONBOARDING_FLOW [$_userId] $_currentStep → $newStep (${elapsed}s)');
     _currentStep = newStep;
     _stepStart = DateTime.now();
@@ -84,7 +84,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     WidgetsBinding.instance.removeObserver(this);
     // If user is disposing without completing, log locally
     if (!_hasRequiredFields && _userId != null) {
-      DebugLogger.log(
+      DebugLogger.logEvent(
           'ONBOARDING_FLOW_DISPOSE [$_userId] at step=$_currentStep after ${_totalElapsed}s — '
           'intentional drop-off or screen replaced (NOT logged to DB)');
     }
@@ -94,12 +94,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused && !_hasRequiredFields) {
-      DebugLogger.log(
+      DebugLogger.logEvent(
           'ONBOARDING_FLOW_BACKGROUNDED [$_userId] step=$_currentStep elapsed=${_totalElapsed}s '
           '— user sent app to background (NOT an error, NOT logged to DB)');
     }
     if (state == AppLifecycleState.resumed && !_hasRequiredFields) {
-      DebugLogger.log(
+      DebugLogger.logEvent(
           'ONBOARDING_FLOW_RESUMED [$_userId] step=$_currentStep — user came back');
     }
   }
@@ -116,12 +116,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       } else if (supabaseSession != null) {
         _userId = supabaseSession.user.id;
       } else {
-        DebugLogger.log('ONBOARDING_FLOW: no user found — redirecting to login');
+        DebugLogger.logEvent('ONBOARDING_FLOW: no user found — redirecting to login');
         if (mounted) setState(() => _isLoading = false);
         return;
       }
 
-      DebugLogger.log('ONBOARDING_FLOW: checking status for userId=$_userId');
+      DebugLogger.logEvent('ONBOARDING_FLOW: checking status for userId=$_userId');
       _advanceStep('db_fetch');
 
       final response = await _supabase
@@ -141,13 +141,13 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       }
 
       if (_hasRequiredFields) {
-        DebugLogger.log(
+        DebugLogger.logEvent(
             'ONBOARDING_FLOW [$_userId]: already complete — calling onComplete');
         _advanceStep('completed');
         widget.onComplete();
       } else {
         _advanceStep('age_screen');
-        DebugLogger.log(
+        DebugLogger.logEvent(
             'ONBOARDING_FLOW [$_userId]: incomplete — showing age screen '
             'username=${response?['username']} dob=${response?['dateOfBirth']} gender=${response?['gender']}');
       }
@@ -156,7 +156,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
       // PGRST116 = no row found — this is expected for brand new users, NOT an error
       if (e is PostgrestException && e.code == 'PGRST116') {
-        DebugLogger.log(
+        DebugLogger.logEvent(
             'ONBOARDING_FLOW [$_userId]: no user record (PGRST116) — new user, showing age screen');
         if (mounted) {
           setState(() {
@@ -195,7 +195,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   void _handleAgeVerificationComplete(DateTime dateOfBirth) {
     _advanceStep('profile_setup');
-    DebugLogger.log(
+    DebugLogger.logEvent(
         'ONBOARDING_FLOW [$_userId]: age verified — moving to profile setup');
 
     Navigator.pushReplacement(
@@ -205,7 +205,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           dateOfBirth: dateOfBirth,
           onComplete: () {
             _advanceStep('completed');
-            DebugLogger.log(
+            DebugLogger.logEvent(
                 'ONBOARDING_FLOW [$_userId]: profile setup complete — totalTime=${_totalElapsed}s');
             widget.onComplete();
           },
@@ -220,7 +220,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     final supabaseSession = _supabase.auth.currentSession;
 
     if (firebaseUser == null && supabaseSession == null) {
-      DebugLogger.log(
+      DebugLogger.logEvent(
           'ONBOARDING_FLOW: build() — no auth session, redirecting to LoginScreen');
       return const LoginScreen();
     }
