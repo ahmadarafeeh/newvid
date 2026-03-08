@@ -53,7 +53,7 @@ class _OnboardingTracker {
 
   void step(String stepName) {
     final elapsed = DateTime.now().difference(stepStartTime).inSeconds;
-    DebugLogger.log(
+    DebugLogger.logEvent(
         'ONBOARDING_STEP [$userId] $currentStep → $stepName (${elapsed}s on previous step)');
     currentStep = stepName;
     stepStartTime = DateTime.now();
@@ -114,20 +114,20 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
       // FIX: removed tokenRefreshed — it is NOT a new login and was causing
       // re-initialization races that wiped onboardingComplete state
       if (data.event == AuthChangeEvent.signedIn) {
-        DebugLogger.log('AUTH_EVENT: signedIn — triggering init');
+        DebugLogger.logEvent('AUTH_EVENT: signedIn — triggering init');
         if (!_initLock) {
           _initLock = true;
           await _initializeAuth();
           _initLock = false;
         } else {
-          DebugLogger.log('AUTH_EVENT: signedIn ignored — init already running');
+          DebugLogger.logEvent('AUTH_EVENT: signedIn ignored — init already running');
         }
       } else if (data.event == AuthChangeEvent.tokenRefreshed) {
         // Intentionally ignored. Token refreshes happen silently in the
         // background and do not represent a meaningful auth state change.
-        DebugLogger.log('AUTH_EVENT: tokenRefreshed — intentionally ignored');
+        DebugLogger.logEvent('AUTH_EVENT: tokenRefreshed — intentionally ignored');
       } else if (data.event == AuthChangeEvent.signedOut && mounted) {
-        DebugLogger.log('AUTH_EVENT: signedOut — clearing state');
+        DebugLogger.logEvent('AUTH_EVENT: signedOut — clearing state');
         setState(() {
           _firebaseUid = null;
           _supabaseUid = null;
@@ -154,7 +154,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
       final userId = _firebaseUid ?? _supabaseUid ?? 'unknown';
       final step = _tracker?.currentStep ?? 'unknown';
       final elapsed = _tracker?.totalElapsedSeconds ?? 0;
-      DebugLogger.log(
+      DebugLogger.logEvent(
           'ONBOARDING_APP_BACKGROUNDED [$userId] at step=$step after ${elapsed}s — possible abandon (not logged to DB)');
     }
   }
@@ -165,7 +165,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     final supabaseSession = _supabase.auth.currentSession;
     final firebaseUser = _auth.currentUser;
 
-    DebugLogger.log(
+    DebugLogger.logEvent(
         'INIT_AUTH: hasSupabase=${supabaseSession != null} hasFirebase=${firebaseUser != null}');
 
     if (supabaseSession != null) {
@@ -178,7 +178,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
       return;
     }
 
-    DebugLogger.log('INIT_AUTH: no session found — showing GetStartedPage');
+    DebugLogger.logEvent('INIT_AUTH: no session found — showing GetStartedPage');
     if (mounted) setState(() => _isLoading = false);
   }
 
@@ -201,7 +201,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
         if (userData != null) {
           found = true;
           recordSource = 'firebase_uid';
-          DebugLogger.log(
+          DebugLogger.logEvent(
               'SUPABASE_SESSION: record found via firebase_uid=${firebaseUser.uid}');
 
           await _supabase.from('users').update({
@@ -236,7 +236,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
           found = true;
           recordSource = 'email_migration';
           userData = userByEmail;
-          DebugLogger.log(
+          DebugLogger.logEvent(
               'SUPABASE_SESSION: record found via email migration email=${session.user.email}');
 
           await _supabase.from('users').update({
@@ -268,7 +268,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
         if (records.isNotEmpty) {
           found = true;
           recordSource = 'supabase_uid';
-          DebugLogger.log(
+          DebugLogger.logEvent(
               'SUPABASE_SESSION: ${records.length} record(s) found via supabase_uid=${session.user.id}');
 
           if (records.length > 1) {
@@ -312,7 +312,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
       // --- STEP 4: No record found — create new user ---
       if (!found) {
         recordSource = 'none_created_new';
-        DebugLogger.log(
+        DebugLogger.logEvent(
             'SUPABASE_SESSION: no record found — creating new user for supabase_uid=${session.user.id}');
 
         final newUser = {
@@ -382,11 +382,11 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
 
       if (!hasCompletedOnboarding) {
         _tracker!.step('onboarding_screen_shown');
-        DebugLogger.log(
+        DebugLogger.logEvent(
             'ONBOARDING: user ${_firebaseUid} sent to onboarding (recordSource=$recordSource)');
       } else {
         _tracker!.step('home_screen');
-        DebugLogger.log('ONBOARDING: user ${_firebaseUid} onboarding complete — going home');
+        DebugLogger.logEvent('ONBOARDING: user ${_firebaseUid} onboarding complete — going home');
       }
 
       // Cache for both Firebase and Supabase users
@@ -421,7 +421,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     final cachedData = await _loadCachedAuthDataInstantly();
 
     if (cachedData != null && mounted) {
-      DebugLogger.log('FIREBASE_USER: using cached onboarding state for ${_firebaseUid}');
+      DebugLogger.logEvent('FIREBASE_USER: using cached onboarding state for ${_firebaseUid}');
       setState(() {
         _onboardingComplete = cachedData['onboardingComplete'] ?? false;
         _usingCachedData = true;
@@ -431,7 +431,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
       await _initializeUserProvider(userProvider);
       _verifyOnboardingInBackground();
     } else {
-      DebugLogger.log('FIREBASE_USER: no cache — fetching from DB for ${_firebaseUid}');
+      DebugLogger.logEvent('FIREBASE_USER: no cache — fetching from DB for ${_firebaseUid}');
       if (mounted) setState(() => _isLoading = false);
       await _checkOnboardingFromDatabase(userProvider);
     }
@@ -451,7 +451,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
       if (userData != null) {
         userProvider.initializeUser(userData as Map<String, dynamic>);
       } else {
-        DebugLogger.log(
+        DebugLogger.logEvent(
             'INIT_USER_PROVIDER: no record found for uid=$_firebaseUid (may be new user)');
       }
     } catch (e, stack) {
@@ -477,18 +477,18 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
         final cacheAge = DateTime.now().millisecondsSinceEpoch - lastUpdated;
         final cacheAgeHours = (cacheAge / 3600000).toStringAsFixed(1);
         if (cacheAge < 24 * 60 * 60 * 1000) {
-          DebugLogger.log(
+          DebugLogger.logEvent(
               'AUTH_CACHE: hit for $_firebaseUid (age=${cacheAgeHours}h)');
           return {
             'onboardingComplete': data['onboardingComplete'] ?? false,
             'lastUpdated': lastUpdated,
           };
         } else {
-          DebugLogger.log(
+          DebugLogger.logEvent(
               'AUTH_CACHE: expired for $_firebaseUid (age=${cacheAgeHours}h) — fetching fresh');
         }
       } else {
-        DebugLogger.log('AUTH_CACHE: miss for $_firebaseUid — no cache found');
+        DebugLogger.logEvent('AUTH_CACHE: miss for $_firebaseUid — no cache found');
       }
     } catch (e) {
       DebugLogger.logError('LOAD_CACHED_AUTH', e);
@@ -502,7 +502,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
       final hasCompletedOnboarding = await _checkOnboardingStatus(_firebaseUid!);
 
       if (hasCompletedOnboarding != _onboardingComplete) {
-        DebugLogger.log(
+        DebugLogger.logEvent(
             'ONBOARDING_BG_VERIFY: cache mismatch for $_firebaseUid — cache=$_onboardingComplete DB=$hasCompletedOnboarding');
         if (mounted) {
           setState(() {
@@ -514,7 +514,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
           _updateAuthCache(_onboardingComplete);
         }
       } else {
-        DebugLogger.log(
+        DebugLogger.logEvent(
             'ONBOARDING_BG_VERIFY: cache matches DB for $_firebaseUid — onboardingComplete=$hasCompletedOnboarding');
       }
     } catch (e, stack) {
@@ -537,7 +537,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
           .maybeSingle();
 
       if (response == null) {
-        DebugLogger.log('CHECK_ONBOARDING: no record for uid=$uid');
+        DebugLogger.logEvent('CHECK_ONBOARDING: no record for uid=$uid');
         return false;
       }
 
@@ -549,7 +549,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
               data['gender'] != null &&
               data['gender'].toString().isNotEmpty);
 
-      DebugLogger.log(
+      DebugLogger.logEvent(
           'CHECK_ONBOARDING: uid=$uid complete=$complete '
           'username=${data['username']} dob=${data['dateOfBirth']} gender=${data['gender']}');
       return complete;
@@ -596,7 +596,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     try {
       final migrationStatus = await _authMethods.getCurrentUserMigrationStatus();
       final needsMigration = migrationStatus['needs_migration'] == true;
-      DebugLogger.log(
+      DebugLogger.logEvent(
           'MIGRATION_CHECK: uid=$_firebaseUid needsMigration=$needsMigration reason=${migrationStatus['reason']}');
 
       if (mounted) {
@@ -640,7 +640,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
           'userId': _firebaseUid,
         }),
       );
-      DebugLogger.log(
+      DebugLogger.logEvent(
           'AUTH_CACHE: updated for $_firebaseUid onboardingComplete=$onboardingComplete');
     } catch (e) {
       DebugLogger.logError('UPDATE_AUTH_CACHE', e);
@@ -649,7 +649,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
 
   void _showMigrationScreen() {
     if (_firebaseUid == null) return;
-    DebugLogger.log('MIGRATION: redirecting uid=$_firebaseUid to migration screen');
+    DebugLogger.logEvent('MIGRATION: redirecting uid=$_firebaseUid to migration screen');
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (context) => LoginScreen(
@@ -662,7 +662,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
 
   void _handleOnboardingComplete() {
     final elapsed = _tracker?.totalElapsedSeconds ?? 0;
-    DebugLogger.log(
+    DebugLogger.logEvent(
         'ONBOARDING_COMPLETE: uid=${_firebaseUid ?? _supabaseUid} totalTime=${elapsed}s');
     _tracker?.step('completed');
     if (mounted) setState(() => _onboardingComplete = true);
