@@ -12,7 +12,7 @@ import 'package:Ratedly/resources/block_firestore_methods.dart';
 import 'package:Ratedly/widgets/algorithm_explanation_screen.dart';
 import 'package:Ratedly/widgets/blue_verification_screen.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:Ratedly/providers/user_provider.dart'; // Add this import
+import 'package:Ratedly/providers/user_provider.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -32,14 +32,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    // Don't load privacy status here, wait for didChangeDependencies
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
 
-    // Get the user ID from UserProvider
     final userProvider = Provider.of<UserProvider>(context, listen: false);
 
     if (userProvider.firebaseUid != null && _currentUserId == null) {
@@ -54,9 +52,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadPrivacyStatus() async {
-    if (_currentUserId == null) {
-      return;
-    }
+    if (_currentUserId == null) return;
 
     try {
       final response = await _supabase
@@ -71,16 +67,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         setState(() => _isPrivate = false);
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isPrivate = false);
-      }
+      if (mounted) setState(() => _isPrivate = false);
     }
   }
 
   Future<void> _togglePrivacy(bool value) async {
-    if (!mounted || _currentUserId == null) {
-      return;
-    }
+    if (!mounted || _currentUserId == null) return;
 
     setState(() => _isLoading = true);
 
@@ -98,7 +90,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       if (mounted) {
         setState(() => _isPrivate = value);
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -119,185 +110,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     }
 
-    if (mounted) {
-      setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _changePassword() async {
-    if (_currentUserId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('User not logged in')),
-      );
-      return;
-    }
-
-    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
-    final colors = _getColors(themeProvider);
-
-    TextEditingController currentPasswordController = TextEditingController();
-    TextEditingController newPasswordController = TextEditingController();
-    TextEditingController confirmPasswordController = TextEditingController();
-
-    bool? confirmed = await showDialog(
-      context: context,
-      builder: (context) {
-        String? errorMessage;
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              backgroundColor: colors.cardColor,
-              title: Text(
-                'Change Password',
-                style: TextStyle(color: colors.textColor, fontFamily: 'Inter'),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (errorMessage != null)
-                    Text(
-                      errorMessage!,
-                      style: TextStyle(color: Colors.red[400], fontSize: 12),
-                    ),
-                  TextField(
-                    controller: currentPasswordController,
-                    obscureText: true,
-                    style: TextStyle(color: colors.textColor),
-                    decoration: InputDecoration(
-                      labelText: 'Current Password',
-                      labelStyle:
-                          TextStyle(color: colors.textColor.withOpacity(0.7)),
-                      enabledBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(
-                            color: colors.textColor.withOpacity(0.5)),
-                      ),
-                      focusedBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: colors.textColor),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: newPasswordController,
-                    obscureText: true,
-                    style: TextStyle(color: colors.textColor),
-                    decoration: InputDecoration(
-                      labelText: 'New Password',
-                      labelStyle:
-                          TextStyle(color: colors.textColor.withOpacity(0.7)),
-                      enabledBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(
-                            color: colors.textColor.withOpacity(0.5)),
-                      ),
-                      focusedBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: colors.textColor),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: confirmPasswordController,
-                    obscureText: true,
-                    style: TextStyle(color: colors.textColor),
-                    decoration: InputDecoration(
-                      labelText: 'Confirm New Password',
-                      labelStyle:
-                          TextStyle(color: colors.textColor.withOpacity(0.7)),
-                      enabledBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(
-                            color: colors.textColor.withOpacity(0.5)),
-                      ),
-                      focusedBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: colors.textColor),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child:
-                      Text('Cancel', style: TextStyle(color: colors.textColor)),
-                ),
-                TextButton(
-                  onPressed: () {
-                    if (newPasswordController.text !=
-                        confirmPasswordController.text) {
-                      setState(
-                          () => errorMessage = 'New passwords do not match');
-                      return;
-                    }
-                    if (newPasswordController.text.isEmpty) {
-                      setState(
-                          () => errorMessage = 'New password cannot be empty');
-                      return;
-                    }
-                    if (currentPasswordController.text.isEmpty) {
-                      setState(
-                          () => errorMessage = 'Current password is required');
-                      return;
-                    }
-                    Navigator.pop(context, true);
-                  },
-                  style: TextButton.styleFrom(
-                    backgroundColor: colors.backgroundColor,
-                  ),
-                  child: Text('Change Password',
-                      style: TextStyle(color: colors.textColor)),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    if (confirmed != true || !mounted) return;
-
-    setState(() => _isLoading = true);
-
-    try {
-      User? user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        // For migrated users, try to change password via Supabase
-        final response = await _supabase.auth.updateUser(
-          UserAttributes(password: newPasswordController.text.trim()),
-        );
-
-        if (response.user != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text('Password changed successfully via Supabase')),
-          );
-        } else {
-          throw Exception('Failed to update password via Supabase');
-        }
-      } else {
-        // For Firebase users
-        AuthCredential credential = EmailAuthProvider.credential(
-          email: user.email!,
-          password: currentPasswordController.text.trim(),
-        );
-        await user.reauthenticateWithCredential(credential);
-
-        await user.updatePassword(newPasswordController.text.trim());
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Password changed successfully')),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(
-                'Something went wrong, please try again later or contact us at ratedly9@gmail.com')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
+    if (mounted) setState(() => _isLoading = false);
   }
 
   Future<void> _signOut() async {
@@ -320,7 +133,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     final colors = _getColors(themeProvider);
 
-    // First confirmation for all users
     bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -347,18 +159,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (confirmed != true || !mounted) return;
 
-    // Get current user and providers
     User? user = FirebaseAuth.instance.currentUser;
     final userId = _currentUserId!;
     final providers =
         user?.providerData.map((info) => info.providerId).toList() ?? [];
     final bool isAppleUser = providers.contains('apple.com');
     final bool isGoogleUser = providers.contains('google.com');
-    final bool isSupabaseUser = user == null; // Migrated user
+    final bool isSupabaseUser = user == null;
 
-    // Special handling for Apple users
     if (isAppleUser) {
-      // Second confirmation only for Apple users
       bool? finalConfirm = await showDialog<bool>(
         context: context,
         builder: (_) => AlertDialog(
@@ -391,26 +200,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       AuthCredential? credential;
-      String? providerUsed;
 
-      // For migrated users (Supabase), we don't need Firebase re-authentication
       if (!isSupabaseUser && !isAppleUser) {
-        // Handle Google and email/password re-authentication
         if (isGoogleUser) {
-          providerUsed = 'google.com';
-
           try {
-            // Try to sign in silently first
             final GoogleSignInAccount? googleUser =
                 await _googleSignIn.signInSilently();
             if (googleUser == null) {
-              // If silent sign-in fails, show the Google sign-in dialog
               final GoogleSignInAccount? googleUserInteractive =
                   await _googleSignIn.signIn();
               if (googleUserInteractive == null) {
                 throw Exception('Google sign-in cancelled');
               }
-
               final GoogleSignInAuthentication googleAuth =
                   await googleUserInteractive.authentication;
               credential = GoogleAuthProvider.credential(
@@ -425,16 +226,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 accessToken: googleAuth.accessToken,
               );
             }
-
-            if (credential == null) {
-              throw Exception('Google credential not obtained');
-            }
+            if (credential == null) throw Exception('Google credential not obtained');
             await user!.reauthenticateWithCredential(credential);
           } catch (e) {
             throw Exception('Google re-authentication failed: $e');
           }
         } else if (providers.contains('password')) {
-          providerUsed = 'password';
           String? password = await showDialog<String>(
             context: context,
             builder: (_) {
@@ -479,7 +276,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       }
 
-      // Proceed with deletion
       try {
         String res = await SupabaseProfileMethods()
             .deleteEntireUserAccount(userId, credential);
@@ -490,7 +286,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           throw Exception(res);
         }
       } catch (e, st) {
-        // Special handling for Apple users - treat as success
         if (isAppleUser) {
           _showSuccessAndNavigate();
         } else {
@@ -498,12 +293,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       }
     } on FirebaseAuthException catch (e) {
-      // Special handling for Apple users - treat as success
       if (isAppleUser && e.code == 'requires-recent-login') {
         _showSuccessAndNavigate();
       } else {
         String errorMessage = 'Account deletion failed';
-
         if (e.code == 'user-mismatch') {
           errorMessage = 'Authentication error: Please sign in again';
         } else if (e.code == 'requires-recent-login') {
@@ -511,13 +304,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         } else if (e.code == 'user-not-found') {
           errorMessage = 'User account not found';
         }
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(errorMessage)),
         );
       }
     } catch (e) {
-      // Special handling for Apple users - treat as success
       if (isAppleUser) {
         _showSuccessAndNavigate();
       } else {
@@ -530,14 +321,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  // Helper method to show success and navigate to login
   void _showSuccessAndNavigate() {
     if (!mounted) return;
-
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Account deleted successfully')),
     );
-
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const LoginScreen()),
     );
@@ -626,7 +414,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           setState(() => isSending = true);
                           try {
                             final userId = _currentUserId!;
-
                             await FirebaseFirestore.instance
                                 .collection('feedback')
                                 .add({
@@ -639,8 +426,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               Navigator.of(context).pop();
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                    content: Text(
-                                        'Thank you for your feedback!',
+                                    content: Text('Thank you for your feedback!',
                                         style: TextStyle(color: Colors.white))),
                               );
                             }
@@ -673,7 +459,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // Add this method to show algorithm explanation
   void _showAlgorithmExplanation() {
     Navigator.push(
       context,
@@ -686,7 +471,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildOptionTile({
     required String title,
     required IconData icon,
-    VoidCallback? onTap, // Changed from required to optional
+    VoidCallback? onTap,
     Color? iconColor,
     Widget? trailing,
   }) {
@@ -703,13 +488,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         leading: Icon(icon, color: iconColor ?? colors.iconColor),
         title: Text(title, style: TextStyle(color: colors.textColor)),
         trailing: trailing,
-        onTap: onTap, // ListTile's onTap is nullable, so this is fine
-        enabled: onTap != null, // Disable the tile if onTap is null
+        onTap: onTap,
+        enabled: onTap != null,
       ),
     );
   }
 
-  // Helper method to get the appropriate color scheme
   _ColorSet _getColors(ThemeProvider themeProvider) {
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
     return isDarkMode ? _DarkColors() : _LightColors();
@@ -721,22 +505,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final colors = _getColors(themeProvider);
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
 
-    // Get user ID from UserProvider if not already set
     if (_currentUserId == null) {
       final userProvider = Provider.of<UserProvider>(context, listen: false);
       if (userProvider.firebaseUid != null) {
         _currentUserId = userProvider.firebaseUid;
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _loadPrivacyStatus();
-          }
+          if (mounted) _loadPrivacyStatus();
         });
       } else if (userProvider.supabaseUid != null) {
         _currentUserId = userProvider.supabaseUid;
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _loadPrivacyStatus();
-          }
+          if (mounted) _loadPrivacyStatus();
         });
       }
     }
@@ -757,7 +536,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
                   children: [
-                    // Blue Verification Button
                     _buildOptionTile(
                       title: 'Blue Verification',
                       icon: Icons.verified,
@@ -768,15 +546,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 const BlueVerificationScreen()),
                       ),
                     ),
-
-                    // Algorithm Explanation Button
                     _buildOptionTile(
                       title: 'Algorithm',
                       icon: Icons.psychology,
                       onTap: _showAlgorithmExplanation,
                     ),
-
-                    // Theme toggle option
                     _buildOptionTile(
                       title: 'Dark Mode',
                       icon: Icons.dark_mode,
@@ -786,15 +560,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onChanged: (value) => themeProvider.toggleTheme(value),
                       ),
                     ),
-
-                    // Feedback option
                     _buildOptionTile(
                       title: 'Send Feedback',
                       icon: Icons.feedback,
                       onTap: _showFeedbackDialog,
                     ),
-
-                    // Existing settings options
                     _buildOptionTile(
                       title: 'Private Account',
                       icon: Icons.lock,
@@ -818,12 +588,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   ),
                                 ),
                               )
-                          : null, // This is now valid since onTap is nullable
-                    ),
-                    _buildOptionTile(
-                      title: 'Change Password',
-                      icon: Icons.lock,
-                      onTap: _changePassword,
+                          : null,
                     ),
                     _buildOptionTile(
                       title: 'Sign Out',
@@ -844,7 +609,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-// Define color schemes for both themes
 class _ColorSet {
   final Color textColor;
   final Color backgroundColor;
@@ -998,11 +762,8 @@ class _BlockedUsersListState extends State<BlockedUsersList> {
                                 height: 44,
                                 fit: BoxFit.cover,
                                 errorBuilder: (context, error, stackTrace) {
-                                  return Icon(
-                                    Icons.person,
-                                    color: colors.textColor,
-                                    size: 24,
-                                  );
+                                  return Icon(Icons.person,
+                                      color: colors.textColor, size: 24);
                                 },
                                 loadingBuilder:
                                     (context, child, loadingProgress) {
@@ -1024,11 +785,8 @@ class _BlockedUsersListState extends State<BlockedUsersList> {
                               ),
                             )
                           : Center(
-                              child: Icon(
-                                Icons.person,
-                                color: colors.textColor,
-                                size: 24,
-                              ),
+                              child: Icon(Icons.person,
+                                  color: colors.textColor, size: 24),
                             ),
                     ),
                     title: Text(
@@ -1070,7 +828,6 @@ class _BlockedUsersListState extends State<BlockedUsersList> {
           .select('username, photoUrl')
           .eq('uid', userId)
           .single();
-
       return response;
     } catch (e) {
       return {};
@@ -1083,10 +840,7 @@ class _BlockedUsersListState extends State<BlockedUsersList> {
         currentUserId: widget.uid,
         targetUserId: targetUserId,
       );
-
-      // Refresh the list
       setState(() {});
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('User unblocked successfully')),
       );
