@@ -139,8 +139,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     const androidLink =
         'https://play.google.com/store/apps/details?id=com.ratedly.ratedly&hl=en';
 
-    final message =
-        '$username invited you to join Ratedly.\n\n'
+    final message = '$username invited you to join Ratedly.\n\n'
         'iOS: $iosLink\n'
         'Android: $androidLink';
 
@@ -151,9 +150,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
 
     try {
-      final result = await Share.shareWithResult(
-        message,
-        subject: 'Join me on Ratedly!',
+      // share_plus v10+ uses SharePlus.instance.share()
+      final result = await SharePlus.instance.share(
+        ShareParams(
+          text: message,
+          subject: 'Join me on Ratedly!',
+        ),
       );
 
       if (result.status == ShareResultStatus.success) {
