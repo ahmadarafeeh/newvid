@@ -34,7 +34,7 @@ dependencies:
   country_code_picker: ^3.4.1
   country_flags: ^4.1.0
   country_detector: ^1.0.2+1
-  share_plus: ^10.1.4
+  share_plus: ^11.1.0
 
 
 
