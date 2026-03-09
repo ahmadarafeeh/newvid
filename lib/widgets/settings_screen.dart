@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:Ratedly/utils/theme_provider.dart';
 import 'package:Ratedly/resources/auth_methods.dart';
 import 'package:Ratedly/resources/profile_firestore_methods.dart';
@@ -28,6 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final AuthMethods _authMethods = AuthMethods();
   final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email']);
   String? _currentUserId;
+  String? _currentUsername;
 
   @override
   void initState() {
@@ -42,11 +44,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (userProvider.firebaseUid != null && _currentUserId == null) {
       _currentUserId = userProvider.firebaseUid;
+      _currentUsername = userProvider.user?.username;
       _loadPrivacyStatus();
     } else if (userProvider.firebaseUid == null &&
         userProvider.supabaseUid != null &&
         _currentUserId == null) {
       _currentUserId = userProvider.supabaseUid;
+      _currentUsername = userProvider.user?.username;
       _loadPrivacyStatus();
     }
   }
@@ -57,12 +61,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final response = await _supabase
           .from('users')
-          .select('isPrivate')
+          .select('isPrivate, username')
           .eq('uid', _currentUserId!)
           .maybeSingle();
 
       if (response != null && mounted) {
-        setState(() => _isPrivate = response['isPrivate'] ?? false);
+        setState(() {
+          _isPrivate = response['isPrivate'] ?? false;
+          _currentUsername ??= response['username'] as String?;
+        });
       } else if (mounted) {
         setState(() => _isPrivate = false);
       }
@@ -119,6 +126,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (context) => const LoginScreen()),
       );
+    }
+  }
+
+  // =============================================
+  // INVITE A FRIEND
+  // =============================================
+  Future<void> _inviteFriend() async {
+    final username = _currentUsername ?? 'Someone';
+
+    const iosLink = 'https://apps.apple.com/us/app/ratedly/id6746138563';
+    const androidLink =
+        'https://play.google.com/store/apps/details?id=com.ratedly.ratedly&hl=en';
+
+    final message =
+        '$username invited you to join Ratedly.\n\n'
+        'iOS: $iosLink\n'
+        'Android: $androidLink';
+
+    final result = await Share.shareWithResult(
+      message,
+      subject: 'Join me on Ratedly!',
+    );
+
+    // Log only when user picked an app and dismissed the sheet
+    // ShareResultStatus.success = picked an app (best signal available on iOS/Android)
+    if (result.status == ShareResultStatus.success) {
+      await _logInviteShare(result.raw);
+    }
+  }
+
+  Future<void> _logInviteShare(String platform) async {
+    try {
+      await _supabase.from('invite_shares').insert({
+        'user_id': _currentUserId ?? 'unknown',
+        'username': _currentUsername,
+        'platform': platform.isNotEmpty ? platform : 'unknown',
+      });
+    } catch (e) {
+      // Logging failure should never affect the user experience
+      debugPrint('invite_shares log failed: $e');
     }
   }
 
@@ -226,7 +273,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 accessToken: googleAuth.accessToken,
               );
             }
-            if (credential == null) throw Exception('Google credential not obtained');
+            if (credential == null)
+              throw Exception('Google credential not obtained');
             await user!.reauthenticateWithCredential(credential);
           } catch (e) {
             throw Exception('Google re-authentication failed: $e');
@@ -426,7 +474,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               Navigator.of(context).pop();
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                    content: Text('Thank you for your feedback!',
+                                    content: Text(
+                                        'Thank you for your feedback!',
                                         style: TextStyle(color: Colors.white))),
                               );
                             }
@@ -509,11 +558,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final userProvider = Provider.of<UserProvider>(context, listen: false);
       if (userProvider.firebaseUid != null) {
         _currentUserId = userProvider.firebaseUid;
+        _currentUsername = userProvider.user?.username;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _loadPrivacyStatus();
         });
       } else if (userProvider.supabaseUid != null) {
         _currentUserId = userProvider.supabaseUid;
+        _currentUsername = userProvider.user?.username;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _loadPrivacyStatus();
         });
@@ -545,6 +596,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             builder: (context) =>
                                 const BlueVerificationScreen()),
                       ),
+                    ),
+                    _buildOptionTile(
+                      title: 'Invite a Friend',
+                      icon: Icons.person_add_alt_1,
+                      onTap: _inviteFriend,
                     ),
                     _buildOptionTile(
                       title: 'Algorithm',
