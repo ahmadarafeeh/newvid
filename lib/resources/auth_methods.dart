@@ -225,7 +225,7 @@ class AuthMethods {
             'createdAt': DateTime.now().toIso8601String(),
             'dateOfBirth': null,
             'gender': null,
-            'isVerified': false,
+            'isVerified': false, // ✅ FIX: never auto-verify on signup
             'blockedUsers': <dynamic>[],
             'country': null,
             'migrated': true,
@@ -316,7 +316,7 @@ class AuthMethods {
         'createdAt': DateTime.now().toIso8601String(),
         'dateOfBirth': dateOfBirth.toIso8601String(),
         'gender': gender,
-        'isVerified': true,
+        'isVerified': false, // ✅ FIX: blue check earned via referrals only
         'migrated': true,
         'supabase_uid': session.user.id,
         'blockedUsers': <dynamic>[],
@@ -527,7 +527,7 @@ class AuthMethods {
           'createdAt': DateTime.now().toIso8601String(),
           'dateOfBirth': null,
           'gender': null,
-          'isVerified': false,
+          'isVerified': false, // ✅ FIX: never auto-verify on signup
           'blockedUsers': <dynamic>[],
           'country': null,
           'migrated': false,
@@ -617,7 +617,7 @@ class AuthMethods {
         'createdAt': DateTime.now().toIso8601String(),
         'dateOfBirth': dateOfBirth.toIso8601String(),
         'gender': gender,
-        'isVerified': true,
+        'isVerified': false, // ✅ FIX: blue check earned via referrals only
         'migrated': false,
         'blockedUsers': <dynamic>[],
       };
@@ -884,7 +884,7 @@ class AuthMethods {
             'createdAt': DateTime.now().toIso8601String(),
             'dateOfBirth': null,
             'gender': null,
-            'isVerified': false,
+            'isVerified': false, // ✅ FIX: never auto-verify on signup
             'blockedUsers': <dynamic>[],
             'country': null,
             'migrated': false,
@@ -996,7 +996,7 @@ class AuthMethods {
             'createdAt': DateTime.now().toIso8601String(),
             'dateOfBirth': null,
             'gender': null,
-            'isVerified': false,
+            'isVerified': false, // ✅ FIX: never auto-verify on signup
             'blockedUsers': <dynamic>[],
             'country': null,
             'migrated': false,
