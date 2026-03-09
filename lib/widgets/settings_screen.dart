@@ -144,27 +144,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'iOS: $iosLink\n'
         'Android: $androidLink';
 
-    final result = await Share.shareWithResult(
-      message,
-      subject: 'Join me on Ratedly!',
+    // Log that user tapped the button
+    await _logInviteShare(
+      status: 'INVITE_TAPPED',
+      platform: null,
     );
 
-    // Log only when user picked an app and dismissed the sheet
-    // ShareResultStatus.success = picked an app (best signal available on iOS/Android)
-    if (result.status == ShareResultStatus.success) {
-      await _logInviteShare(result.raw);
+    try {
+      final result = await Share.shareWithResult(
+        message,
+        subject: 'Join me on Ratedly!',
+      );
+
+      if (result.status == ShareResultStatus.success) {
+        // User picked an app and dismissed the sheet
+        await _logInviteShare(
+          status: 'INVITE_SHARED',
+          platform: result.raw.isNotEmpty ? result.raw : 'unknown',
+        );
+      } else if (result.status == ShareResultStatus.dismissed) {
+        // User opened the sheet but dismissed without picking
+        await _logInviteShare(
+          status: 'INVITE_DISMISSED',
+          platform: null,
+        );
+      } else {
+        // Unavailable — share sheet couldn't open
+        await _logInviteShare(
+          status: 'INVITE_UNAVAILABLE',
+          platform: null,
+        );
+      }
+    } catch (e, stack) {
+      await _logInviteShare(
+        status: 'INVITE_ERROR',
+        platform: null,
+        errorDetails: e.toString(),
+        stackTrace: stack.toString(),
+      );
     }
   }
 
-  Future<void> _logInviteShare(String platform) async {
+  Future<void> _logInviteShare({
+    required String status,
+    String? platform,
+    String? errorDetails,
+    String? stackTrace,
+  }) async {
     try {
       await _supabase.from('invite_shares').insert({
         'user_id': _currentUserId ?? 'unknown',
         'username': _currentUsername,
-        'platform': platform.isNotEmpty ? platform : 'unknown',
+        'status': status,
+        'platform': platform,
+        'error_details': errorDetails,
+        'stack_trace': stackTrace,
       });
     } catch (e) {
-      // Logging failure should never affect the user experience
       debugPrint('invite_shares log failed: $e');
     }
   }
