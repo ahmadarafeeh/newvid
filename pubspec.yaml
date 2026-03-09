@@ -1,6 +1,6 @@
 name: Ratedly
 description: A new Flutter project.
-version: 1.0.24+18
+version: 1.0.24+23
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -34,7 +34,8 @@ dependencies:
   country_code_picker: ^3.4.1
   country_flags: ^4.1.0
   country_detector: ^1.0.2+1
-  share_plus: ^7.2.2
+  share_plus: ^10.1.4
+
 
 
 dev_dependencies:
