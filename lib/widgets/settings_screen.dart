@@ -31,6 +31,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _currentUserId;
   String? _currentUsername;
 
+  // GlobalKey to get the position of the Invite button for iOS share sheet anchor
+  final GlobalKey _inviteButtonKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
@@ -149,12 +152,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
       platform: null,
     );
 
+    // Get the position of the invite button for iOS share sheet anchor
+    // iOS requires a non-zero origin rect or it throws PlatformException
+    Rect shareOrigin = Rect.fromCenter(
+      center: Offset(
+        MediaQuery.of(context).size.width / 2,
+        MediaQuery.of(context).size.height / 2,
+      ),
+      width: 1,
+      height: 1,
+    );
+    final renderBox =
+        _inviteButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox != null) {
+      final position = renderBox.localToGlobal(Offset.zero);
+      shareOrigin = position & renderBox.size;
+    }
+
     try {
-      // share_plus v10+ uses SharePlus.instance.share()
       final result = await SharePlus.instance.share(
         ShareParams(
           text: message,
           subject: 'Join me on Ratedly!',
+          sharePositionOrigin: shareOrigin,
         ),
       );
 
@@ -561,11 +581,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     VoidCallback? onTap,
     Color? iconColor,
     Widget? trailing,
+    Key? tileKey,
   }) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final colors = _getColors(themeProvider);
 
     return Container(
+      key: tileKey,
       margin: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         color: colors.cardColor,
@@ -635,10 +657,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 const BlueVerificationScreen()),
                       ),
                     ),
+                    // tileKey passed here so _inviteFriend can find this
+                    // widget's position on screen for the iOS share sheet anchor
                     _buildOptionTile(
                       title: 'Invite a Friend',
                       icon: Icons.person_add_alt_1,
                       onTap: _inviteFriend,
+                      tileKey: _inviteButtonKey,
                     ),
                     _buildOptionTile(
                       title: 'Algorithm',
