@@ -7,9 +7,8 @@ import 'package:Ratedly/screens/Profile_page/image_screen.dart';
 import 'package:Ratedly/utils/theme_provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:Ratedly/widgets/verified_username_widget.dart';
-import 'package:Ratedly/providers/user_provider.dart'; // Add this import
+import 'package:Ratedly/providers/user_provider.dart';
 
-// Define color schemes for both themes at top level
 class _SearchColorSet {
   final Color textColor;
   final Color backgroundColor;
@@ -107,6 +106,10 @@ class _SearchScreenState extends State<SearchScreen>
   Set<String> blockedUsersSet = {};
   bool _isLoading = true;
 
+  // ── A/B test: true = show view-count badges on post thumbnails ────────
+  bool _showViewCount = false;
+  // ──────────────────────────────────────────────────────────────────────
+
   // Pagination helpers
   int _offset = 0;
   bool _isLoadingMore = false;
@@ -117,37 +120,38 @@ class _SearchScreenState extends State<SearchScreen>
   final int _subsequentPostsLimit = 6;
   final int _initialPostsToShow = 12;
 
-  // Scroll controller
   final ScrollController _scrollController = ScrollController();
 
-  // Suggested users
   List<String> _rotatedSuggestedUsers = [];
   final Random _random = Random();
 
-  // Video player controllers cache for posts
   final Map<String, VideoPlayerController> _videoControllers = {};
   final Map<String, bool> _videoControllersInitialized = {};
 
-  // Video player controllers cache for user profile avatars
   final Map<String, VideoPlayerController> _avatarVideoControllers = {};
   final Map<String, bool> _avatarVideoControllersInitialized = {};
 
-  // Helper method to get the appropriate color scheme
   _SearchColorSet _getColors(ThemeProvider themeProvider) {
-    final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
-    return isDarkMode ? _SearchDarkColors() : _SearchLightColors();
+    return themeProvider.themeMode == ThemeMode.dark
+        ? _SearchDarkColors()
+        : _SearchLightColors();
   }
+
+  // ========== FORMAT VIEW COUNT ==========
+  String _formatViewCount(int count) {
+    if (count >= 1000000) return '${(count / 1000000).toStringAsFixed(1)}M';
+    if (count >= 1000) return '${(count / 1000).toStringAsFixed(1)}K';
+    return count.toString();
+  }
+  // ========================================
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-
-    // Enhanced scroll listener with both extentAfter (for mobile) and pixels (for web)
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >=
-              _scrollController.position.maxScrollExtent -
-                  200 && // Reduced threshold for web
+              _scrollController.position.maxScrollExtent - 200 &&
           !_isLoadingMore &&
           _hasMorePosts &&
           !isShowUsers) {
@@ -159,30 +163,19 @@ class _SearchScreenState extends State<SearchScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-
-    // Get the user ID from UserProvider when dependencies change
     final userProvider = Provider.of<UserProvider>(context, listen: false);
 
     if (userProvider.firebaseUid != null && currentUserId == null) {
       currentUserId = userProvider.firebaseUid;
-      if (!_isLoading) {
-        // If we're already not loading but have a user ID now, init data
-        _initData();
-      }
+      if (!_isLoading) _initData();
     } else if (userProvider.firebaseUid == null &&
         userProvider.supabaseUid != null &&
         currentUserId == null) {
-      // Fallback to Supabase UID if Firebase UID is not available
       currentUserId = userProvider.supabaseUid;
-      if (!_isLoading) {
-        _initData();
-      }
+      if (!_isLoading) _initData();
     }
 
-    // If we have a user ID and haven't loaded data yet, init data
-    if (currentUserId != null && _isLoading) {
-      _initData();
-    }
+    if (currentUserId != null && _isLoading) _initData();
   }
 
   @override
@@ -193,17 +186,12 @@ class _SearchScreenState extends State<SearchScreen>
     }
   }
 
-  // Helper method to pause all video controllers
   void _pauseAllVideos() {
-    for (final controller in _videoControllers.values) {
-      if (controller.value.isPlaying) {
-        controller.pause();
-      }
+    for (final c in _videoControllers.values) {
+      if (c.value.isPlaying) c.pause();
     }
-    for (final controller in _avatarVideoControllers.values) {
-      if (controller.value.isPlaying) {
-        controller.pause();
-      }
+    for (final c in _avatarVideoControllers.values) {
+      if (c.value.isPlaying) c.pause();
     }
   }
 
@@ -212,105 +200,67 @@ class _SearchScreenState extends State<SearchScreen>
     WidgetsBinding.instance.removeObserver(this);
     searchController.dispose();
     _scrollController.dispose();
-
-    // Dispose all video controllers for posts
-    for (final controller in _videoControllers.values) {
-      controller.dispose();
+    for (final c in _videoControllers.values) {
+      c.dispose();
     }
     _videoControllers.clear();
     _videoControllersInitialized.clear();
-
-    // Dispose all video controllers for avatars
-    for (final controller in _avatarVideoControllers.values) {
-      controller.dispose();
+    for (final c in _avatarVideoControllers.values) {
+      c.dispose();
     }
     _avatarVideoControllers.clear();
     _avatarVideoControllersInitialized.clear();
-
     super.dispose();
   }
 
-  // -------------------------
-  // Video player logic for posts
-  // -------------------------
-
+  // ========== VIDEO CONTROLLERS ==========
   Future<void> _initializeVideoController(String videoUrl) async {
     if (_videoControllers.containsKey(videoUrl) ||
-        _videoControllersInitialized[videoUrl] == true) {
-      return;
-    }
-
+        _videoControllersInitialized[videoUrl] == true) return;
     try {
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(videoUrl),
-        videoPlayerOptions: VideoPlayerOptions(
-          mixWithOthers: true,
-        ),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
       );
-
       _videoControllers[videoUrl] = controller;
       _videoControllersInitialized[videoUrl] = false;
-
       controller.addListener(() {
         if (controller.value.isInitialized &&
             !_videoControllersInitialized[videoUrl]!) {
           _videoControllersInitialized[videoUrl] = true;
-
           _configureVideoLoop(controller);
-
-          if (mounted) {
-            setState(() {});
-          }
+          if (mounted) setState(() {});
         }
       });
-
       await controller.initialize();
-      // Mute video by default
       await controller.setVolume(0.0);
-    } catch (e) {
+    } catch (_) {
       _videoControllers.remove(videoUrl)?.dispose();
       _videoControllersInitialized.remove(videoUrl);
     }
   }
 
-  // -------------------------
-  // Video player logic for avatars
-  // -------------------------
-
   Future<void> _initializeAvatarVideoController(String videoUrl) async {
     if (_avatarVideoControllers.containsKey(videoUrl) ||
-        _avatarVideoControllersInitialized[videoUrl] == true) {
-      return;
-    }
-
+        _avatarVideoControllersInitialized[videoUrl] == true) return;
     try {
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(videoUrl),
-        videoPlayerOptions: VideoPlayerOptions(
-          mixWithOthers: true,
-        ),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
       );
-
       _avatarVideoControllers[videoUrl] = controller;
       _avatarVideoControllersInitialized[videoUrl] = false;
-
       controller.addListener(() {
         if (controller.value.isInitialized &&
             !_avatarVideoControllersInitialized[videoUrl]!) {
           _avatarVideoControllersInitialized[videoUrl] = true;
-
           _configureVideoLoop(controller);
-
-          if (mounted) {
-            setState(() {});
-          }
+          if (mounted) setState(() {});
         }
       });
-
       await controller.initialize();
-      // Mute avatar video by default (as per requirement)
       await controller.setVolume(0.0);
-    } catch (e) {
+    } catch (_) {
       _avatarVideoControllers.remove(videoUrl)?.dispose();
       _avatarVideoControllersInitialized.remove(videoUrl);
     }
@@ -318,117 +268,84 @@ class _SearchScreenState extends State<SearchScreen>
 
   void _configureVideoLoop(VideoPlayerController controller) {
     final duration = controller.value.duration;
-    final endPosition =
-        duration.inSeconds > 0 ? const Duration(seconds: 1) : duration;
-
+    final end = duration.inSeconds > 0 ? const Duration(seconds: 1) : duration;
     controller.addListener(() {
       if (controller.value.isInitialized && controller.value.isPlaying) {
-        final currentPosition = controller.value.position;
-        if (currentPosition >= endPosition) {
-          controller.seekTo(Duration.zero);
-        }
+        if (controller.value.position >= end) controller.seekTo(Duration.zero);
       }
     });
-
     controller.play();
   }
 
-  VideoPlayerController? _getVideoController(String videoUrl) {
-    return _videoControllers[videoUrl];
-  }
+  VideoPlayerController? _getVideoController(String url) =>
+      _videoControllers[url];
+  bool _isVideoControllerInitialized(String url) =>
+      _videoControllersInitialized[url] == true;
+  VideoPlayerController? _getAvatarVideoController(String url) =>
+      _avatarVideoControllers[url];
+  bool _isAvatarVideoControllerInitialized(String url) =>
+      _avatarVideoControllersInitialized[url] == true;
 
-  bool _isVideoControllerInitialized(String videoUrl) {
-    return _videoControllersInitialized[videoUrl] == true;
-  }
-
-  VideoPlayerController? _getAvatarVideoController(String videoUrl) {
-    return _avatarVideoControllers[videoUrl];
-  }
-
-  bool _isAvatarVideoControllerInitialized(String videoUrl) {
-    return _avatarVideoControllersInitialized[videoUrl] == true;
-  }
-
-  // Helper method to detect video files by extension
   bool _isVideoFile(String url) {
     if (url.isEmpty) return false;
-
-    final lowerUrl = url.toLowerCase();
-    return lowerUrl.endsWith('.mp4') ||
-        lowerUrl.endsWith('.mov') ||
-        lowerUrl.endsWith('.avi') ||
-        lowerUrl.endsWith('.wmv') ||
-        lowerUrl.endsWith('.flv') ||
-        lowerUrl.endsWith('.mkv') ||
-        lowerUrl.endsWith('.webm') ||
-        lowerUrl.endsWith('.m4v') ||
-        lowerUrl.endsWith('.3gp') ||
-        lowerUrl.contains('/video/') ||
-        lowerUrl.contains('video=true');
+    final l = url.toLowerCase();
+    return l.endsWith('.mp4') ||
+        l.endsWith('.mov') ||
+        l.endsWith('.avi') ||
+        l.endsWith('.wmv') ||
+        l.endsWith('.flv') ||
+        l.endsWith('.mkv') ||
+        l.endsWith('.webm') ||
+        l.endsWith('.m4v') ||
+        l.endsWith('.3gp') ||
+        l.contains('/video/') ||
+        l.contains('video=true');
   }
 
   Widget _buildVideoPlayer(String videoUrl, _SearchColorSet colors) {
     final controller = _getVideoController(videoUrl);
     final isInitialized = _isVideoControllerInitialized(videoUrl);
-
     if (!isInitialized || controller == null) {
       return Container(
         color: colors.gridItemBackgroundColor,
         child: Center(
-          child: CircularProgressIndicator(
-            color: colors.progressIndicatorColor,
-          ),
-        ),
+            child: CircularProgressIndicator(
+                color: colors.progressIndicatorColor)),
       );
     }
-
     return AspectRatio(
       aspectRatio: 0.75,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
         child: Container(
           color: colors.gridItemBackgroundColor,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              FittedBox(
-                fit: BoxFit.cover,
-                child: SizedBox(
-                  width: controller.value.size.width,
-                  height: controller.value.size.height,
-                  child: VideoPlayer(controller),
-                ),
+          child: Stack(fit: StackFit.expand, children: [
+            FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: controller.value.size.width,
+                height: controller.value.size.height,
+                child: VideoPlayer(controller),
               ),
-            ],
-          ),
+            ),
+          ]),
         ),
       ),
     );
   }
 
-  // -------------------------
-  // Avatar video player
-  // -------------------------
-
   Widget _buildAvatarVideoPlayer(String videoUrl, _SearchColorSet colors) {
     final controller = _getAvatarVideoController(videoUrl);
     final isInitialized = _isAvatarVideoControllerInitialized(videoUrl);
-
     if (!isInitialized || controller == null) {
       return Container(
         decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: colors.avatarBackgroundColor,
-        ),
+            shape: BoxShape.circle, color: colors.avatarBackgroundColor),
         child: Center(
-          child: CircularProgressIndicator(
-            color: colors.progressIndicatorColor,
-            strokeWidth: 2.0,
-          ),
-        ),
+            child: CircularProgressIndicator(
+                color: colors.progressIndicatorColor, strokeWidth: 2.0)),
       );
     }
-
     return ClipOval(
       child: SizedBox(
         width: 40,
@@ -454,55 +371,56 @@ class _SearchScreenState extends State<SearchScreen>
       return CircleAvatar(
         backgroundColor: colors.avatarBackgroundColor,
         radius: 20,
-        child: Icon(
-          Icons.account_circle,
-          size: 40,
-          color: colors.iconColor,
-        ),
+        child: Icon(Icons.account_circle, size: 40, color: colors.iconColor),
       );
     }
-
     if (isVideo) {
-      // Initialize avatar video controller if needed
       if (!_avatarVideoControllers.containsKey(url)) {
         _initializeAvatarVideoController(url);
       }
       return _buildAvatarVideoPlayer(url, colors);
     }
-
-    // Regular image
     return CircleAvatar(
       backgroundColor: colors.avatarBackgroundColor,
       radius: 20,
       backgroundImage: NetworkImage(url),
-      child: url.isEmpty || url == "default"
-          ? Icon(
-              Icons.account_circle,
-              size: 40,
-              color: colors.iconColor,
-            )
-          : null,
     );
   }
 
-  // -------------------------
-  // Data loading methods
-  // -------------------------
-
+  // ========== DATA LOADING ==========
   Future<void> _initData() async {
     if (currentUserId == null) {
       setState(() => _isLoading = false);
       return;
     }
-
     setState(() => _isLoading = true);
 
     await Future.wait([
       _loadBlockedUsers(),
       _fetchPosts(),
+      _loadCurrentUserAbTest(), // ── load A/B flag ──
     ]);
     _rotateSuggestedUsers();
     setState(() => _isLoading = false);
+  }
+
+  // ── Reads `test` column from the logged-in user's row.
+  // true  → show view-count badge (treatment)
+  // false → hide badge (control)
+  Future<void> _loadCurrentUserAbTest() async {
+    if (currentUserId == null) return;
+    try {
+      final result = await _supabase
+          .from('users')
+          .select('test')
+          .eq('uid', currentUserId!)
+          .maybeSingle();
+      if (mounted) {
+        setState(() => _showViewCount = result?['test'] == true);
+      }
+    } catch (_) {
+      // On error keep _showViewCount = false (control group)
+    }
   }
 
   Future<void> _loadBlockedUsers() async {
@@ -510,17 +428,15 @@ class _SearchScreenState extends State<SearchScreen>
       blockedUsersSet = {};
       return;
     }
-
     try {
       final response = await _supabase
           .from('users')
           .select('blockedUsers')
           .eq('uid', currentUserId!)
           .single();
-
       final blockedUsers = response['blockedUsers'] as List<dynamic>?;
       blockedUsersSet = Set<String>.from(blockedUsers ?? []);
-    } catch (e) {
+    } catch (_) {
       blockedUsersSet = {};
     }
   }
@@ -532,7 +448,6 @@ class _SearchScreenState extends State<SearchScreen>
       _isFirstLoad = false;
       return;
     }
-
     try {
       final excludedUsers = [...blockedUsersSet, currentUserId!];
       final postsLimit =
@@ -547,19 +462,14 @@ class _SearchScreenState extends State<SearchScreen>
 
       if (response is List && response.isNotEmpty) {
         _allPosts = response.map<Map<String, dynamic>>((post) {
-          final Map<String, dynamic> convertedPost = {};
-          (post as Map).forEach((key, value) {
-            convertedPost[key.toString()] = value;
-          });
-          return convertedPost;
+          final Map<String, dynamic> converted = {};
+          (post as Map).forEach((k, v) => converted[k.toString()] = v);
+          return converted;
         }).toList();
 
-        // Initialize video controllers for all video posts
         for (final post in _allPosts) {
-          final postUrl = post['postUrl']?.toString() ?? '';
-          if (_isVideoFile(postUrl)) {
-            _initializeVideoController(postUrl);
-          }
+          final url = post['postUrl']?.toString() ?? '';
+          if (_isVideoFile(url)) _initializeVideoController(url);
         }
 
         _offset = _allPosts.length;
@@ -570,7 +480,7 @@ class _SearchScreenState extends State<SearchScreen>
         _hasMorePosts = false;
         _isFirstLoad = false;
       }
-    } catch (e) {
+    } catch (_) {
       _allPosts = [];
       _hasMorePosts = false;
       _isFirstLoad = false;
@@ -578,41 +488,30 @@ class _SearchScreenState extends State<SearchScreen>
   }
 
   Future<void> _loadMorePosts() async {
-    if (!_hasMorePosts || _isLoadingMore) {
-      return;
-    }
-
+    if (!_hasMorePosts || _isLoadingMore) return;
     setState(() => _isLoadingMore = true);
-
     try {
       final excludedUsers = [...blockedUsersSet, currentUserId!];
       final postsLimit = _subsequentPostsLimit;
-
-      // Calculate page number using integer division
       final pageNumber = _offset ~/ postsLimit;
 
       final response = await _supabase.rpc('get_search_feed', params: {
         'current_user_id': currentUserId!,
         'excluded_users': excludedUsers,
-        'page_offset': pageNumber, // Integer division for page number
+        'page_offset': pageNumber,
         'page_limit': postsLimit,
       });
 
       if (response is List && response.isNotEmpty) {
         final newPosts = response.map<Map<String, dynamic>>((post) {
-          final Map<String, dynamic> convertedPost = {};
-          (post as Map).forEach((key, value) {
-            convertedPost[key.toString()] = value;
-          });
-          return convertedPost;
+          final Map<String, dynamic> converted = {};
+          (post as Map).forEach((k, v) => converted[k.toString()] = v);
+          return converted;
         }).toList();
 
-        // Initialize video controllers for new video posts
         for (final post in newPosts) {
-          final postUrl = post['postUrl']?.toString() ?? '';
-          if (_isVideoFile(postUrl)) {
-            _initializeVideoController(postUrl);
-          }
+          final url = post['postUrl']?.toString() ?? '';
+          if (_isVideoFile(url)) _initializeVideoController(url);
         }
 
         setState(() {
@@ -623,7 +522,7 @@ class _SearchScreenState extends State<SearchScreen>
       } else {
         setState(() => _hasMorePosts = false);
       }
-    } catch (e) {
+    } catch (_) {
       setState(() => _hasMorePosts = false);
     } finally {
       setState(() => _isLoadingMore = false);
@@ -635,9 +534,8 @@ class _SearchScreenState extends State<SearchScreen>
       _rotatedSuggestedUsers = [];
       return;
     }
-
     final suggestedUserIds = _allPosts
-        .map((post) => post['uid']?.toString())
+        .map((p) => p['uid']?.toString())
         .whereType<String>()
         .where((uid) => !blockedUsersSet.contains(uid) && uid != currentUserId)
         .toSet()
@@ -647,22 +545,16 @@ class _SearchScreenState extends State<SearchScreen>
       _rotatedSuggestedUsers = [];
       return;
     }
-
     suggestedUserIds.shuffle(_random);
     _rotatedSuggestedUsers = suggestedUserIds.take(5).toList();
   }
 
-  // SIMPLIFIED: Faster navigation without extra checks
   void _navigateToProfile(String uid) {
     if (uid.isEmpty) return;
-
-    // Pause any currently playing video before navigation
     _pauseAllVideos();
-
     Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => ProfileScreen(uid: uid)),
-    ).then((_) {
+            context, MaterialPageRoute(builder: (_) => ProfileScreen(uid: uid)))
+        .then((_) {
       if (mounted) {
         setState(() {
           isShowUsers = false;
@@ -675,19 +567,14 @@ class _SearchScreenState extends State<SearchScreen>
   Future<List<Map<String, dynamic>>> _fetchUsersByIds(
       List<String> userIds) async {
     if (userIds.isEmpty) return [];
-
     try {
       final response =
           await _supabase.from('users').select().inFilter('uid', userIds);
-
-      final users = List<Map<String, dynamic>>.from(response);
-
-      // Simple filter - remove blocked users and current user
-      return users.where((user) {
-        final userId = user['uid']?.toString() ?? '';
-        return !blockedUsersSet.contains(userId) && userId != currentUserId;
+      return List<Map<String, dynamic>>.from(response).where((u) {
+        final id = u['uid']?.toString() ?? '';
+        return !blockedUsersSet.contains(id) && id != currentUserId;
       }).toList();
-    } catch (e) {
+    } catch (_) {
       return [];
     }
   }
@@ -699,156 +586,116 @@ class _SearchScreenState extends State<SearchScreen>
           .select()
           .ilike('username', '$query%')
           .limit(15);
-
-      final users = List<Map<String, dynamic>>.from(response);
-
-      // Simple filter
-      return users.where((user) {
-        final userId = user['uid']?.toString() ?? '';
-        return !blockedUsersSet.contains(userId) && userId != currentUserId;
+      return List<Map<String, dynamic>>.from(response).where((u) {
+        final id = u['uid']?.toString() ?? '';
+        return !blockedUsersSet.contains(id) && id != currentUserId;
       }).toList();
-    } catch (e) {
+    } catch (_) {
       return [];
     }
   }
 
-  // -------------------------
-  // Skeleton Loading Widgets
-  // -------------------------
-
+  // ========== SKELETONS ==========
   Widget _buildPostsGridSkeleton(_SearchColorSet colors) {
     return ListView(
       padding: const EdgeInsets.all(8.0),
       children: [
-        // Top posts section skeleton
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16.0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Divider(color: colors.dividerColor),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                    child: Container(
-                      height: 20,
-                      width: 180,
-                      decoration: BoxDecoration(
-                        color: colors.skeletonColor,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: Divider(color: colors.dividerColor),
-                  ),
-                ],
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16.0),
+            child: Row(children: [
+              Expanded(child: Divider(color: colors.dividerColor)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                child: Container(
+                  height: 20,
+                  width: 180,
+                  decoration: BoxDecoration(
+                      color: colors.skeletonColor,
+                      borderRadius: BorderRadius.circular(4)),
+                ),
               ),
-            ),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              Expanded(child: Divider(color: colors.dividerColor)),
+            ]),
+          ),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 3,
                 crossAxisSpacing: 8.0,
                 mainAxisSpacing: 8.0,
-                childAspectRatio: 0.75,
-              ),
-              itemCount: 3,
-              itemBuilder: (context, index) => _buildPostSkeleton(colors),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16.0),
-              child: Divider(color: colors.dividerColor),
-            ),
-          ],
-        ),
-        // Regular posts skeleton
+                childAspectRatio: 0.75),
+            itemCount: 3,
+            itemBuilder: (_, __) => _buildPostSkeleton(colors),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16.0),
+            child: Divider(color: colors.dividerColor),
+          ),
+        ]),
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            crossAxisSpacing: 8.0,
-            mainAxisSpacing: 8.0,
-            childAspectRatio: 0.75,
-          ),
+              crossAxisCount: 3,
+              crossAxisSpacing: 8.0,
+              mainAxisSpacing: 8.0,
+              childAspectRatio: 0.75),
           itemCount: _initialPostsToShow - 3,
-          itemBuilder: (context, index) => _buildPostSkeleton(colors),
+          itemBuilder: (_, __) => _buildPostSkeleton(colors),
         ),
       ],
     );
   }
 
-  Widget _buildPostSkeleton(_SearchColorSet colors) {
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.skeletonColor,
-        borderRadius: BorderRadius.circular(8),
-      ),
-    );
-  }
+  Widget _buildPostSkeleton(_SearchColorSet colors) => Container(
+        decoration: BoxDecoration(
+            color: colors.skeletonColor,
+            borderRadius: BorderRadius.circular(8)),
+      );
 
   Widget _buildSuggestedUsersSkeleton(_SearchColorSet colors) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: Container(
-            height: 20,
-            width: 140,
-            decoration: BoxDecoration(
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Container(
+          height: 20,
+          width: 140,
+          decoration: BoxDecoration(
               color: colors.skeletonColor,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
+              borderRadius: BorderRadius.circular(4)),
         ),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.only(top: 8),
-            itemCount: 5,
-            itemBuilder: (context, index) {
-              return _buildUserSkeleton(colors);
-            },
-          ),
+      ),
+      Expanded(
+        child: ListView.builder(
+          padding: const EdgeInsets.only(top: 8),
+          itemCount: 5,
+          itemBuilder: (_, __) => _buildUserSkeleton(colors),
         ),
-      ],
-    );
+      ),
+    ]);
   }
 
   Widget _buildUserSkeleton(_SearchColorSet colors) {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-      leading: CircleAvatar(
-        backgroundColor: colors.skeletonColor,
-        radius: 20,
-      ),
-      title: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
+      leading: CircleAvatar(backgroundColor: colors.skeletonColor, radius: 20),
+      title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
             height: 14,
             width: 120,
             decoration: BoxDecoration(
-              color: colors.skeletonColor,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Container(
+                color: colors.skeletonColor,
+                borderRadius: BorderRadius.circular(4))),
+        const SizedBox(height: 6),
+        Container(
             height: 12,
             width: 80,
             decoration: BoxDecoration(
-              color: colors.skeletonColor.withOpacity(0.7),
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-        ],
-      ),
+                color: colors.skeletonColor.withOpacity(0.7),
+                borderRadius: BorderRadius.circular(4))),
+      ]),
     );
   }
 
@@ -856,29 +703,23 @@ class _SearchScreenState extends State<SearchScreen>
     return ListView.builder(
       padding: const EdgeInsets.only(top: 8),
       itemCount: 5,
-      itemBuilder: (context, index) {
-        return _buildUserSkeleton(colors);
-      },
+      itemBuilder: (_, __) => _buildUserSkeleton(colors),
     );
   }
 
+  // ========== BUILD ==========
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final colors = _getColors(themeProvider);
 
-    // Check if we have a user ID from UserProvider
     if (currentUserId == null) {
       final userProvider = Provider.of<UserProvider>(context, listen: false);
-
       if (userProvider.firebaseUid != null && currentUserId == null) {
         currentUserId = userProvider.firebaseUid;
         if (!_isLoading) {
-          // Delay slightly to avoid setState during build
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) {
-              _initData();
-            }
+            if (mounted) _initData();
           });
         }
       } else if (userProvider.firebaseUid == null &&
@@ -887,9 +728,7 @@ class _SearchScreenState extends State<SearchScreen>
         currentUserId = userProvider.supabaseUid;
         if (!_isLoading) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) {
-              _initData();
-            }
+            if (mounted) _initData();
           });
         }
       }
@@ -897,27 +736,6 @@ class _SearchScreenState extends State<SearchScreen>
 
     return Scaffold(
       backgroundColor: colors.backgroundColor,
-      body: _isLoading
-          ? _buildEnhancedSkeletonLoading(colors)
-          : Column(
-              children: [
-                // Main content area that takes all available space
-                Expanded(
-                  child:
-                      _isSearchFocused && searchController.text.trim().isEmpty
-                          ? Padding(
-                              padding: const EdgeInsets.only(top: 15.0),
-                              child: _buildSuggestedUsers(colors),
-                            )
-                          : isShowUsers
-                              ? Padding(
-                                  padding: const EdgeInsets.only(top: 15.0),
-                                  child: _buildUserSearch(colors),
-                                )
-                              : _buildPostsGrid(colors),
-                ),
-              ],
-            ),
       appBar: AppBar(
         backgroundColor: colors.appBarBackgroundColor,
         toolbarHeight: 80,
@@ -936,15 +754,15 @@ class _SearchScreenState extends State<SearchScreen>
                 filled: true,
                 fillColor: colors.cardColor,
                 contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
                 border: OutlineInputBorder(
                   borderSide: BorderSide(color: colors.borderColor),
-                  borderRadius: BorderRadius.all(Radius.circular(4)),
+                  borderRadius: const BorderRadius.all(Radius.circular(4)),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderSide:
                       BorderSide(color: colors.focusedBorderColor, width: 2),
-                  borderRadius: BorderRadius.all(Radius.circular(4)),
+                  borderRadius: const BorderRadius.all(Radius.circular(4)),
                 ),
               ),
               onTap: () {
@@ -971,91 +789,91 @@ class _SearchScreenState extends State<SearchScreen>
           ),
         ),
       ),
+      body: _isLoading
+          ? _buildEnhancedSkeletonLoading(colors)
+          : Column(children: [
+              Expanded(
+                child: _isSearchFocused && searchController.text.trim().isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 15.0),
+                        child: _buildSuggestedUsers(colors))
+                    : isShowUsers
+                        ? Padding(
+                            padding: const EdgeInsets.only(top: 15.0),
+                            child: _buildUserSearch(colors))
+                        : _buildPostsGrid(colors),
+              ),
+            ]),
     );
   }
 
   Widget _buildEnhancedSkeletonLoading(_SearchColorSet colors) {
-    return Column(
-      children: [
-        Expanded(
-          child: _isSearchFocused && searchController.text.trim().isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.only(top: 15.0),
-                  child: _buildSuggestedUsersSkeleton(colors),
-                )
-              : isShowUsers
-                  ? Padding(
-                      padding: const EdgeInsets.only(top: 15.0),
-                      child: _buildUserSearchSkeleton(colors),
-                    )
-                  : _buildPostsGridSkeleton(colors),
-        ),
-      ],
-    );
+    return Column(children: [
+      Expanded(
+        child: _isSearchFocused && searchController.text.trim().isEmpty
+            ? Padding(
+                padding: const EdgeInsets.only(top: 15.0),
+                child: _buildSuggestedUsersSkeleton(colors))
+            : isShowUsers
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 15.0),
+                    child: _buildUserSearchSkeleton(colors))
+                : _buildPostsGridSkeleton(colors),
+      ),
+    ]);
   }
 
   Widget _buildSuggestedUsers(_SearchColorSet colors) {
     if (_rotatedSuggestedUsers.isEmpty) {
       return Center(
-        child: Text('No suggestions available.',
-            style: TextStyle(color: colors.textColor)),
-      );
+          child: Text('No suggestions available.',
+              style: TextStyle(color: colors.textColor)));
     }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: Text(
-            'Suggested users',
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Text('Suggested users',
             style: TextStyle(
                 color: colors.textColor.withOpacity(0.7),
                 fontSize: 16,
-                fontWeight: FontWeight.bold),
-          ),
+                fontWeight: FontWeight.bold)),
+      ),
+      Expanded(
+        child: FutureBuilder<List<Map<String, dynamic>>>(
+          future: _fetchUsersByIds(_rotatedSuggestedUsers),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return _buildSuggestedUsersSkeleton(colors);
+            }
+            final users = snapshot.data ?? [];
+            if (users.isEmpty) {
+              return Center(
+                  child: Text('No suggestions found.',
+                      style: TextStyle(color: colors.textColor)));
+            }
+            return ListView.builder(
+              padding: const EdgeInsets.only(top: 8),
+              itemCount: users.length,
+              itemBuilder: (context, index) {
+                final user = users[index];
+                final userId = user['uid'] as String? ?? '';
+                final photoUrl = user['photoUrl']?.toString() ?? '';
+                return ListTile(
+                  onTap: () => _navigateToProfile(userId),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                  leading: _buildUserAvatar(photoUrl, colors),
+                  title: VerifiedUsernameWidget(
+                    username: user['username']?.toString() ?? 'Unknown',
+                    uid: userId,
+                    style: TextStyle(color: colors.textColor),
+                  ),
+                );
+              },
+            );
+          },
         ),
-        Expanded(
-          child: FutureBuilder<List<Map<String, dynamic>>>(
-            future: _fetchUsersByIds(_rotatedSuggestedUsers),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return _buildSuggestedUsersSkeleton(colors);
-              }
-
-              final users = snapshot.data ?? [];
-
-              if (users.isEmpty) {
-                return Center(
-                    child: Text('No suggestions found.',
-                        style: TextStyle(color: colors.textColor)));
-              }
-
-              return ListView.builder(
-                padding: const EdgeInsets.only(top: 8),
-                itemCount: users.length,
-                itemBuilder: (context, index) {
-                  final user = users[index];
-                  final userId = user['uid'] as String? ?? '';
-                  final photoUrl = user['photoUrl']?.toString() ?? '';
-
-                  return ListTile(
-                    onTap: () => _navigateToProfile(userId),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                    leading: _buildUserAvatar(photoUrl, colors),
-                    title: VerifiedUsernameWidget(
-                      username: user['username']?.toString() ?? 'Unknown',
-                      uid: userId,
-                      style: TextStyle(color: colors.textColor),
-                    ),
-                  );
-                },
-              );
-            },
-          ),
-        ),
-      ],
-    );
+      ),
+    ]);
   }
 
   Widget _buildUserSearch(_SearchColorSet colors) {
@@ -1065,22 +883,18 @@ class _SearchScreenState extends State<SearchScreen>
           child: Text('Please enter a username.',
               style: TextStyle(color: colors.textColor)));
     }
-
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: _searchUsers(query),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return _buildUserSearchSkeleton(colors);
         }
-
         final users = snapshot.data ?? [];
-
         if (users.isEmpty) {
           return Center(
               child: Text('No users found.',
                   style: TextStyle(color: colors.textColor)));
         }
-
         return ListView.builder(
           padding: const EdgeInsets.only(top: 8),
           itemCount: users.length,
@@ -1088,7 +902,6 @@ class _SearchScreenState extends State<SearchScreen>
             final user = users[index];
             final userId = user['uid'] as String? ?? '';
             final photoUrl = user['photoUrl']?.toString() ?? '';
-
             return ListTile(
               onTap: () => _navigateToProfile(userId),
               contentPadding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1108,152 +921,127 @@ class _SearchScreenState extends State<SearchScreen>
   Widget _buildPostsGrid(_SearchColorSet colors) {
     if (_allPosts.isEmpty) {
       return Center(
-        child:
-            Text('No posts found.', style: TextStyle(color: colors.textColor)),
-      );
+          child: Text('No posts found.',
+              style: TextStyle(color: colors.textColor)));
     }
 
     final topPosts =
         _allPosts.length >= 3 ? _allPosts.sublist(0, 3) : _allPosts;
-    final remainingPosts = _allPosts.length > 3 ? _allPosts.sublist(3) : [];
+    final remainingPosts =
+        _allPosts.length > 3 ? _allPosts.sublist(3) : <Map<String, dynamic>>[];
 
-    return Stack(
-      children: [
-        // Enhanced scroll detection with NotificationListener
-        NotificationListener<ScrollNotification>(
-          onNotification: (ScrollNotification scrollNotification) {
-            // Check using extentAfter (more reliable on mobile)
-            if (scrollNotification.metrics.extentAfter <
-                    500 && // Reduced threshold for mobile
-                !_isLoadingMore &&
-                _hasMorePosts &&
-                !isShowUsers) {
-              _loadMorePosts();
-            }
-            return false;
-          },
-          child: ListView(
-            controller: _scrollController,
-            padding: const EdgeInsets.all(8.0),
-            children: [
-              if (topPosts.isNotEmpty)
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+    return Stack(children: [
+      NotificationListener<ScrollNotification>(
+        onNotification: (scrollInfo) {
+          if (scrollInfo.metrics.extentAfter < 500 &&
+              !_isLoadingMore &&
+              _hasMorePosts &&
+              !isShowUsers) {
+            _loadMorePosts();
+          }
+          return false;
+        },
+        child: ListView(
+          controller: _scrollController,
+          padding: const EdgeInsets.all(8.0),
+          children: [
+            if (topPosts.isNotEmpty)
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16.0),
+                  child: Row(children: [
+                    Expanded(child: Divider(color: colors.dividerColor)),
                     Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 16.0),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Divider(color: colors.dividerColor),
-                          ),
-                          Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 8.0),
-                            child: Text(
-                              'Top posts for this week 🏆',
-                              style: TextStyle(
-                                color: colors.textColor,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: Divider(color: colors.dividerColor),
-                          ),
-                        ],
+                      padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                      child: Text(
+                        'Top posts for this week 🏆',
+                        style: TextStyle(
+                            color: colors.textColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16),
                       ),
                     ),
-                    GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
-                        childAspectRatio: 0.75,
-                        crossAxisSpacing: 8.0,
-                        mainAxisSpacing: 8.0,
-                      ),
-                      itemCount: topPosts.length,
-                      itemBuilder: (context, index) {
-                        final post = topPosts[index];
-                        final postUrl = post['postUrl']?.toString() ?? '';
-                        return _buildPostItem(post, postUrl, colors, true);
-                      },
-                    ),
-                    if (remainingPosts.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 16.0),
-                        child: Divider(color: colors.dividerColor),
-                      ),
-                  ],
+                    Expanded(child: Divider(color: colors.dividerColor)),
+                  ]),
                 ),
-              if (remainingPosts.isNotEmpty)
                 GridView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      childAspectRatio: 0.75,
+                      crossAxisSpacing: 8.0,
+                      mainAxisSpacing: 8.0),
+                  itemCount: topPosts.length,
+                  itemBuilder: (context, index) {
+                    final post = topPosts[index];
+                    return _buildPostItem(
+                        post, post['postUrl']?.toString() ?? '', colors, true);
+                  },
+                ),
+                if (remainingPosts.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16.0),
+                    child: Divider(color: colors.dividerColor),
+                  ),
+              ]),
+            if (remainingPosts.isNotEmpty)
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 3,
                     childAspectRatio: 0.75,
                     crossAxisSpacing: 8.0,
-                    mainAxisSpacing: 8.0,
-                  ),
-                  itemCount: remainingPosts.length,
-                  itemBuilder: (context, index) {
-                    final post = remainingPosts[index];
-                    final postUrl = post['postUrl']?.toString() ?? '';
-                    return _buildPostItem(post, postUrl, colors, false);
-                  },
-                ),
-            ],
-          ),
-        ),
-        if (_isLoadingMore)
-          Positioned(
-            bottom: 8,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: colors.backgroundColor.withOpacity(0.8),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: CircularProgressIndicator(
-                  color: colors.progressIndicatorColor,
-                ),
+                    mainAxisSpacing: 8.0),
+                itemCount: remainingPosts.length,
+                itemBuilder: (context, index) {
+                  final post = remainingPosts[index];
+                  return _buildPostItem(
+                      post, post['postUrl']?.toString() ?? '', colors, false);
+                },
               ),
+          ],
+        ),
+      ),
+      if (_isLoadingMore)
+        Positioned(
+          bottom: 8,
+          left: 0,
+          right: 0,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: colors.backgroundColor.withOpacity(0.8),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: CircularProgressIndicator(
+                  color: colors.progressIndicatorColor),
             ),
           ),
-      ],
-    );
+        ),
+    ]);
   }
 
+  // ========== POST ITEM — badge gated by _showViewCount ==========
   Widget _buildPostItem(Map<String, dynamic> post, String postUrl,
       _SearchColorSet colors, bool isTopPost) {
     final isVideo = _isVideoFile(postUrl);
+    if (isVideo) _initializeVideoController(postUrl);
 
-    // Start initialization if it's a video
-    if (isVideo) {
-      _initializeVideoController(postUrl);
-    }
+    final int viewCount = (post['viewers_count'] as num?)?.toInt() ?? 0;
 
     return InkWell(
       onTap: () async {
         final userId = post['uid']?.toString() ?? '';
         if (userId.isEmpty) return;
-
-        // Pause any currently playing video before navigation
         _pauseAllVideos();
-
         final user = await _fetchUserById(userId);
-
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => ImageViewScreen(
+            builder: (_) => ImageViewScreen(
               imageUrl: postUrl,
               postId: post['postId']?.toString() ?? '',
               description: post['description']?.toString() ?? '',
@@ -1272,66 +1060,87 @@ class _SearchScreenState extends State<SearchScreen>
           border: isTopPost ? Border.all(color: Colors.amber, width: 2) : null,
         ),
         clipBehavior: Clip.hardEdge,
-        child: Stack(
-          children: [
-            if (postUrl.isNotEmpty)
-              isVideo
-                  ? _buildVideoPlayer(postUrl, colors)
-                  : AspectRatio(
-                      aspectRatio: 0.75,
-                      child: Image.network(
-                        postUrl,
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: double.infinity,
-                        loadingBuilder: (context, child, loadingProgress) {
-                          if (loadingProgress == null) return child;
-                          return Center(
+        child: Stack(children: [
+          // ── media ─────────────────────────────────────────────────────
+          if (postUrl.isNotEmpty)
+            isVideo
+                ? _buildVideoPlayer(postUrl, colors)
+                : AspectRatio(
+                    aspectRatio: 0.75,
+                    child: Image.network(
+                      postUrl,
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: double.infinity,
+                      loadingBuilder: (_, child, progress) {
+                        if (progress == null) return child;
+                        return Center(
                             child: CircularProgressIndicator(
-                              color: colors.progressIndicatorColor,
-                            ),
-                          );
-                        },
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            color: colors.gridItemBackgroundColor,
-                            child: Icon(Icons.broken_image,
-                                color: colors.iconColor),
-                          );
-                        },
+                                color: colors.progressIndicatorColor));
+                      },
+                      errorBuilder: (_, __, ___) => Container(
+                        color: colors.gridItemBackgroundColor,
+                        child:
+                            Icon(Icons.broken_image, color: colors.iconColor),
                       ),
-                    )
-            else
-              Container(
-                color: colors.gridItemBackgroundColor,
-                child: Icon(Icons.broken_image, color: colors.iconColor),
-              ),
-            if (isTopPost)
-              Positioned(
-                top: 4,
-                right: 4,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
+                    ),
+                  )
+          else
+            Container(
+              color: colors.gridItemBackgroundColor,
+              child: Icon(Icons.broken_image, color: colors.iconColor),
+            ),
+
+          // ── trophy badge (top posts) ───────────────────────────────────
+          if (isTopPost)
+            Positioned(
+              top: 4,
+              right: 4,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
                     color: Colors.black.withOpacity(0.5),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.emoji_events,
-                    color: Colors.amber,
-                    size: 16,
-                  ),
+                    shape: BoxShape.circle),
+                child: const Icon(Icons.emoji_events,
+                    color: Colors.amber, size: 16),
+              ),
+            ),
+
+          // ── view count badge — only for A/B treatment group ────────────
+          if (_showViewCount)
+            Positioned(
+              bottom: 4,
+              left: 4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.55),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.visibility, size: 10, color: Colors.white),
+                    const SizedBox(width: 3),
+                    Text(
+                      _formatViewCount(viewCount),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-          ],
-        ),
+            ),
+        ]),
       ),
     );
   }
 
   Future<Map<String, dynamic>?> _fetchUserById(String userId) async {
     if (userId.isEmpty) return null;
-
     try {
       final response = await _supabase
           .from('users')
@@ -1339,7 +1148,7 @@ class _SearchScreenState extends State<SearchScreen>
           .eq('uid', userId)
           .maybeSingle();
       return response as Map<String, dynamic>?;
-    } catch (e) {
+    } catch (_) {
       return null;
     }
   }
