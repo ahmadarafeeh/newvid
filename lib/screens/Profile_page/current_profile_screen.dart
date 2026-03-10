@@ -103,13 +103,10 @@ class _ExpandableBioTextState extends State<ExpandableBioText> {
   @override
   Widget build(BuildContext context) {
     final shouldTruncate = widget.text.length > widget.maxLength;
-
     if (!shouldTruncate || _isExpanded) {
       return Text(widget.text, style: widget.style);
     }
-
     final truncatedText = widget.text.substring(0, widget.maxLength);
-
     return RichText(
       text: TextSpan(
         children: [
@@ -154,6 +151,10 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   String errorMessage = '';
   final SupabaseProfileMethods _profileMethods = SupabaseProfileMethods();
 
+  // ── A/B test: true = show view-count badges, false = hide ─────────────
+  bool _showViewCount = false;
+  // ──────────────────────────────────────────────────────────────────────
+
   List<dynamic> _galleries = [];
   int _selectedTabIndex = 0;
 
@@ -175,24 +176,31 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   late ScrollController _scrollController;
 
   _ColorSet _getColors(ThemeProvider themeProvider) {
-    final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
-    return isDarkMode ? _DarkColors() : _LightColors();
+    return themeProvider.themeMode == ThemeMode.dark
+        ? _DarkColors()
+        : _LightColors();
+  }
+
+  String _formatViewCount(int count) {
+    if (count >= 1000000) return '${(count / 1000000).toStringAsFixed(1)}M';
+    if (count >= 1000) return '${(count / 1000).toStringAsFixed(1)}K';
+    return count.toString();
   }
 
   bool _isVideoFile(String url) {
     if (url.isEmpty || url == 'default') return false;
-    final lowerUrl = url.toLowerCase();
-    return lowerUrl.endsWith('.mp4') ||
-        lowerUrl.endsWith('.mov') ||
-        lowerUrl.endsWith('.avi') ||
-        lowerUrl.endsWith('.wmv') ||
-        lowerUrl.endsWith('.flv') ||
-        lowerUrl.endsWith('.mkv') ||
-        lowerUrl.endsWith('.webm') ||
-        lowerUrl.endsWith('.m4v') ||
-        lowerUrl.endsWith('.3gp') ||
-        lowerUrl.contains('/video/') ||
-        lowerUrl.contains('video=true');
+    final l = url.toLowerCase();
+    return l.endsWith('.mp4') ||
+        l.endsWith('.mov') ||
+        l.endsWith('.avi') ||
+        l.endsWith('.wmv') ||
+        l.endsWith('.flv') ||
+        l.endsWith('.mkv') ||
+        l.endsWith('.webm') ||
+        l.endsWith('.m4v') ||
+        l.endsWith('.3gp') ||
+        l.contains('/video/') ||
+        l.contains('video=true');
   }
 
   @override
@@ -210,15 +218,13 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
     WidgetsBinding.instance.removeObserver(this);
     _scrollController.removeListener(_scrollListener);
     _scrollController.dispose();
-    for (final controller in _videoControllers.values) {
-      controller.dispose();
+    for (final c in _videoControllers.values) {
+      c.dispose();
     }
     _videoControllers.clear();
     _videoControllersInitialized.clear();
-    if (_profileVideoController != null) {
-      _profileVideoController!.dispose();
-      _profileVideoController = null;
-    }
+    _profileVideoController?.dispose();
+    _profileVideoController = null;
     super.dispose();
   }
 
@@ -305,48 +311,46 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   Widget _buildProfileVideoPlayer(_ColorSet colors) {
     if (_profileVideoController == null || !_isProfileVideoInitialized) {
       return Container(
-        decoration: BoxDecoration(shape: BoxShape.circle, color: colors.cardColor),
-        child: Center(child: CircularProgressIndicator(color: colors.textColor)),
+        decoration:
+            BoxDecoration(shape: BoxShape.circle, color: colors.cardColor),
+        child:
+            Center(child: CircularProgressIndicator(color: colors.textColor)),
       );
     }
-    return Stack(
-      children: [
-        ClipOval(
-          child: SizedBox(
-            width: 80,
-            height: 80,
-            child: FittedBox(
-              fit: BoxFit.cover,
-              child: SizedBox(
-                width: _profileVideoController!.value.size.width,
-                height: _profileVideoController!.value.size.height,
-                child: VideoPlayer(_profileVideoController!),
-              ),
+    return Stack(children: [
+      ClipOval(
+        child: SizedBox(
+          width: 80,
+          height: 80,
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: _profileVideoController!.value.size.width,
+              height: _profileVideoController!.value.size.height,
+              child: VideoPlayer(_profileVideoController!),
             ),
           ),
         ),
-        Positioned(
-          top: 4,
-          right: 4,
-          child: GestureDetector(
-            onTap: _toggleProfileVideoMute,
-            child: Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.6),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                _isProfileVideoMuted ? Icons.volume_off : Icons.volume_up,
-                size: 12,
-                color: Colors.white,
-              ),
+      ),
+      Positioned(
+        top: 4,
+        right: 4,
+        child: GestureDetector(
+          onTap: _toggleProfileVideoMute,
+          child: Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.6), shape: BoxShape.circle),
+            child: Icon(
+              _isProfileVideoMuted ? Icons.volume_off : Icons.volume_up,
+              size: 12,
+              color: Colors.white,
             ),
           ),
         ),
-      ],
-    );
+      ),
+    ]);
   }
 
   Widget _buildProfilePicture(_ColorSet colors) {
@@ -362,19 +366,16 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
       );
     }
     if (isVideo) return _buildProfileVideoPlayer(colors);
-
     return ClipOval(
       child: Container(
         width: 80,
         height: 80,
         color: colors.cardColor,
-        child: Image.network(
-          photoUrl,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Center(
-            child: Icon(Icons.account_circle, size: 80, color: colors.textColor),
-          ),
-        ),
+        child: Image.network(photoUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Center(
+                child: Icon(Icons.account_circle,
+                    size: 80, color: colors.textColor))),
       ),
     );
   }
@@ -383,7 +384,6 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   Future<void> _initializeVideoController(String videoUrl) async {
     if (_videoControllers.containsKey(videoUrl) ||
         _videoControllersInitialized[videoUrl] == true) return;
-
     try {
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(videoUrl),
@@ -400,7 +400,6 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
           if (mounted) setState(() {});
         }
       });
-
       await controller.initialize();
       await controller.setVolume(0.0);
     } catch (_) {
@@ -411,50 +410,42 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
 
   void _configureVideoLoop(VideoPlayerController controller) {
     final duration = controller.value.duration;
-    final endPosition =
-        duration.inSeconds > 0 ? const Duration(seconds: 1) : duration;
+    final end = duration.inSeconds > 0 ? const Duration(seconds: 1) : duration;
     controller.addListener(() {
       if (controller.value.isInitialized && controller.value.isPlaying) {
-        if (controller.value.position >= endPosition) {
-          controller.seekTo(Duration.zero);
-        }
+        if (controller.value.position >= end) controller.seekTo(Duration.zero);
       }
     });
     controller.play();
   }
 
-  VideoPlayerController? _getVideoController(String videoUrl) =>
-      _videoControllers[videoUrl];
-
-  bool _isVideoControllerInitialized(String videoUrl) =>
-      _videoControllersInitialized[videoUrl] == true;
+  VideoPlayerController? _getVideoController(String url) =>
+      _videoControllers[url];
+  bool _isVideoControllerInitialized(String url) =>
+      _videoControllersInitialized[url] == true;
 
   Widget _buildPostVideoPlayer(String videoUrl, _ColorSet colors) {
     final controller = _getVideoController(videoUrl);
     final isInitialized = _isVideoControllerInitialized(videoUrl);
     if (!isInitialized || controller == null) {
       return Container(
-        color: colors.cardColor,
-        child: Center(child: CircularProgressIndicator(color: colors.textColor)),
-      );
+          color: colors.cardColor,
+          child: Center(
+              child: CircularProgressIndicator(color: colors.textColor)));
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(4),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Positioned.fill(
-            child: FittedBox(
-              fit: BoxFit.cover,
-              child: SizedBox(
+      child: Stack(fit: StackFit.expand, children: [
+        Positioned.fill(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
                 width: controller.value.size.width,
                 height: controller.value.size.height,
-                child: VideoPlayer(controller),
-              ),
-            ),
+                child: VideoPlayer(controller)),
           ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
 
@@ -463,34 +454,30 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
     final isInitialized = _isVideoControllerInitialized(videoUrl);
     if (!isInitialized || controller == null) {
       return Container(
-        color: colors.cardColor,
-        child: Center(child: CircularProgressIndicator(color: colors.textColor)),
-      );
+          color: colors.cardColor,
+          child: Center(
+              child: CircularProgressIndicator(color: colors.textColor)));
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Positioned.fill(
-            child: FittedBox(
-              fit: BoxFit.cover,
-              child: SizedBox(
+      child: Stack(fit: StackFit.expand, children: [
+        Positioned.fill(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
                 width: controller.value.size.width,
                 height: controller.value.size.height,
-                child: VideoPlayer(controller),
-              ),
-            ),
+                child: VideoPlayer(controller)),
           ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
 
   void _preInitializeVideoControllers(List<dynamic> posts) {
-    for (final post in posts) {
-      final postUrl = post['postUrl'] ?? '';
-      if (_isVideoFile(postUrl)) _initializeVideoController(postUrl);
+    for (final p in posts) {
+      final url = p['postUrl'] ?? '';
+      if (_isVideoFile(url)) _initializeVideoController(url);
     }
   }
 
@@ -502,17 +489,8 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
     } catch (_) {}
   }
 
-  /// FIX: Previously used .single() which throws a PostgrestException when
-  /// 0 rows are found, crashing the entire Future.wait and showing
-  /// "Something went wrong". Now uses .maybeSingle() which returns null
-  /// on no match, letting us handle the case gracefully.
-  ///
-  /// Also removed the dependency on FirebaseAuth in ProfileScreen —
-  /// pure Supabase users have no Firebase session so currentUser was null,
-  /// causing a 500ms delay and potential misidentification of "my profile".
   Future<void> getData() async {
     if (!mounted) return;
-
     setState(() {
       isLoading = true;
       hasError = false;
@@ -520,39 +498,37 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
     });
 
     try {
-      // Total post count
       final totalPostsResponse =
           await _supabase.from('posts').select('postId').eq('uid', widget.uid);
       final totalPostCount = totalPostsResponse.length;
 
-      // Initial posts batch
       final postsLimit =
           _isFirstLoad ? _initialPostsLimit : _subsequentPostsLimit;
+
+      // viewers_count + fetch A/B flag in the same user row read below
       final initialPosts = await _supabase
           .from('posts')
-          .select('postId, postUrl, description, datePublished, uid')
+          .select(
+              'postId, postUrl, description, datePublished, uid, viewers_count')
           .eq('uid', widget.uid)
           .order('datePublished', ascending: false)
           .range(0, postsLimit - 1);
 
-      // ✅ FIX: .maybeSingle() returns null instead of throwing when 0 rows found
       final userResponse = await _supabase
           .from('users')
           .select()
           .eq('uid', widget.uid)
           .maybeSingle();
 
-      // ✅ FIX: Handle missing user gracefully instead of crashing
       if (userResponse == null) {
-        // Log so we can investigate in Supabase
         try {
           await _supabase.from('login_logs').insert({
             'event_type': 'PROFILE_USER_NOT_FOUND',
             'firebase_uid': widget.uid,
-            'error_details': 'maybeSingle() returned null for uid: ${widget.uid}',
+            'error_details':
+                'maybeSingle() returned null for uid: ${widget.uid}',
           });
         } catch (_) {}
-
         if (mounted) {
           setState(() {
             hasError = true;
@@ -564,8 +540,10 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         return;
       }
 
-      // Remaining queries in parallel — each wrapped so one failure
-      // cannot bring down the whole profile load
+      // ── Read A/B test flag from own user row ─────────────────────────
+      final bool abTest = userResponse['test'] == true;
+      // ──────────────────────────────────────────────────────────────────
+
       final followersResponse = await _supabase
           .from('user_followers')
           .select('follower_id, followed_at')
@@ -580,8 +558,6 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
           .then<List>((v) => v)
           .catchError((_) => <dynamic>[]);
 
-      // ✅ FIX: Galleries query wrapped with catchError so a join/schema
-      // issue cannot crash the whole profile screen
       final galleriesResponse = await _supabase
           .from('galleries')
           .select('''
@@ -594,20 +570,13 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
           .then<List>((v) => v)
           .catchError((_) => <dynamic>[]);
 
-      // Initialize profile video if needed
       final photoUrl = userResponse['photoUrl'] ?? '';
-      if (_isVideoFile(photoUrl)) {
-        _initializeProfileVideo(photoUrl);
-      }
+      if (_isVideoFile(photoUrl)) _initializeProfileVideo(photoUrl);
 
-      // Pre-initialize video controllers for posts
       _preInitializeVideoControllers(initialPosts);
-      for (final gallery in galleriesResponse) {
-        final coverImageUrl =
-            gallery['posts'] != null ? gallery['posts']['postUrl'] ?? '' : '';
-        if (_isVideoFile(coverImageUrl)) {
-          _initializeVideoController(coverImageUrl);
-        }
+      for (final g in galleriesResponse) {
+        final url = g['posts'] != null ? g['posts']['postUrl'] ?? '' : '';
+        if (_isVideoFile(url)) _initializeVideoController(url);
       }
 
       final processedData = await Future.wait([
@@ -628,10 +597,10 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
           _postsOffset = initialPosts.length;
           _hasMorePosts = totalPostCount > initialPosts.length;
           _isFirstLoad = false;
+          _showViewCount = abTest; // ← apply A/B flag
         });
       }
     } catch (e, stackTrace) {
-      // Log the real error to Supabase so we can debug remotely
       try {
         await _supabase.from('login_logs').insert({
           'event_type': 'PROFILE_LOAD_ERROR',
@@ -640,7 +609,6 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
           'stack_trace': stackTrace.toString(),
         });
       } catch (_) {}
-
       if (mounted) {
         setState(() {
           hasError = true;
@@ -661,13 +629,13 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
     try {
       final newPosts = await _supabase
           .from('posts')
-          .select('postId, postUrl, description, datePublished, uid')
+          .select(
+              'postId, postUrl, description, datePublished, uid, viewers_count')
           .eq('uid', widget.uid)
           .order('datePublished', ascending: false)
           .range(_postsOffset, _postsOffset + _subsequentPostsLimit - 1);
 
       _preInitializeVideoControllers(newPosts);
-
       if (newPosts.isNotEmpty && mounted) {
         setState(() {
           _displayedPosts.addAll(newPosts);
@@ -677,7 +645,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
       } else {
         if (mounted) setState(() => _hasMorePosts = false);
       }
-    } catch (e) {
+    } catch (_) {
       if (mounted) showSnackBar(context, 'Failed to load more posts');
     } finally {
       if (mounted) setState(() => _isLoadingMore = false);
@@ -687,20 +655,20 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   Future<List<dynamic>> _processUserList(
       List<dynamic> userList, String idKey) async {
     if (userList.isEmpty) return [];
-    final userIds = userList.map((user) => user[idKey] as String).toList();
+    final userIds = userList.map((u) => u[idKey] as String).toList();
     final usersData = await _supabase
         .from('users')
         .select('uid, username, photoUrl')
         .inFilter('uid', userIds);
-    final userMap = {for (var user in usersData) user['uid'] as String: user};
+    final userMap = {for (var u in usersData) u['uid'] as String: u};
     return userList
         .map((entry) {
-          final userInfo = userMap[entry[idKey]];
-          return userInfo != null
+          final info = userMap[entry[idKey]];
+          return info != null
               ? {
                   'userId': entry[idKey],
-                  'username': userInfo['username'],
-                  'photoUrl': userInfo['photoUrl'],
+                  'username': info['username'],
+                  'photoUrl': info['photoUrl'],
                   'timestamp': entry['followed_at'],
                 }
               : null;
@@ -712,9 +680,8 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
   void _navigateToSettings() {
     _muteProfileVideo();
     Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const SettingsScreen()),
-    ).then((_) {
+            context, MaterialPageRoute(builder: (_) => const SettingsScreen()))
+        .then((_) {
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted) _unmuteProfileVideo();
       });
@@ -723,25 +690,22 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
 
   Widget _buildUsernameWithFlag(
       String username, bool isVerified, String? countryCode, _ColorSet colors) {
-    final bool hasCountryFlag = countryCode != null &&
+    final bool hasFlag = countryCode != null &&
         countryCode.isNotEmpty &&
         countryCode.length == 2;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(username,
-            style: TextStyle(
-                color: colors.textColor, fontWeight: FontWeight.bold)),
-        if (hasCountryFlag) ...[
-          const SizedBox(width: 4),
-          CountryFlagWidget(countryCode: countryCode!),
-        ],
-        if (isVerified) ...[
-          const SizedBox(width: 4),
-          const Icon(Icons.verified, color: Colors.blue, size: 16),
-        ],
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Text(username,
+          style:
+              TextStyle(color: colors.textColor, fontWeight: FontWeight.bold)),
+      if (hasFlag) ...[
+        const SizedBox(width: 4),
+        CountryFlagWidget(countryCode: countryCode!),
       ],
-    );
+      if (isVerified) ...[
+        const SizedBox(width: 4),
+        const Icon(Icons.verified, color: Colors.blue, size: 16),
+      ],
+    ]);
   }
 
   // ========== BUILD ==========
@@ -787,33 +751,27 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
                   controller: _scrollController,
                   child: Padding(
                     padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        _buildProfileHeader(colors),
-                        const SizedBox(height: 20),
-                        Column(
-                          children: [
-                            _buildBioSection(colors),
-                            const SizedBox(height: 16),
-                            Column(
-                              children: [
-                                _buildTabButtons(colors),
-                                _selectedTabIndex == 0
-                                    ? _buildPostsGrid(colors)
-                                    : _buildGalleriesGrid(colors),
-                              ],
-                            ),
-                          ],
+                    child: Column(children: [
+                      _buildProfileHeader(colors),
+                      const SizedBox(height: 20),
+                      Column(children: [
+                        _buildBioSection(colors),
+                        const SizedBox(height: 16),
+                        Column(children: [
+                          _buildTabButtons(colors),
+                          _selectedTabIndex == 0
+                              ? _buildPostsGrid(colors)
+                              : _buildGalleriesGrid(colors),
+                        ]),
+                      ]),
+                      if (_selectedTabIndex == 0 && _isLoadingMore)
+                        Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: CircularProgressIndicator(
+                              color: colors.textColor),
                         ),
-                        if (_selectedTabIndex == 0 && _isLoadingMore)
-                          Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: CircularProgressIndicator(
-                                color: colors.textColor),
-                          ),
-                        const SizedBox(height: 20),
-                      ],
-                    ),
+                      const SizedBox(height: 20),
+                    ]),
                   ),
                 ),
     );
@@ -821,66 +779,51 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
 
   Widget _buildErrorWidget(_ColorSet colors) {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.error_outline, color: colors.textColor, size: 64),
-          const SizedBox(height: 16),
-          Text(
-            'Something went wrong',
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.error_outline, color: colors.textColor, size: 64),
+        const SizedBox(height: 16),
+        Text('Something went wrong',
             style: TextStyle(
                 color: colors.textColor,
                 fontSize: 18,
-                fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            errorMessage,
+                fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Text(errorMessage,
             style: TextStyle(color: colors.textColor),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton(
-            onPressed: getData,
-            style: ElevatedButton.styleFrom(
+            textAlign: TextAlign.center),
+        const SizedBox(height: 16),
+        ElevatedButton(
+          onPressed: getData,
+          style: ElevatedButton.styleFrom(
               backgroundColor: colors.cardColor,
-              foregroundColor: colors.textColor,
-            ),
-            child: const Text('Try Again'),
-          ),
-        ],
-      ),
+              foregroundColor: colors.textColor),
+          child: const Text('Try Again'),
+        ),
+      ]),
     );
   }
 
   Widget _buildProfileHeader(_ColorSet colors) {
-    return Column(
-      children: [
+    return Column(children: [
+      SizedBox(height: 80, child: Center(child: _buildProfilePicture(colors))),
+      Column(children: [
         SizedBox(
-          height: 80,
-          child: Center(child: _buildProfilePicture(colors)),
+          width: double.infinity,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildMetric(postCount, "Posts", colors.textColor),
+              _buildInteractiveMetric(
+                  followers, "Followers", _followersList, colors),
+              _buildInteractiveMetric(
+                  following, "Following", _followingList, colors),
+            ],
+          ),
         ),
-        Column(
-          children: [
-            SizedBox(
-              width: double.infinity,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _buildMetric(postCount, "Posts", colors.textColor),
-                  _buildInteractiveMetric(
-                      followers, "Followers", _followersList, colors),
-                  _buildInteractiveMetric(
-                      following, "Following", _followingList, colors),
-                ],
-              ),
-            ),
-            const SizedBox(height: 5),
-            Center(child: _buildEditProfileButton(colors)),
-          ],
-        ),
-      ],
-    );
+        const SizedBox(height: 5),
+        Center(child: _buildEditProfileButton(colors)),
+      ]),
+    ]);
   }
 
   Widget _buildInteractiveMetric(
@@ -891,9 +834,8 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) =>
-                UserListScreen(title: label, userEntries: userList),
-          ),
+              builder: (_) =>
+                  UserListScreen(title: label, userEntries: userList)),
         ).then((_) {
           Future.delayed(const Duration(milliseconds: 300), () {
             if (mounted) _unmuteProfileVideo();
@@ -910,7 +852,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         _muteProfileVideo();
         final result = await Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => const EditProfileScreen()),
+          MaterialPageRoute(builder: (_) => const EditProfileScreen()),
         );
         Future.delayed(const Duration(milliseconds: 300), () {
           if (mounted) _unmuteProfileVideo();
@@ -918,139 +860,110 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         if (result != null && mounted) {
           setState(() {
             userData['bio'] = result['bio'] ?? userData['bio'];
-            userData['photoUrl'] =
-                result['photoUrl'] ?? userData['photoUrl'];
+            userData['photoUrl'] = result['photoUrl'] ?? userData['photoUrl'];
           });
           await getData();
         }
       },
       style: ElevatedButton.styleFrom(
-        backgroundColor: colors.cardColor,
-        foregroundColor: colors.textColor,
-      ),
+          backgroundColor: colors.cardColor, foregroundColor: colors.textColor),
       child: const Text("Edit Profile"),
     );
   }
 
   Widget _buildMetric(int value, String label, Color textColor) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          value.toString(),
+    return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      Text(value.toString(),
           style: TextStyle(
-              fontSize: 14, fontWeight: FontWeight.bold, color: textColor),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
+              fontSize: 14, fontWeight: FontWeight.bold, color: textColor)),
+      const SizedBox(height: 4),
+      Text(label,
           style: TextStyle(
-              fontSize: 15, fontWeight: FontWeight.w400, color: textColor),
-        ),
-      ],
-    );
+              fontSize: 15, fontWeight: FontWeight.w400, color: textColor)),
+    ]);
   }
 
   Widget _buildBioSection(_ColorSet colors) {
     final String bio = userData['bio'] ?? '';
     return Align(
       alignment: Alignment.centerLeft,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildUsernameWithFlag(
-            userData['username'] ?? '',
-            userData['isVerified'] == true,
-            userData['country']?.toString(),
-            colors,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _buildUsernameWithFlag(
+          userData['username'] ?? '',
+          userData['isVerified'] == true,
+          userData['country']?.toString(),
+          colors,
+        ),
+        const SizedBox(height: 4),
+        if (bio.isNotEmpty)
+          ExpandableBioText(
+            text: bio,
+            style: TextStyle(color: colors.textColor),
+            expandColor: colors.textColor.withOpacity(0.8),
           ),
-          const SizedBox(height: 4),
-          if (bio.isNotEmpty)
-            ExpandableBioText(
-              text: bio,
-              style: TextStyle(color: colors.textColor),
-              expandColor: colors.textColor.withOpacity(0.8),
-            ),
-        ],
-      ),
+      ]),
     );
   }
 
   Widget _buildTabButtons(_ColorSet colors) {
     return Container(
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: colors.cardColor, width: 1)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextButton(
-              onPressed: () => setState(() => _selectedTabIndex = 0),
-              style: TextButton.styleFrom(
-                foregroundColor: _selectedTabIndex == 0
-                    ? colors.textColor
-                    : colors.textColor.withOpacity(0.5),
-                shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.zero),
-              ),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.grid_on,
-                    color: _selectedTabIndex == 0
-                        ? colors.textColor
-                        : colors.textColor.withOpacity(0.5),
-                  ),
-                  Text(
-                    'POSTS',
-                    style: TextStyle(
+          border:
+              Border(bottom: BorderSide(color: colors.cardColor, width: 1))),
+      child: Row(children: [
+        Expanded(
+          child: TextButton(
+            onPressed: () => setState(() => _selectedTabIndex = 0),
+            style: TextButton.styleFrom(
+              foregroundColor: _selectedTabIndex == 0
+                  ? colors.textColor
+                  : colors.textColor.withOpacity(0.5),
+              shape:
+                  const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            ),
+            child: Column(children: [
+              Icon(Icons.grid_on,
+                  color: _selectedTabIndex == 0
+                      ? colors.textColor
+                      : colors.textColor.withOpacity(0.5)),
+              Text('POSTS',
+                  style: TextStyle(
                       fontSize: 12,
                       fontWeight: _selectedTabIndex == 0
                           ? FontWeight.bold
-                          : FontWeight.normal,
-                    ),
-                  ),
-                  if (_selectedTabIndex == 0)
-                    Container(height: 1, color: colors.textColor),
-                ],
-              ),
-            ),
+                          : FontWeight.normal)),
+              if (_selectedTabIndex == 0)
+                Container(height: 1, color: colors.textColor),
+            ]),
           ),
-          Expanded(
-            child: TextButton(
-              onPressed: () => setState(() => _selectedTabIndex = 1),
-              style: TextButton.styleFrom(
-                foregroundColor: _selectedTabIndex == 1
-                    ? colors.textColor
-                    : colors.textColor.withOpacity(0.5),
-                shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.zero),
-              ),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.collections,
-                    color: _selectedTabIndex == 1
-                        ? colors.textColor
-                        : colors.textColor.withOpacity(0.5),
-                  ),
-                  Text(
-                    'GALLERIES',
-                    style: TextStyle(
+        ),
+        Expanded(
+          child: TextButton(
+            onPressed: () => setState(() => _selectedTabIndex = 1),
+            style: TextButton.styleFrom(
+              foregroundColor: _selectedTabIndex == 1
+                  ? colors.textColor
+                  : colors.textColor.withOpacity(0.5),
+              shape:
+                  const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            ),
+            child: Column(children: [
+              Icon(Icons.collections,
+                  color: _selectedTabIndex == 1
+                      ? colors.textColor
+                      : colors.textColor.withOpacity(0.5)),
+              Text('GALLERIES',
+                  style: TextStyle(
                       fontSize: 12,
                       fontWeight: _selectedTabIndex == 1
                           ? FontWeight.bold
-                          : FontWeight.normal,
-                    ),
-                  ),
-                  if (_selectedTabIndex == 1)
-                    Container(height: 1, color: colors.textColor),
-                ],
-              ),
-            ),
+                          : FontWeight.normal)),
+              if (_selectedTabIndex == 1)
+                Container(height: 1, color: colors.textColor),
+            ]),
           ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
 
@@ -1060,11 +973,10 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
       physics: const NeverScrollableScrollPhysics(),
       itemCount: _displayedPosts.length + 1,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 2,
-        mainAxisSpacing: 2,
-        childAspectRatio: 0.8,
-      ),
+          crossAxisCount: 3,
+          crossAxisSpacing: 2,
+          mainAxisSpacing: 2,
+          childAspectRatio: 0.8),
       itemBuilder: (context, index) {
         if (index == 0) return _buildAddPostButton(colors);
         final postIndex = index - 1;
@@ -1083,10 +995,8 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => AddPostScreen(
-              onPostUploaded: () async => getData(),
-            ),
-          ),
+              builder: (_) =>
+                  AddPostScreen(onPostUploaded: () async => getData())),
         ).then((_) {
           Future.delayed(const Duration(milliseconds: 300), () {
             if (mounted) _unmuteProfileVideo();
@@ -1096,28 +1006,29 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
       child: Container(
         margin: const EdgeInsets.all(1),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(4),
-          color: colors.cardColor,
-        ),
-        child: Icon(Icons.add_circle_outline, size: 40, color: colors.textColor),
+            borderRadius: BorderRadius.circular(4), color: colors.cardColor),
+        child:
+            Icon(Icons.add_circle_outline, size: 40, color: colors.textColor),
       ),
     );
   }
 
+  // ========== POST ITEM — badge gated by _showViewCount ==========
   Widget _buildPostItem(Map<String, dynamic> post, _ColorSet colors) {
     final postUrl = post['postUrl'] ?? '';
     final isVideo = _isVideoFile(postUrl);
+    final int viewsCount = (post['viewers_count'] as num?)?.toInt() ?? 0;
 
     return GestureDetector(
       onTap: () {
-        for (final controller in _videoControllers.values) {
-          if (controller.value.isPlaying) controller.pause();
+        for (final c in _videoControllers.values) {
+          if (c.value.isPlaying) c.pause();
         }
         _muteProfileVideo();
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => ImageViewScreen(
+            builder: (_) => ImageViewScreen(
               imageUrl: postUrl,
               postId: post['postId']?.toString() ?? '',
               description: post['description']?.toString() ?? '',
@@ -1137,23 +1048,57 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
       child: Container(
         margin: const EdgeInsets.all(1),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(4),
-          color: isVideo ? colors.cardColor : null,
-        ),
-        child: isVideo
-            ? _buildPostVideoPlayer(postUrl, colors)
-            : ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: Image.network(
-                  postUrl,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
-                    color: colors.cardColor,
-                    child: Icon(Icons.broken_image,
-                        color: colors.iconColor, size: 20),
+            borderRadius: BorderRadius.circular(4),
+            color: isVideo ? colors.cardColor : null),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // ── media ─────────────────────────────────────────────
+            isVideo
+                ? _buildPostVideoPlayer(postUrl, colors)
+                : ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Image.network(postUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                              color: colors.cardColor,
+                              child: Icon(Icons.broken_image,
+                                  color: colors.iconColor, size: 20),
+                            )),
+                  ),
+
+            // ── view count badge — only for A/B treatment group ───
+            if (_showViewCount)
+              Positioned(
+                bottom: 4,
+                left: 4,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.55),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.visibility,
+                          size: 10, color: Colors.white),
+                      const SizedBox(width: 3),
+                      Text(
+                        _formatViewCount(viewsCount),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
+          ],
+        ),
       ),
     );
   }
@@ -1162,35 +1107,28 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
     if (_galleries.isEmpty) {
       return Padding(
         padding: const EdgeInsets.all(40.0),
-        child: Column(
-          children: [
-            Icon(Icons.collections,
-                size: 64, color: colors.textColor.withOpacity(0.5)),
-            const SizedBox(height: 16),
-            Text(
-              'No Galleries Yet',
+        child: Column(children: [
+          Icon(Icons.collections,
+              size: 64, color: colors.textColor.withOpacity(0.5)),
+          const SizedBox(height: 16),
+          Text('No Galleries Yet',
               style: TextStyle(
                   color: colors.textColor,
                   fontSize: 18,
-                  fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Create your first gallery to organize your posts',
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text('Create your first gallery to organize your posts',
               style: TextStyle(color: colors.textColor.withOpacity(0.7)),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _createNewGallery,
-              style: ElevatedButton.styleFrom(
+              textAlign: TextAlign.center),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _createNewGallery,
+            style: ElevatedButton.styleFrom(
                 backgroundColor: colors.cardColor,
-                foregroundColor: colors.textColor,
-              ),
-              child: const Text('Create Gallery'),
-            ),
-          ],
-        ),
+                foregroundColor: colors.textColor),
+            child: const Text('Create Gallery'),
+          ),
+        ]),
       );
     }
 
@@ -1199,18 +1137,15 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
       physics: const NeverScrollableScrollPhysics(),
       itemCount: _galleries.length + 1,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
-        childAspectRatio: 1,
-      ),
+          crossAxisCount: 2,
+          crossAxisSpacing: 8,
+          mainAxisSpacing: 8,
+          childAspectRatio: 1),
       itemBuilder: (context, index) {
         if (index == 0) return _buildAddGalleryButton(colors);
-        final galleryIndex = index - 1;
-        if (galleryIndex < 0 || galleryIndex >= _galleries.length) {
-          return Container();
-        }
-        return _buildGalleryItem(_galleries[galleryIndex], colors);
+        final i = index - 1;
+        if (i < 0 || i >= _galleries.length) return Container();
+        return _buildGalleryItem(_galleries[i], colors);
       },
     );
   }
@@ -1224,19 +1159,14 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
           color: colors.cardColor,
           border: Border.all(color: colors.textColor.withOpacity(0.3)),
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.add_photo_alternate,
-                size: 40, color: colors.textColor.withOpacity(0.7)),
-            const SizedBox(height: 8),
-            Text(
-              'New Gallery',
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(Icons.add_photo_alternate,
+              size: 40, color: colors.textColor.withOpacity(0.7)),
+          const SizedBox(height: 8),
+          Text('New Gallery',
               style: TextStyle(
-                  color: colors.textColor.withOpacity(0.7), fontSize: 12),
-            ),
-          ],
-        ),
+                  color: colors.textColor.withOpacity(0.7), fontSize: 12)),
+        ]),
       ),
     );
   }
@@ -1256,7 +1186,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => GalleryDetailScreen(
+            builder: (_) => GalleryDetailScreen(
               galleryId: gallery['id'],
               galleryName: gallery['name'] ?? 'Unnamed Gallery',
               uid: widget.uid,
@@ -1271,82 +1201,68 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
       },
       child: Container(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          color: colors.cardColor,
-        ),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (coverImageUrl.isNotEmpty)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: isVideoCover
-                    ? _buildGalleryVideoPlayer(coverImageUrl, colors)
-                    : Image.network(
-                        coverImageUrl,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
-                            color: colors.cardColor.withOpacity(0.5),
-                          ),
-                          child: Icon(Icons.collections,
-                              size: 40,
-                              color: colors.textColor.withOpacity(0.5)),
-                        ),
-                      ),
-              )
-            else
-              Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  color: colors.cardColor.withOpacity(0.5),
-                ),
-                child: Icon(Icons.collections,
-                    size: 40, color: colors.textColor.withOpacity(0.5)),
-              ),
+            borderRadius: BorderRadius.circular(8), color: colors.cardColor),
+        child: Stack(fit: StackFit.expand, children: [
+          if (coverImageUrl.isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: isVideoCover
+                  ? _buildGalleryVideoPlayer(coverImageUrl, colors)
+                  : Image.network(coverImageUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                            decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(8),
+                                color: colors.cardColor.withOpacity(0.5)),
+                            child: Icon(Icons.collections,
+                                size: 40,
+                                color: colors.textColor.withOpacity(0.5)),
+                          )),
+            )
+          else
             Container(
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [
-                    Colors.black.withOpacity(0.7),
-                    Colors.transparent,
-                  ],
-                ),
+                  borderRadius: BorderRadius.circular(8),
+                  color: colors.cardColor.withOpacity(0.5)),
+              child: Icon(Icons.collections,
+                  size: 40, color: colors.textColor.withOpacity(0.5)),
+            ),
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [
+                  Colors.black.withOpacity(0.7),
+                  Colors.transparent,
+                ],
               ),
-              child: Align(
-                alignment: Alignment.bottomLeft,
-                child: Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Column(
+            ),
+            child: Align(
+              alignment: Alignment.bottomLeft,
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        gallery['name'] ?? 'Unnamed Gallery',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        '$postCount ${postCount == 1 ? 'post' : 'posts'}',
-                        style: TextStyle(
-                            color: Colors.white.withOpacity(0.8), fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
+                      Text(gallery['name'] ?? 'Unnamed Gallery',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                      Text('$postCount ${postCount == 1 ? 'post' : 'posts'}',
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.8),
+                              fontSize: 12)),
+                    ]),
               ),
             ),
-          ],
-        ),
+          ),
+        ]),
       ),
     );
   }
@@ -1357,10 +1273,10 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
     showDialog(
       context: context,
       builder: (context) {
-        final TextEditingController nameController = TextEditingController();
+        final nameController = TextEditingController();
         return AlertDialog(
-          title:
-              Text('Create New Gallery', style: TextStyle(color: colors.textColor)),
+          title: Text('Create New Gallery',
+              style: TextStyle(color: colors.textColor)),
           backgroundColor: colors.backgroundColor,
           content: TextField(
             controller: nameController,
@@ -1373,9 +1289,9 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text('Cancel', style: TextStyle(color: colors.textColor)),
-            ),
+                onPressed: () => Navigator.of(context).pop(),
+                child:
+                    Text('Cancel', style: TextStyle(color: colors.textColor))),
             TextButton(
               onPressed: () async {
                 final name = nameController.text.trim();
@@ -1412,133 +1328,104 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
       controller: _scrollController,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            _buildProfileHeaderSkeleton(colors),
-            const SizedBox(height: 20),
-            Column(
-              children: [
-                _buildBioSectionSkeleton(colors),
-                const SizedBox(height: 16),
-                Divider(color: colors.cardColor),
-                _buildPostsGridSkeleton(colors),
-              ],
-            ),
-          ],
-        ),
+        child: Column(children: [
+          _buildProfileHeaderSkeleton(colors),
+          const SizedBox(height: 20),
+          Column(children: [
+            _buildBioSectionSkeleton(colors),
+            const SizedBox(height: 16),
+            Divider(color: colors.cardColor),
+            _buildPostsGridSkeleton(colors),
+          ]),
+        ]),
       ),
     );
   }
 
   Widget _buildProfileHeaderSkeleton(_ColorSet colors) {
-    return Column(
-      children: [
-        SizedBox(
-          height: 80,
-          child: Center(
-            child: Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
+    return Column(children: [
+      SizedBox(
+        height: 80,
+        child: Center(
+          child: Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: colors.cardColor.withOpacity(0.6),
-              ),
-            ),
+                color: colors.cardColor.withOpacity(0.6)),
           ),
         ),
-        const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildMetricSkeleton(colors),
-              _buildMetricSkeleton(colors),
-              _buildMetricSkeleton(colors),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        Container(
-          width: 120,
-          height: 36,
-          decoration: BoxDecoration(
+      ),
+      const SizedBox(height: 16),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _buildMetricSkeleton(colors),
+          _buildMetricSkeleton(colors),
+          _buildMetricSkeleton(colors),
+        ],
+      ),
+      const SizedBox(height: 16),
+      Container(
+        width: 120,
+        height: 36,
+        decoration: BoxDecoration(
             color: colors.cardColor.withOpacity(0.6),
-            borderRadius: BorderRadius.circular(8),
-          ),
-        ),
-      ],
-    );
+            borderRadius: BorderRadius.circular(8)),
+      ),
+    ]);
   }
 
   Widget _buildMetricSkeleton(_ColorSet colors) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Container(
+    return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      Container(
           height: 16,
           width: 30,
           decoration: BoxDecoration(
-            color: colors.cardColor.withOpacity(0.8),
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Container(
+              color: colors.cardColor.withOpacity(0.8),
+              borderRadius: BorderRadius.circular(4))),
+      const SizedBox(height: 6),
+      Container(
           height: 12,
           width: 50,
           decoration: BoxDecoration(
-            color: colors.cardColor.withOpacity(0.6),
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ),
-      ],
-    );
+              color: colors.cardColor.withOpacity(0.6),
+              borderRadius: BorderRadius.circular(4))),
+    ]);
   }
 
   Widget _buildBioSectionSkeleton(_ColorSet colors) {
     return Align(
       alignment: Alignment.centerLeft,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
             height: 18,
             width: 120,
             decoration: BoxDecoration(
-              color: colors.cardColor.withOpacity(0.8),
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Container(
+                color: colors.cardColor.withOpacity(0.8),
+                borderRadius: BorderRadius.circular(4))),
+        const SizedBox(height: 12),
+        Container(
             height: 14,
             width: double.infinity,
             decoration: BoxDecoration(
-              color: colors.cardColor.withOpacity(0.6),
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Container(
+                color: colors.cardColor.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(4))),
+        const SizedBox(height: 6),
+        Container(
             height: 14,
             width: 250,
             decoration: BoxDecoration(
-              color: colors.cardColor.withOpacity(0.6),
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Container(
+                color: colors.cardColor.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(4))),
+        const SizedBox(height: 6),
+        Container(
             height: 14,
             width: 200,
             decoration: BoxDecoration(
-              color: colors.cardColor.withOpacity(0.6),
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-        ],
-      ),
+                color: colors.cardColor.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(4))),
+      ]),
     );
   }
 
@@ -1548,17 +1435,15 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
       physics: const NeverScrollableScrollPhysics(),
       itemCount: 7,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 2,
-        mainAxisSpacing: 2,
-        childAspectRatio: 0.8,
-      ),
-      itemBuilder: (context, index) => Container(
+          crossAxisCount: 3,
+          crossAxisSpacing: 2,
+          mainAxisSpacing: 2,
+          childAspectRatio: 0.8),
+      itemBuilder: (_, __) => Container(
         margin: const EdgeInsets.all(1),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(4),
-          color: colors.cardColor.withOpacity(0.5),
-        ),
+            borderRadius: BorderRadius.circular(4),
+            color: colors.cardColor.withOpacity(0.5)),
       ),
     );
   }
