@@ -22,7 +22,6 @@ import 'package:country_flags/country_flags.dart';
 import 'package:Ratedly/screens/Profile_page/gallery_post_view_screen.dart';
 import 'package:Ratedly/providers/user_provider.dart';
 
-// Define color schemes for both themes at top level
 class _OtherProfileColorSet {
   final Color backgroundColor;
   final Color textColor;
@@ -119,19 +118,13 @@ class CountryFlagWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool hasCountryFlag =
         countryCode.isNotEmpty && countryCode.length == 2;
-
-    if (!hasCountryFlag) {
-      return const SizedBox.shrink();
-    }
-
+    if (!hasCountryFlag) return const SizedBox.shrink();
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
       child: SizedBox(
         width: width,
         height: height,
-        child: CountryFlag.fromCountryCode(
-          countryCode,
-        ),
+        child: CountryFlag.fromCountryCode(countryCode),
       ),
     );
   }
@@ -161,23 +154,14 @@ class _ExpandableBioTextState extends State<ExpandableBioText> {
   @override
   Widget build(BuildContext context) {
     final shouldTruncate = widget.text.length > widget.maxLength;
-
     if (!shouldTruncate || _isExpanded) {
-      return Text(
-        widget.text,
-        style: widget.style,
-      );
+      return Text(widget.text, style: widget.style);
     }
-
     final truncatedText = widget.text.substring(0, widget.maxLength);
-
     return RichText(
       text: TextSpan(
         children: [
-          TextSpan(
-            text: '$truncatedText... ',
-            style: widget.style,
-          ),
+          TextSpan(text: '$truncatedText... ', style: widget.style),
           TextSpan(
             text: 'more',
             style: widget.style.copyWith(
@@ -185,11 +169,7 @@ class _ExpandableBioTextState extends State<ExpandableBioText> {
               fontWeight: FontWeight.w600,
             ),
             recognizer: TapGestureRecognizer()
-              ..onTap = () {
-                setState(() {
-                  _isExpanded = true;
-                });
-              },
+              ..onTap = () => setState(() => _isExpanded = true),
           ),
         ],
       ),
@@ -222,35 +202,30 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
   int following = 0;
   bool _isMutualFollow = false;
 
-  // Video player controllers cache for posts
+  // ── A/B test: true = viewer is in the "show view counts" group ────────
+  bool _showViewCount = false;
+  // ──────────────────────────────────────────────────────────────────────
+
   final Map<String, VideoPlayerController> _videoControllers = {};
   final Map<String, bool> _videoControllersInitialized = {};
 
-  // ========== VIDEO PLAYER CONTROLLER FOR PROFILE PICTURE ==========
   VideoPlayerController? _profileVideoController;
   bool _isProfileVideoInitialized = false;
   bool _isProfileVideoMuted = false;
-  // ================================================================
 
-  // ========== GALLERIES VARIABLES ==========
   List<dynamic> _galleries = [];
-  int _selectedTabIndex = 0; // 0 for posts, 1 for galleries
-  // =========================================
+  int _selectedTabIndex = 0;
 
-  // ========== PAGINATION VARIABLES ==========
-  List<dynamic> _displayedPosts = []; // Posts currently shown
-  int _postsOffset = 0; // Current offset for pagination
+  List<dynamic> _displayedPosts = [];
+  int _postsOffset = 0;
   final int _initialPostsLimit = 9;
   final int _subsequentPostsLimit = 6;
   bool _hasMorePosts = true;
   bool _isLoadingMore = false;
   bool _isFirstLoad = true;
-  // ==========================================
 
-  // Scroll controller
   late ScrollController _scrollController;
 
-  // Add the missing profileReportReasons list
   final List<String> profileReportReasons = [
     'Impersonation (Pretending to be someone else)',
     'Fake Account (Misleading or suspicious profile)',
@@ -263,18 +238,22 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
 
   bool _hasLoaded = false;
 
-  // Helper method to get the appropriate color scheme
   _OtherProfileColorSet _getColors(ThemeProvider themeProvider) {
-    final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
-    return isDarkMode ? _OtherProfileDarkColors() : _OtherProfileLightColors();
+    return themeProvider.themeMode == ThemeMode.dark
+        ? _OtherProfileDarkColors()
+        : _OtherProfileLightColors();
+  }
+
+  String _formatViewCount(int count) {
+    if (count >= 1000000) return '${(count / 1000000).toStringAsFixed(1)}M';
+    if (count >= 1000) return '${(count / 1000).toStringAsFixed(1)}K';
+    return count.toString();
   }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-
-    // Initialize scroll controller
     _scrollController = ScrollController();
     _scrollController.addListener(_scrollListener);
   }
@@ -282,8 +261,6 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-
-    // Load data when dependencies change (when UserProvider is available)
     if (!_hasLoaded) {
       _hasLoaded = true;
       _loadDataInParallel();
@@ -293,74 +270,53 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
-      // App is going to background or losing focus
       _pauseAllVideos();
       _muteProfileVideo();
     } else if (state == AppLifecycleState.resumed) {
-      // App is coming back to foreground
       _unmuteProfileVideo();
     }
   }
 
-  // Helper method to pause all video controllers
   void _pauseAllVideos() {
-    for (final controller in _videoControllers.values) {
-      if (controller.value.isPlaying) {
-        controller.pause();
-      }
+    for (final c in _videoControllers.values) {
+      if (c.value.isPlaying) c.pause();
     }
   }
 
-  // Helper method to resume all video controllers
   void _resumeAllVideos() {
-    for (final controller in _videoControllers.values) {
-      if (controller.value.isInitialized && !controller.value.isPlaying) {
-        controller.play();
-      }
+    for (final c in _videoControllers.values) {
+      if (c.value.isInitialized && !c.value.isPlaying) c.play();
     }
   }
 
-  // Mute profile video
   void _muteProfileVideo() {
     if (_profileVideoController != null && _isProfileVideoInitialized) {
       try {
         _profileVideoController!.setVolume(0.0);
-      } catch (e) {
-        // Handle error silently
-      }
+      } catch (_) {}
     }
   }
 
-  // Unmute profile video
   void _unmuteProfileVideo() {
     if (_profileVideoController != null && _isProfileVideoInitialized) {
       try {
         _profileVideoController!.setVolume(_isProfileVideoMuted ? 0.0 : 1.0);
-      } catch (e) {
-        // Handle error silently
-      }
+      } catch (_) {}
     }
   }
 
-  // Toggle profile video mute state
   void _toggleProfileVideoMute() {
     if (_profileVideoController != null && _isProfileVideoInitialized) {
-      setState(() {
-        _isProfileVideoMuted = !_isProfileVideoMuted;
-      });
-
+      setState(() => _isProfileVideoMuted = !_isProfileVideoMuted);
       try {
         _profileVideoController!.setVolume(_isProfileVideoMuted ? 0.0 : 1.0);
-      } catch (e) {
-        // Handle error silently
-      }
+      } catch (_) {}
     }
   }
 
-  // ========== PROFILE VIDEO HANDLING ==========
+  // ========== PROFILE VIDEO ==========
   Future<void> _initializeProfileVideo(String videoUrl) async {
     if (_profileVideoController != null) {
       await _profileVideoController!.dispose();
@@ -369,35 +325,24 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
         _isProfileVideoInitialized = false;
       });
     }
-
     try {
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(videoUrl),
-        videoPlayerOptions: VideoPlayerOptions(
-          mixWithOthers: true,
-        ),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
       );
-
       await controller.initialize();
-      // Play with sound by default (volume 1.0)
       await controller.setVolume(1.0);
       await controller.setLooping(true);
       await controller.play();
-
       if (mounted) {
         setState(() {
           _profileVideoController = controller;
           _isProfileVideoInitialized = true;
-          _isProfileVideoMuted =
-              false; // Reset mute state when initializing new video
+          _isProfileVideoMuted = false;
         });
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isProfileVideoInitialized = false;
-        });
-      }
+    } catch (_) {
+      if (mounted) setState(() => _isProfileVideoInitialized = false);
     }
   }
 
@@ -405,17 +350,12 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
     if (_profileVideoController == null || !_isProfileVideoInitialized) {
       return Container(
         decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: colors.avatarBackgroundColor,
-        ),
+            shape: BoxShape.circle, color: colors.avatarBackgroundColor),
         child: Center(
-          child: CircularProgressIndicator(
-            color: colors.progressIndicatorColor,
-          ),
-        ),
+            child: CircularProgressIndicator(
+                color: colors.progressIndicatorColor)),
       );
     }
-
     return Stack(
       children: [
         ClipOval(
@@ -432,7 +372,6 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
             ),
           ),
         ),
-        // Mute button overlay
         Positioned(
           top: 4,
           right: 4,
@@ -442,9 +381,7 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
               width: 28,
               height: 28,
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.6),
-                shape: BoxShape.circle,
-              ),
+                  color: Colors.black.withOpacity(0.6), shape: BoxShape.circle),
               child: Icon(
                 _isProfileVideoMuted ? Icons.volume_off : Icons.volume_up,
                 size: 14,
@@ -466,73 +403,73 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
       return CircleAvatar(
         radius: 45,
         backgroundColor: colors.avatarBackgroundColor,
-        child: Icon(
-          Icons.account_circle,
-          size: 90,
-          color: colors.iconColor,
-        ),
+        child: Icon(Icons.account_circle, size: 90, color: colors.iconColor),
       );
     }
-
-    if (isVideo) {
-      return _buildProfileVideoPlayer(colors);
-    }
-
-    // Regular image
+    if (isVideo) return _buildProfileVideoPlayer(colors);
     return CircleAvatar(
       backgroundColor: colors.avatarBackgroundColor,
       radius: 45,
       backgroundImage: NetworkImage(photoUrl),
-      child: photoUrl.isEmpty || photoUrl == "default"
-          ? Icon(
-              Icons.account_circle,
-              size: 90,
-              color: colors.iconColor,
-            )
-          : null,
     );
   }
-  // ============================================
 
+  // ========== SCROLL ==========
   void _scrollListener() {
-    // More reliable detection for mobile
     if (_scrollController.position.pixels >=
             _scrollController.position.maxScrollExtent - 50 &&
         !_isLoadingMore &&
         _hasMorePosts &&
         _selectedTabIndex == 0) {
-      // Reduced delay to 15ms for faster loading
       Future.delayed(const Duration(milliseconds: 15), () {
-        if (mounted) {
-          _loadMorePosts();
-        }
+        if (mounted) _loadMorePosts();
       });
     }
   }
 
+  // ========== LOAD DATA ==========
   Future<void> _loadDataInParallel() async {
     setState(() => isLoading = true);
-
     try {
       await Future.wait([
         _loadUserData(),
         _loadPostsCountAndFirstBatch(),
         _loadGalleriesData(),
         _loadBlockStatus(),
+        _loadCurrentUserAbTest(), // ── A/B flag ──
       ]);
-
-      if (!_isBlocked && mounted) {
-        await _loadRelationshipData();
-      }
-    } catch (e) {
+      if (!_isBlocked && mounted) await _loadRelationshipData();
+    } catch (_) {
       if (mounted) {
         showSnackBar(
             context, "Please try again or contact us at ratedly9@gmail.com");
       }
     } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  // ── Reads `test` column from the CURRENT (logged-in) user's row.
+  // true  → show view-count badge  (treatment group)
+  // false → hide view-count badge  (control group)
+  Future<void> _loadCurrentUserAbTest() async {
+    final userProvider = Provider.of<UserProvider>(context, listen: false);
+    final String? currentUserId =
+        userProvider.firebaseUid ?? userProvider.supabaseUid;
+    if (currentUserId == null || currentUserId.isEmpty) return;
+
+    try {
+      final result = await _supabase
+          .from('users')
+          .select('test')
+          .eq('uid', currentUserId)
+          .maybeSingle();
+
       if (mounted) {
-        setState(() => isLoading = false);
+        setState(() => _showViewCount = result?['test'] == true);
       }
+    } catch (_) {
+      // On error keep _showViewCount = false (control)
     }
   }
 
@@ -540,21 +477,12 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
     try {
       final userResponse =
           await _supabase.from('users').select().eq('uid', widget.uid).single();
-
       if (mounted) {
-        setState(() {
-          userData = userResponse;
-        });
-
-        // Initialize profile video if needed
+        setState(() => userData = userResponse);
         final photoUrl = userResponse['photoUrl'] ?? '';
-        if (_isVideoFile(photoUrl)) {
-          _initializeProfileVideo(photoUrl);
-        }
+        if (_isVideoFile(photoUrl)) _initializeProfileVideo(photoUrl);
       }
-    } catch (e) {
-      // User data is essential, so we might want to handle this differently
-    }
+    } catch (_) {}
   }
 
   Future<void> _loadGalleriesData() async {
@@ -565,51 +493,32 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
             posts!cover_post_id(postUrl)
           ''').eq('uid', widget.uid).order('created_at', ascending: false);
 
-      // Pre-initialize video controllers for gallery covers
-      for (final gallery in galleriesResponse) {
-        final coverImageUrl =
-            gallery['posts'] != null ? gallery['posts']['postUrl'] ?? '' : '';
-        if (_isVideoFile(coverImageUrl)) {
-          _initializeVideoController(coverImageUrl);
-        }
+      for (final g in galleriesResponse) {
+        final url = g['posts'] != null ? g['posts']['postUrl'] ?? '' : '';
+        if (_isVideoFile(url)) _initializeVideoController(url);
       }
-
-      if (mounted) {
-        setState(() {
-          _galleries = galleriesResponse;
-        });
-      }
-    } catch (e) {
-      // Galleries can fail without breaking the whole screen
-      if (mounted) {
-        setState(() {
-          _galleries = [];
-        });
-      }
+      if (mounted) setState(() => _galleries = galleriesResponse);
+    } catch (_) {
+      if (mounted) setState(() => _galleries = []);
     }
   }
 
   Future<void> _loadPostsCountAndFirstBatch() async {
     try {
-      // Get total post count
       final totalPostsResponse =
           await _supabase.from('posts').select('postId').eq('uid', widget.uid);
-
       final totalPostCount = totalPostsResponse.length;
-
-      // Use _initialPostsLimit (9) for first load
       final postsLimit =
           _isFirstLoad ? _initialPostsLimit : _subsequentPostsLimit;
 
-      // Get the initial batch of posts (first 9 on first load)
       final initialPosts = await _supabase
           .from('posts')
-          .select('postId, postUrl, description, datePublished, uid')
+          .select(
+              'postId, postUrl, description, datePublished, uid, viewers_count')
           .eq('uid', widget.uid)
           .order('datePublished', ascending: false)
           .range(0, postsLimit - 1);
 
-      // Pre-initialize video controllers for video posts
       _preInitializeVideoControllers(initialPosts);
 
       if (mounted) {
@@ -617,19 +526,17 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
           _displayedPosts = initialPosts;
           postLen = totalPostCount;
           _postsOffset = initialPosts.length;
-          // Check against the correct limit used
           _hasMorePosts = totalPostCount > initialPosts.length;
-          _isFirstLoad = false; // Mark first load as complete
+          _isFirstLoad = false;
         });
       }
-    } catch (e) {
-      // Posts can load separately
+    } catch (_) {
       if (mounted) {
         setState(() {
           _displayedPosts = [];
           postLen = 0;
           _hasMorePosts = false;
-          _isFirstLoad = false; // Still mark as complete even on error
+          _isFirstLoad = false;
         });
       }
     }
@@ -653,14 +560,9 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
 
     try {
       final isBlockedByMe = await SupabaseBlockMethods().isBlockInitiator(
-        currentUserId: currentUserId,
-        targetUserId: widget.uid,
-      );
-
+          currentUserId: currentUserId, targetUserId: widget.uid);
       final isBlockedByThem = await SupabaseBlockMethods().isUserBlocked(
-        currentUserId: currentUserId,
-        targetUserId: widget.uid,
-      );
+          currentUserId: currentUserId, targetUserId: widget.uid);
 
       if (mounted) {
         setState(() {
@@ -675,15 +577,13 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
-              builder: (context) => BlockedProfileScreen(
-                uid: widget.uid,
-                isBlocker: _isBlockedByMe,
-              ),
+              builder: (_) => BlockedProfileScreen(
+                  uid: widget.uid, isBlocker: _isBlockedByMe),
             ),
           );
         });
       }
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
         setState(() {
           _isBlockedByMe = false;
@@ -704,7 +604,6 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
         setState(() {
           followers = 0;
           following = 0;
-          _followersList = [];
           isFollowing = false;
           hasPendingRequest = false;
           _isMutualFollow = false;
@@ -714,58 +613,50 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
     }
 
     try {
-      // Load followers, following, and relationship status in parallel
       final results = await Future.wait<dynamic>([
         _supabase
             .from('user_followers')
             .select('follower_id, followed_at')
             .eq('user_id', widget.uid)
-            .then((value) => value as List<dynamic>),
+            .then((v) => v as List<dynamic>),
         _supabase
             .from('user_following')
             .select('following_id, followed_at')
             .eq('user_id', widget.uid)
-            .then((value) => value as List<dynamic>),
+            .then((v) => v as List<dynamic>),
         _supabase
             .from('user_following')
             .select()
             .eq('user_id', currentUserId)
             .eq('following_id', widget.uid)
             .maybeSingle()
-            .then((value) => value as Map<String, dynamic>?),
+            .then((v) => v as Map<String, dynamic>?),
         _supabase
             .from('user_follow_request')
             .select()
             .eq('user_id', widget.uid)
             .eq('requester_id', currentUserId)
             .maybeSingle()
-            .then((value) => value as Map<String, dynamic>?),
+            .then((v) => v as Map<String, dynamic>?),
         _supabase
             .from('user_following')
             .select()
             .eq('user_id', widget.uid)
             .eq('following_id', currentUserId)
             .maybeSingle()
-            .then((value) => value as Map<String, dynamic>?),
+            .then((v) => v as Map<String, dynamic>?),
       ]);
-
-      final followersResponse = results[0] as List<dynamic>;
-      final followingResponse = results[1] as List<dynamic>;
-      final isFollowingResponse = results[2] as Map<String, dynamic>?;
-      final followRequestResponse = results[3] as Map<String, dynamic>?;
-      final otherFollowsCurrent = results[4] as Map<String, dynamic>?;
 
       if (mounted) {
         setState(() {
-          followers = followersResponse.length;
-          following = followingResponse.length;
-          isFollowing = isFollowingResponse != null;
-          hasPendingRequest = followRequestResponse != null;
-          _isMutualFollow =
-              isFollowingResponse != null && otherFollowsCurrent != null;
+          followers = (results[0] as List).length;
+          following = (results[1] as List).length;
+          isFollowing = results[2] != null;
+          hasPendingRequest = results[3] != null;
+          _isMutualFollow = results[2] != null && results[4] != null;
         });
       }
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
         setState(() {
           followers = 0;
@@ -778,68 +669,47 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
     }
   }
 
-  // ========== LOAD MORE POSTS METHOD ==========
   Future<void> _loadMorePosts() async {
     if (!_hasMorePosts || _isLoadingMore) return;
-
     setState(() => _isLoadingMore = true);
-
     try {
-      // Always use _subsequentPostsLimit (6) for subsequent loads
-      final postsLimit = _subsequentPostsLimit;
-
       final newPosts = await _supabase
           .from('posts')
-          .select('postId, postUrl, description, datePublished, uid')
+          .select(
+              'postId, postUrl, description, datePublished, uid, viewers_count')
           .eq('uid', widget.uid)
           .order('datePublished', ascending: false)
-          .range(_postsOffset, _postsOffset + postsLimit - 1);
+          .range(_postsOffset, _postsOffset + _subsequentPostsLimit - 1);
 
-      // Pre-initialize video controllers for new video posts
       _preInitializeVideoControllers(newPosts);
 
       if (newPosts.isNotEmpty && mounted) {
         setState(() {
           _displayedPosts.addAll(newPosts);
           _postsOffset += newPosts.length;
-          // Check against _subsequentPostsLimit
           _hasMorePosts = newPosts.length == _subsequentPostsLimit;
         });
       } else {
-        if (mounted) {
-          setState(() => _hasMorePosts = false);
-        }
+        if (mounted) setState(() => _hasMorePosts = false);
       }
-    } catch (e) {
-      // Handle error quietly
-      if (mounted) {
-        showSnackBar(context, 'Failed to load more posts');
-      }
+    } catch (_) {
+      if (mounted) showSnackBar(context, 'Failed to load more posts');
     } finally {
-      if (mounted) {
-        setState(() => _isLoadingMore = false);
-      }
+      if (mounted) setState(() => _isLoadingMore = false);
     }
   }
 
-  // Video player logic for posts
+  // ========== VIDEO HELPERS ==========
   Future<void> _initializeVideoController(String videoUrl) async {
     if (_videoControllers.containsKey(videoUrl) ||
-        _videoControllersInitialized[videoUrl] == true) {
-      return;
-    }
-
+        _videoControllersInitialized[videoUrl] == true) return;
     try {
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(videoUrl),
-        videoPlayerOptions: VideoPlayerOptions(
-          mixWithOthers: false,
-        ),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
       );
-
       _videoControllers[videoUrl] = controller;
       _videoControllersInitialized[videoUrl] = false;
-
       controller.initialize().then((_) {
         if (mounted && _videoControllers.containsKey(videoUrl)) {
           _videoControllersInitialized[videoUrl] = true;
@@ -848,7 +718,7 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
           setState(() {});
         }
       });
-    } catch (e) {
+    } catch (_) {
       _videoControllers.remove(videoUrl)?.dispose();
       _videoControllersInitialized.remove(videoUrl);
     }
@@ -856,52 +726,41 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
 
   void _configureVideoLoop(VideoPlayerController controller) {
     final duration = controller.value.duration;
-    final endPosition =
-        duration.inSeconds > 0 ? const Duration(seconds: 1) : duration;
-
+    final end = duration.inSeconds > 0 ? const Duration(seconds: 1) : duration;
     controller.addListener(() {
       if (controller.value.isInitialized && controller.value.isPlaying) {
-        final currentPosition = controller.value.position;
-        if (currentPosition >= endPosition) {
-          controller.seekTo(Duration.zero);
-        }
+        if (controller.value.position >= end) controller.seekTo(Duration.zero);
       }
     });
-
     controller.play();
   }
 
-  VideoPlayerController? _getVideoController(String videoUrl) {
-    return _videoControllers[videoUrl];
-  }
-
-  bool _isVideoControllerInitialized(String videoUrl) {
-    return _videoControllersInitialized[videoUrl] == true;
-  }
+  VideoPlayerController? _getVideoController(String url) =>
+      _videoControllers[url];
+  bool _isVideoControllerInitialized(String url) =>
+      _videoControllersInitialized[url] == true;
 
   void _preInitializeVideoControllers(List<dynamic> posts) {
-    for (final post in posts) {
-      final postUrl = post['postUrl'] ?? '';
-      if (_isVideoFile(postUrl)) {
-        _initializeVideoController(postUrl);
-      }
+    for (final p in posts) {
+      final url = p['postUrl'] ?? '';
+      if (_isVideoFile(url)) _initializeVideoController(url);
     }
   }
 
   bool _isVideoFile(String url) {
     if (url.isEmpty) return false;
-    final lowerUrl = url.toLowerCase();
-    return lowerUrl.endsWith('.mp4') ||
-        lowerUrl.endsWith('.mov') ||
-        lowerUrl.endsWith('.avi') ||
-        lowerUrl.endsWith('.wmv') ||
-        lowerUrl.endsWith('.flv') ||
-        lowerUrl.endsWith('.mkv') ||
-        lowerUrl.endsWith('.webm') ||
-        lowerUrl.endsWith('.m4v') ||
-        lowerUrl.endsWith('.3gp') ||
-        lowerUrl.contains('/video/') ||
-        lowerUrl.contains('video=true');
+    final l = url.toLowerCase();
+    return l.endsWith('.mp4') ||
+        l.endsWith('.mov') ||
+        l.endsWith('.avi') ||
+        l.endsWith('.wmv') ||
+        l.endsWith('.flv') ||
+        l.endsWith('.mkv') ||
+        l.endsWith('.webm') ||
+        l.endsWith('.m4v') ||
+        l.endsWith('.3gp') ||
+        l.contains('/video/') ||
+        l.contains('video=true');
   }
 
   Widget _buildGalleryVideoPlayer(
@@ -909,39 +768,29 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
     if (!_videoControllers.containsKey(videoUrl)) {
       _initializeVideoController(videoUrl);
     }
-
     final controller = _getVideoController(videoUrl);
     final isInitialized = _isVideoControllerInitialized(videoUrl);
-
     if (!isInitialized || controller == null) {
       return Container(
         color: colors.avatarBackgroundColor,
         child: Center(
-          child: CircularProgressIndicator(
-            color: colors.progressIndicatorColor,
-            strokeWidth: 1.5,
-          ),
-        ),
+            child: CircularProgressIndicator(
+                color: colors.progressIndicatorColor, strokeWidth: 1.5)),
       );
     }
-
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Positioned.fill(
-            child: FittedBox(
-              fit: BoxFit.cover,
-              child: SizedBox(
+      child: Stack(fit: StackFit.expand, children: [
+        Positioned.fill(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
                 width: controller.value.size.width,
                 height: controller.value.size.height,
-                child: VideoPlayer(controller),
-              ),
-            ),
+                child: VideoPlayer(controller)),
           ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
 
@@ -949,31 +798,22 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
     if (!_videoControllers.containsKey(videoUrl)) {
       _initializeVideoController(videoUrl);
     }
-
     final controller = _getVideoController(videoUrl);
     final isInitialized = _isVideoControllerInitialized(videoUrl);
-
-    if (!isInitialized || controller == null) {
-      return _buildVideoLoading(colors);
-    }
-
+    if (!isInitialized || controller == null) return _buildVideoLoading(colors);
     return ClipRRect(
       borderRadius: BorderRadius.circular(4),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Positioned.fill(
-            child: FittedBox(
-              fit: BoxFit.cover,
-              child: SizedBox(
+      child: Stack(fit: StackFit.expand, children: [
+        Positioned.fill(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
                 width: controller.value.size.width,
                 height: controller.value.size.height,
-                child: VideoPlayer(controller),
-              ),
-            ),
+                child: VideoPlayer(controller)),
           ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
 
@@ -999,239 +839,171 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
   }
 
   Widget _buildOtherProfileHeaderSkeleton(_OtherProfileColorSet colors) {
-    return Column(
-      children: [
-        Container(
+    return Column(children: [
+      Container(
           width: 90,
           height: 90,
           decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: colors.skeletonColor,
-          ),
-        ),
-        const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildOtherMetricSkeleton(colors),
-              _buildOtherMetricSkeleton(colors),
-              _buildOtherMetricSkeleton(colors),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 100,
-              height: 40,
-              decoration: BoxDecoration(
+              shape: BoxShape.circle, color: colors.skeletonColor)),
+      const SizedBox(height: 16),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _buildOtherMetricSkeleton(colors),
+          _buildOtherMetricSkeleton(colors),
+          _buildOtherMetricSkeleton(colors),
+        ],
+      ),
+      const SizedBox(height: 16),
+      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Container(
+            width: 100,
+            height: 40,
+            decoration: BoxDecoration(
                 color: colors.skeletonColor,
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              width: 100,
-              height: 40,
-              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8))),
+        const SizedBox(width: 8),
+        Container(
+            width: 100,
+            height: 40,
+            decoration: BoxDecoration(
                 color: colors.skeletonColor,
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
+                borderRadius: BorderRadius.circular(8))),
+      ]),
+    ]);
   }
 
   Widget _buildOtherMetricSkeleton(_OtherProfileColorSet colors) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Container(
+    return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      Container(
           height: 16,
           width: 30,
           decoration: BoxDecoration(
-            color: colors.skeletonColor,
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Container(
+              color: colors.skeletonColor,
+              borderRadius: BorderRadius.circular(4))),
+      const SizedBox(height: 6),
+      Container(
           height: 12,
           width: 50,
           decoration: BoxDecoration(
-            color: colors.skeletonColor,
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ),
-      ],
-    );
+              color: colors.skeletonColor,
+              borderRadius: BorderRadius.circular(4))),
+    ]);
   }
 
   Widget _buildOtherBioSectionSkeleton(_OtherProfileColorSet colors) {
     return Align(
       alignment: Alignment.centerLeft,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
             height: 18,
             width: 120,
             decoration: BoxDecoration(
-              color: colors.skeletonColor,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Container(
+                color: colors.skeletonColor,
+                borderRadius: BorderRadius.circular(4))),
+        const SizedBox(height: 12),
+        Container(
             height: 14,
             width: double.infinity,
             decoration: BoxDecoration(
-              color: colors.skeletonColor,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Container(
+                color: colors.skeletonColor,
+                borderRadius: BorderRadius.circular(4))),
+        const SizedBox(height: 6),
+        Container(
             height: 14,
             width: 250,
             decoration: BoxDecoration(
-              color: colors.skeletonColor,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Container(
+                color: colors.skeletonColor,
+                borderRadius: BorderRadius.circular(4))),
+        const SizedBox(height: 6),
+        Container(
             height: 14,
             width: 200,
             decoration: BoxDecoration(
-              color: colors.skeletonColor,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-        ],
-      ),
+                color: colors.skeletonColor,
+                borderRadius: BorderRadius.circular(4))),
+      ]),
     );
   }
 
   Widget _buildTabButtonsSkeleton(_OtherProfileColorSet colors) {
-    return Row(
-      children: [
-        Expanded(
+    return Row(children: [
+      Expanded(
           child: Container(
-            height: 50,
-            decoration: BoxDecoration(
-              color: colors.skeletonColor,
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
+              height: 50,
+              decoration: BoxDecoration(
+                  color: colors.skeletonColor,
+                  borderRadius: BorderRadius.circular(8)))),
+      const SizedBox(width: 8),
+      Expanded(
           child: Container(
-            height: 50,
-            decoration: BoxDecoration(
-              color: colors.skeletonColor,
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        ),
-      ],
-    );
+              height: 50,
+              decoration: BoxDecoration(
+                  color: colors.skeletonColor,
+                  borderRadius: BorderRadius.circular(8)))),
+    ]);
   }
 
   Widget _buildOtherPostsGridSkeleton(_OtherProfileColorSet colors) {
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      // Show 9 items in skeleton to match first load
       itemCount: 9,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 2,
-        mainAxisSpacing: 2,
-        childAspectRatio: 0.8,
-      ),
-      itemBuilder: (context, index) {
-        return Container(
-          margin: const EdgeInsets.all(1),
-          decoration: BoxDecoration(
+          crossAxisCount: 3,
+          crossAxisSpacing: 2,
+          mainAxisSpacing: 2,
+          childAspectRatio: 0.8),
+      itemBuilder: (_, __) => Container(
+        margin: const EdgeInsets.all(1),
+        decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(4),
-            color: colors.skeletonColor,
-          ),
-        );
-      },
+            color: colors.skeletonColor),
+      ),
     );
   }
 
   Widget _buildAppBarTitleSkeleton(_OtherProfileColorSet colors) {
     return Container(
-      height: 16,
-      width: 120,
-      decoration: BoxDecoration(
-        color: colors.skeletonColor,
-        borderRadius: BorderRadius.circular(4),
-      ),
-    );
+        height: 16,
+        width: 120,
+        decoration: BoxDecoration(
+            color: colors.skeletonColor,
+            borderRadius: BorderRadius.circular(4)));
   }
 
+  // ========== FOLLOW / MESSAGE / REPORT ==========
   void _otherHandleFollow() async {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     final String? currentUserId =
         userProvider.firebaseUid ?? userProvider.supabaseUid;
-
     if (currentUserId == null || currentUserId.isEmpty) {
-      if (mounted) {
-        showSnackBar(context, "Please sign in to follow users");
-      }
+      if (mounted) showSnackBar(context, "Please sign in to follow users");
       return;
     }
-
     try {
-      final targetUserId = widget.uid;
       final isPrivate = userData['isPrivate'] ?? false;
-
       if (isFollowing) {
-        await SupabaseProfileMethods()
-            .unfollowUser(currentUserId, targetUserId);
-        if (mounted) {
+        await SupabaseProfileMethods().unfollowUser(currentUserId, widget.uid);
+        if (mounted)
           setState(() {
             isFollowing = false;
             _isMutualFollow = false;
           });
-        }
       } else if (hasPendingRequest) {
-        await SupabaseProfileMethods().declineFollowRequest(
-          targetUserId,
-          currentUserId,
-        );
-        if (mounted) {
-          setState(() {
-            hasPendingRequest = false;
-          });
-        }
+        await SupabaseProfileMethods()
+            .declineFollowRequest(widget.uid, currentUserId);
+        if (mounted) setState(() => hasPendingRequest = false);
       } else {
-        await SupabaseProfileMethods().followUser(
-          currentUserId,
-          targetUserId,
-        );
+        await SupabaseProfileMethods().followUser(currentUserId, widget.uid);
         if (isPrivate) {
-          setState(() {
-            hasPendingRequest = true;
-          });
+          setState(() => hasPendingRequest = true);
         } else {
-          setState(() {
-            isFollowing = true;
-          });
+          setState(() => isFollowing = true);
           _checkMutualFollowAfterFollow();
         }
       }
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
         showSnackBar(
             context, "Please try again or contact us at ratedly9@gmail.com");
@@ -1243,58 +1015,40 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     final String? currentUserId =
         userProvider.firebaseUid ?? userProvider.supabaseUid;
-
-    if (currentUserId == null || currentUserId.isEmpty) {
-      return;
-    }
-
-    final otherFollowsCurrent = await _supabase
+    if (currentUserId == null || currentUserId.isEmpty) return;
+    final result = await _supabase
         .from('user_following')
         .select()
         .eq('user_id', widget.uid)
         .eq('following_id', currentUserId)
         .maybeSingle();
-
-    if (mounted) {
-      setState(() {
-        _isMutualFollow = otherFollowsCurrent != null;
-      });
-    }
+    if (mounted) setState(() => _isMutualFollow = result != null);
   }
 
   void _otherNavigateToMessaging() async {
-    // Get user ID from UserProvider (not Firebase Auth directly)
     final userProvider = Provider.of<UserProvider>(context, listen: false);
-
     final String? userId = userProvider.firebaseUid ?? userProvider.supabaseUid;
-
     if (userId == null || userId.isEmpty) {
-      if (mounted) {
-        showSnackBar(context, "Please sign in to message users");
-      }
+      if (mounted) showSnackBar(context, "Please sign in to message users");
       return;
     }
-
-    // Pause any currently playing video before navigation
     _pauseAllVideos();
-    _muteProfileVideo(); // Mute profile video
-
+    _muteProfileVideo();
     if (mounted) {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => MessagingScreen(
+          builder: (_) => MessagingScreen(
             recipientUid: widget.uid,
             recipientUsername: userData['username'] ?? '',
             recipientPhotoUrl: userData['photoUrl'] ?? '',
           ),
         ),
       ).then((_) {
-        // Resume videos when returning (after a small delay)
         Future.delayed(const Duration(milliseconds: 300), () {
           if (mounted) {
             _resumeAllVideos();
-            _unmuteProfileVideo(); // Unmute profile video
+            _unmuteProfileVideo();
           }
         });
       });
@@ -1305,73 +1059,56 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     final String? currentUserId =
         userProvider.firebaseUid ?? userProvider.supabaseUid;
-
     if (currentUserId == null || currentUserId.isEmpty) {
-      if (mounted) {
-        showSnackBar(context, "Please sign in to report profiles");
-      }
+      if (mounted) showSnackBar(context, "Please sign in to report profiles");
       return;
     }
-
     String? selectedReason;
     showDialog(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              backgroundColor: colors.dialogBackgroundColor,
-              title: Text('Report Profile',
-                  style: TextStyle(color: colors.dialogTextColor)),
-              content: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Thank you for helping keep our community safe.\n\nPlease let us know the reason for reporting this content. Your report is anonymous, and our moderators will review it as soon as possible. \n\n If you prefer not to see this user posts or content, you can choose to block them.',
-                      style: TextStyle(
-                          color: colors.dialogTextColor, fontSize: 14),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Select a reason:',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: colors.dialogTextColor),
-                    ),
-                    ...profileReportReasons.map((reason) {
-                      return RadioListTile<String>(
-                        title: Text(reason,
-                            style: TextStyle(color: colors.dialogTextColor)),
-                        value: reason,
-                        groupValue: selectedReason,
-                        activeColor: colors.radioActiveColor,
-                        onChanged: (value) {
-                          setState(() => selectedReason = value);
-                        },
-                      );
-                    }).toList(),
-                  ],
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: colors.dialogBackgroundColor,
+          title: Text('Report Profile',
+              style: TextStyle(color: colors.dialogTextColor)),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Thank you for helping keep our community safe.\n\nPlease let us know the reason for reporting this content. Your report is anonymous, and our moderators will review it as soon as possible.\n\nIf you prefer not to see this user\'s content, you can choose to block them.',
+                  style: TextStyle(color: colors.dialogTextColor, fontSize: 14),
                 ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text('Cancel',
-                      style: TextStyle(color: colors.dialogTextColor)),
-                ),
-                TextButton(
-                  onPressed: selectedReason != null
-                      ? () => _submitProfileReport(selectedReason!)
-                      : null,
-                  child: Text('Submit',
-                      style: TextStyle(color: colors.dialogTextColor)),
-                ),
+                const SizedBox(height: 16),
+                Text('Select a reason:',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: colors.dialogTextColor)),
+                ...profileReportReasons.map((reason) => RadioListTile<String>(
+                      title: Text(reason,
+                          style: TextStyle(color: colors.dialogTextColor)),
+                      value: reason,
+                      groupValue: selectedReason,
+                      activeColor: colors.radioActiveColor,
+                      onChanged: (v) => setState(() => selectedReason = v),
+                    )),
               ],
-            );
-          },
-        );
-      },
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Cancel',
+                    style: TextStyle(color: colors.dialogTextColor))),
+            TextButton(
+                onPressed: selectedReason != null
+                    ? () => _submitProfileReport(selectedReason!)
+                    : null,
+                child: Text('Submit',
+                    style: TextStyle(color: colors.dialogTextColor))),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1383,12 +1120,11 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
         'timestamp': DateTime.now().toIso8601String(),
         'type': 'profile',
       });
-
       if (mounted) {
         Navigator.pop(context);
         showSnackBar(context, 'Report submitted. Thank you!');
       }
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
         showSnackBar(
             context, 'Please try again or contact us at ratedly9@gmail.com');
@@ -1396,102 +1132,79 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
     }
   }
 
-  // ========== SIMPLIFIED TAB BUTTONS ==========
+  // ========== TAB BUTTONS ==========
   Widget _buildTabButtons(_OtherProfileColorSet colors) {
-    return Row(
-      children: [
-        Expanded(
-          child: GestureDetector(
-            onTap: () => setState(() => _selectedTabIndex = 0),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
+    return Row(children: [
+      Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => _selectedTabIndex = 0),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
                 border: Border(
-                  bottom: BorderSide(
-                    color: _selectedTabIndex == 0
-                        ? colors.textColor
-                        : colors.dividerColor,
-                    width: 2,
-                  ),
-                ),
-              ),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.grid_on,
-                    color: _selectedTabIndex == 0
-                        ? colors.textColor
-                        : colors.textColor.withOpacity(0.5),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'POSTS',
-                    style: TextStyle(
+                    bottom: BorderSide(
+                        color: _selectedTabIndex == 0
+                            ? colors.textColor
+                            : colors.dividerColor,
+                        width: 2))),
+            child: Column(children: [
+              Icon(Icons.grid_on,
+                  color: _selectedTabIndex == 0
+                      ? colors.textColor
+                      : colors.textColor.withOpacity(0.5)),
+              const SizedBox(height: 4),
+              Text('POSTS',
+                  style: TextStyle(
                       fontSize: 12,
                       fontWeight: _selectedTabIndex == 0
                           ? FontWeight.bold
                           : FontWeight.normal,
                       color: _selectedTabIndex == 0
                           ? colors.textColor
-                          : colors.textColor.withOpacity(0.5),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+                          : colors.textColor.withOpacity(0.5))),
+            ]),
           ),
         ),
-        Expanded(
-          child: GestureDetector(
-            onTap: () => setState(() => _selectedTabIndex = 1),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
+      ),
+      Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => _selectedTabIndex = 1),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
                 border: Border(
-                  bottom: BorderSide(
-                    color: _selectedTabIndex == 1
-                        ? colors.textColor
-                        : colors.dividerColor,
-                    width: 2,
-                  ),
-                ),
-              ),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.collections,
-                    color: _selectedTabIndex == 1
-                        ? colors.textColor
-                        : colors.textColor.withOpacity(0.5),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'GALLERIES',
-                    style: TextStyle(
+                    bottom: BorderSide(
+                        color: _selectedTabIndex == 1
+                            ? colors.textColor
+                            : colors.dividerColor,
+                        width: 2))),
+            child: Column(children: [
+              Icon(Icons.collections,
+                  color: _selectedTabIndex == 1
+                      ? colors.textColor
+                      : colors.textColor.withOpacity(0.5)),
+              const SizedBox(height: 4),
+              Text('GALLERIES',
+                  style: TextStyle(
                       fontSize: 12,
                       fontWeight: _selectedTabIndex == 1
                           ? FontWeight.bold
                           : FontWeight.normal,
                       color: _selectedTabIndex == 1
                           ? colors.textColor
-                          : colors.textColor.withOpacity(0.5),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+                          : colors.textColor.withOpacity(0.5))),
+            ]),
           ),
         ),
-      ],
-    );
+      ),
+    ]);
   }
 
+  // ========== BUILD ==========
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final colors = _getColors(themeProvider);
-
-    // Get user ID from UserProvider
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     final String? currentUserId =
         userProvider.firebaseUid ?? userProvider.supabaseUid;
@@ -1517,19 +1230,14 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
         iconTheme: IconThemeData(color: colors.appBarIconColor),
         backgroundColor: colors.appBarBackgroundColor,
         elevation: 0,
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            VerifiedUsernameWidget(
-              username: userData['username'] ?? 'User',
-              uid: widget.uid,
-              style: TextStyle(
-                color: colors.textColor,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
+        title: Row(mainAxisSize: MainAxisSize.min, children: [
+          VerifiedUsernameWidget(
+            username: userData['username'] ?? 'User',
+            uid: widget.uid,
+            style:
+                TextStyle(color: colors.textColor, fontWeight: FontWeight.bold),
+          ),
+        ]),
         centerTitle: true,
         leading: BackButton(color: colors.appBarIconColor),
         actions: [
@@ -1540,26 +1248,19 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
                 if (value == 'block') {
                   try {
                     setState(() => isLoading = true);
-
                     if (currentUserId == null) return;
-
                     await SupabaseBlockMethods().blockUser(
-                      currentUserId: currentUserId,
-                      targetUserId: widget.uid,
-                    );
-
+                        currentUserId: currentUserId, targetUserId: widget.uid);
                     if (mounted) {
                       Navigator.pushReplacement(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => BlockedProfileScreen(
-                            uid: widget.uid,
-                            isBlocker: true,
-                          ),
+                          builder: (_) => BlockedProfileScreen(
+                              uid: widget.uid, isBlocker: true),
                         ),
                       );
                     }
-                  } catch (e) {
+                  } catch (_) {
                     if (mounted) {
                       showSnackBar(context,
                           "Please try again or contact us at ratedly9@gmail.com");
@@ -1569,7 +1270,6 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
                   }
                 } else if (value == 'remove_follower') {
                   if (currentUserId == null) return;
-
                   try {
                     await SupabaseProfileMethods()
                         .removeFollower(currentUserId, widget.uid);
@@ -1580,7 +1280,7 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
                       });
                       showSnackBar(context, "Follower removed successfully");
                     }
-                  } catch (e) {
+                  } catch (_) {
                     if (mounted) {
                       showSnackBar(context,
                           "Please try again or contact us at ratedly9@gmail.com");
@@ -1590,32 +1290,28 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
                   _showProfileReportDialog(colors);
                 }
               },
-              itemBuilder: (context) => [
+              itemBuilder: (_) => [
                 if (_isViewerFollower)
                   PopupMenuItem(
-                    value: 'remove_follower',
-                    child: Text('Remove Follower',
-                        style: TextStyle(color: colors.textColor)),
-                  ),
+                      value: 'remove_follower',
+                      child: Text('Remove Follower',
+                          style: TextStyle(color: colors.textColor))),
                 if (!isCurrentUser)
                   PopupMenuItem(
-                    value: 'report',
-                    child: Text('Report Profile',
-                        style: TextStyle(color: colors.textColor)),
-                  ),
+                      value: 'report',
+                      child: Text('Report Profile',
+                          style: TextStyle(color: colors.textColor))),
                 PopupMenuItem(
-                  value: 'block',
-                  child: Text('Block User',
-                      style: TextStyle(color: colors.textColor)),
-                ),
+                    value: 'block',
+                    child: Text('Block User',
+                        style: TextStyle(color: colors.textColor))),
               ],
             )
         ],
       ),
       backgroundColor: colors.backgroundColor,
       body: NotificationListener<ScrollNotification>(
-        onNotification: (ScrollNotification scrollInfo) {
-          // Alternative scroll detection for mobile
+        onNotification: (scrollInfo) {
           if (scrollInfo is ScrollEndNotification) {
             if (scrollInfo.metrics.pixels >=
                     scrollInfo.metrics.maxScrollExtent - 100 &&
@@ -1629,68 +1325,56 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
         },
         child: SingleChildScrollView(
           controller: _scrollController,
-          child: Column(
-            children: [
+          child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(children: [
+                _buildOtherProfileHeader(colors),
+                const SizedBox(height: 20),
+                _buildOtherBioSection(colors),
+              ]),
+            ),
+            const SizedBox(height: 16),
+            _buildTabButtons(colors),
+            const SizedBox(height: 8),
+            _selectedTabIndex == 0
+                ? _buildOtherPostsGrid(colors)
+                : _buildOtherGalleriesGrid(colors),
+            if (_isLoadingMore && _selectedTabIndex == 0)
               Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    _buildOtherProfileHeader(colors),
-                    const SizedBox(height: 20),
-                    _buildOtherBioSection(colors),
-                  ],
-                ),
+                padding: const EdgeInsets.all(16.0),
+                child: CircularProgressIndicator(color: colors.textColor),
               ),
-              const SizedBox(height: 16),
-              _buildTabButtons(colors),
-              const SizedBox(height: 8),
-              // Tab content
-              _selectedTabIndex == 0
-                  ? _buildOtherPostsGrid(colors)
-                  : _buildOtherGalleriesGrid(colors),
-              // Show loading indicator at bottom when loading more
-              if (_isLoadingMore && _selectedTabIndex == 0)
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: CircularProgressIndicator(color: colors.textColor),
-                ),
-              const SizedBox(height: 20), // Add some bottom padding
-            ],
-          ),
+            const SizedBox(height: 20),
+          ]),
         ),
       ),
     );
   }
 
   Widget _buildOtherProfileHeader(_OtherProfileColorSet colors) {
-    return Column(
-      children: [
-        _buildProfilePicture(colors), // Use the new profile picture builder
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _buildOtherMetric(postLen, "Posts", colors),
-                        _buildOtherMetric(followers, "Followers", colors),
-                        _buildOtherMetric(following, "Following", colors),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    _buildOtherInteractionButtons(colors),
-                  ],
-                ),
+    return Column(children: [
+      _buildProfilePicture(colors),
+      Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Row(children: [
+          Expanded(
+            child: Column(children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildOtherMetric(postLen, "Posts", colors),
+                  _buildOtherMetric(followers, "Followers", colors),
+                  _buildOtherMetric(following, "Following", colors),
+                ],
               ),
-            ],
+              const SizedBox(height: 8),
+              _buildOtherInteractionButtons(colors),
+            ]),
           ),
-        ),
-      ],
-    );
+        ]),
+      ),
+    ]);
   }
 
   Widget _buildOtherInteractionButtons(_OtherProfileColorSet colors) {
@@ -1700,132 +1384,107 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
     final bool isCurrentUser = currentUserId == widget.uid;
     final bool isPrivateAccount = userData['isPrivate'] ?? false;
 
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (!isCurrentUser) _buildFollowButton(isPrivateAccount, colors),
-            const SizedBox(width: 5),
-            if (!isCurrentUser)
-              ElevatedButton(
-                onPressed: _otherNavigateToMessaging,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: colors.buttonBackgroundColor,
-                  foregroundColor: colors.buttonTextColor,
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  minimumSize: const Size(100, 40),
-                ),
-                child: Text("Message",
-                    style: TextStyle(color: colors.buttonTextColor)),
-              ),
-          ],
-        ),
-        const SizedBox(height: 5),
-      ],
-    );
+    return Column(children: [
+      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        if (!isCurrentUser) _buildFollowButton(isPrivateAccount, colors),
+        const SizedBox(width: 5),
+        if (!isCurrentUser)
+          ElevatedButton(
+            onPressed: _otherNavigateToMessaging,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: colors.buttonBackgroundColor,
+              foregroundColor: colors.buttonTextColor,
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              minimumSize: const Size(100, 40),
+            ),
+            child: Text("Message",
+                style: TextStyle(color: colors.buttonTextColor)),
+          ),
+      ]),
+      const SizedBox(height: 5),
+    ]);
   }
 
   Widget _buildFollowButton(
       bool isPrivateAccount, _OtherProfileColorSet colors) {
     final isPending = hasPendingRequest && isPrivateAccount;
-
     return ElevatedButton(
-        onPressed: _otherHandleFollow,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: colors.buttonBackgroundColor,
-          foregroundColor: colors.buttonTextColor,
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          side: BorderSide(
-            color: colors.buttonBackgroundColor,
-          ),
-          minimumSize: const Size(100, 40),
-        ),
-        child: Text(
-          isFollowing
-              ? 'Unfollow'
-              : isPending
-                  ? 'Requested'
-                  : 'Follow',
-          style: TextStyle(
-              fontWeight: FontWeight.w600, color: colors.buttonTextColor),
-        ));
-  }
-
-  Widget _buildOtherMetric(
-      int value, String label, _OtherProfileColorSet colors) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          value.toString(),
-          style: TextStyle(
-            fontSize: 13.6,
-            fontWeight: FontWeight.bold,
-            color: colors.textColor,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w400,
-            color: colors.textColor,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildOtherBioSection(_OtherProfileColorSet colors) {
-    final String bio = userData['bio'] ?? '';
-
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          VerifiedUsernameWidget(
-            username: userData['username'] ?? '',
-            uid: widget.uid,
-            style: TextStyle(
-              color: colors.textColor,
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-            ),
-          ),
-          const SizedBox(height: 4),
-          if (bio.isNotEmpty)
-            ExpandableBioText(
-              text: bio,
-              style: TextStyle(color: colors.textColor),
-              expandColor: colors.textColor.withOpacity(0.8),
-            ),
-        ],
+      onPressed: _otherHandleFollow,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: colors.buttonBackgroundColor,
+        foregroundColor: colors.buttonTextColor,
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        side: BorderSide(color: colors.buttonBackgroundColor),
+        minimumSize: const Size(100, 40),
+      ),
+      child: Text(
+        isFollowing
+            ? 'Unfollow'
+            : isPending
+                ? 'Requested'
+                : 'Follow',
+        style: TextStyle(
+            fontWeight: FontWeight.w600, color: colors.buttonTextColor),
       ),
     );
   }
 
-  Widget _buildPrivateAccountMessage(_OtherProfileColorSet colors) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(Icons.lock, size: 60, color: colors.errorTextColor),
-        const SizedBox(height: 20),
-        Text('This Account is Private',
-            style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: colors.textColor)),
-        const SizedBox(height: 10),
-        Text('Follow to see their galleries',
-            style: TextStyle(fontSize: 14, color: colors.textColor)),
-      ],
+  Widget _buildOtherMetric(
+      int value, String label, _OtherProfileColorSet colors) {
+    return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      Text(value.toString(),
+          style: TextStyle(
+              fontSize: 13.6,
+              fontWeight: FontWeight.bold,
+              color: colors.textColor)),
+      const SizedBox(height: 4),
+      Text(label,
+          style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w400,
+              color: colors.textColor)),
+    ]);
+  }
+
+  Widget _buildOtherBioSection(_OtherProfileColorSet colors) {
+    final String bio = userData['bio'] ?? '';
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        VerifiedUsernameWidget(
+          username: userData['username'] ?? '',
+          uid: widget.uid,
+          style: TextStyle(
+              color: colors.textColor,
+              fontWeight: FontWeight.bold,
+              fontSize: 16),
+        ),
+        const SizedBox(height: 4),
+        if (bio.isNotEmpty)
+          ExpandableBioText(
+            text: bio,
+            style: TextStyle(color: colors.textColor),
+            expandColor: colors.textColor.withOpacity(0.8),
+          ),
+      ]),
     );
   }
 
-  // ========== SIMPLIFIED POSTS GRID ==========
+  Widget _buildPrivateAccountMessage(_OtherProfileColorSet colors) {
+    return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      Icon(Icons.lock, size: 60, color: colors.errorTextColor),
+      const SizedBox(height: 20),
+      Text('This Account is Private',
+          style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: colors.textColor)),
+      const SizedBox(height: 10),
+      Text('Follow to see their galleries',
+          style: TextStyle(fontSize: 14, color: colors.textColor)),
+    ]);
+  }
+
   Widget _buildOtherPostsGrid(_OtherProfileColorSet colors) {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     final String? currentUserId =
@@ -1837,41 +1496,27 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
 
     if (isMutuallyBlocked) {
       return SizedBox(
-        height: 200,
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.block, size: 50, color: Colors.red),
-              const SizedBox(height: 10),
-              Text('Posts unavailable due to blocking',
-                  style: TextStyle(color: colors.errorTextColor)),
-            ],
-          ),
-        ),
-      );
+          height: 200,
+          child: Center(
+              child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                const Icon(Icons.block, size: 50, color: Colors.red),
+                const SizedBox(height: 10),
+                Text('Posts unavailable due to blocking',
+                    style: TextStyle(color: colors.errorTextColor)),
+              ])));
     }
-
     if (shouldHidePosts) {
-      return SizedBox(
-        height: 200,
-        child: _buildPrivateAccountMessage(colors),
-      );
+      return SizedBox(height: 200, child: _buildPrivateAccountMessage(colors));
     }
-
     if (_displayedPosts.isEmpty) {
       return SizedBox(
-        height: 200,
-        child: Center(
-          child: Text(
-            'This user has no posts.',
-            style: TextStyle(
-              fontSize: 16,
-              color: colors.errorTextColor,
-            ),
-          ),
-        ),
-      );
+          height: 200,
+          child: Center(
+              child: Text('This user has no posts.',
+                  style:
+                      TextStyle(fontSize: 16, color: colors.errorTextColor))));
     }
 
     return GridView.builder(
@@ -1879,19 +1524,15 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
       physics: const NeverScrollableScrollPhysics(),
       itemCount: _displayedPosts.length,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 2,
-        mainAxisSpacing: 2,
-        childAspectRatio: 0.8,
-      ),
-      itemBuilder: (context, index) {
-        final post = _displayedPosts[index];
-        return _buildOtherPostItem(post, colors);
-      },
+          crossAxisCount: 3,
+          crossAxisSpacing: 2,
+          mainAxisSpacing: 2,
+          childAspectRatio: 0.8),
+      itemBuilder: (context, index) =>
+          _buildOtherPostItem(_displayedPosts[index], colors),
     );
   }
 
-  // ========== SIMPLIFIED GALLERIES GRID ==========
   Widget _buildOtherGalleriesGrid(_OtherProfileColorSet colors) {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     final String? currentUserId =
@@ -1904,58 +1545,36 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
 
     if (isMutuallyBlocked) {
       return SizedBox(
-        height: 200,
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.block, size: 50, color: Colors.red),
-              const SizedBox(height: 10),
-              Text('Galleries unavailable due to blocking',
-                  style: TextStyle(color: colors.errorTextColor)),
-            ],
-          ),
-        ),
-      );
+          height: 200,
+          child: Center(
+              child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                const Icon(Icons.block, size: 50, color: Colors.red),
+                const SizedBox(height: 10),
+                Text('Galleries unavailable due to blocking',
+                    style: TextStyle(color: colors.errorTextColor)),
+              ])));
     }
-
     if (shouldHideGalleries) {
-      return SizedBox(
-        height: 200,
-        child: _buildPrivateAccountMessage(colors),
-      );
+      return SizedBox(height: 200, child: _buildPrivateAccountMessage(colors));
     }
-
     if (_galleries.isEmpty) {
       return Padding(
-        padding: const EdgeInsets.all(40.0),
-        child: Column(
-          children: [
-            Icon(
-              Icons.collections,
-              size: 64,
-              color: colors.errorTextColor,
-            ),
+          padding: const EdgeInsets.all(40.0),
+          child: Column(children: [
+            Icon(Icons.collections, size: 64, color: colors.errorTextColor),
             const SizedBox(height: 16),
-            Text(
-              'No Galleries Yet',
-              style: TextStyle(
-                color: colors.textColor,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            Text('No Galleries Yet',
+                style: TextStyle(
+                    color: colors.textColor,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            Text(
-              'This user hasn\'t created any galleries',
-              style: TextStyle(
-                color: colors.textColor.withOpacity(0.7),
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      );
+            Text('This user hasn\'t created any galleries',
+                style: TextStyle(color: colors.textColor.withOpacity(0.7)),
+                textAlign: TextAlign.center),
+          ]));
     }
 
     return GridView.builder(
@@ -1963,22 +1582,21 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
       physics: const NeverScrollableScrollPhysics(),
       itemCount: _galleries.length,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
-        childAspectRatio: 1,
-      ),
-      itemBuilder: (context, index) {
-        final gallery = _galleries[index];
-        return _buildGalleryItem(gallery, colors);
-      },
+          crossAxisCount: 2,
+          crossAxisSpacing: 8,
+          mainAxisSpacing: 8,
+          childAspectRatio: 1),
+      itemBuilder: (context, index) =>
+          _buildGalleryItem(_galleries[index], colors),
     );
   }
 
+  // ========== POST ITEM — badge shown only to test == true users ==========
   Widget _buildOtherPostItem(
       Map<String, dynamic> post, _OtherProfileColorSet colors) {
     final postUrl = post['postUrl'] ?? '';
     final isVideo = _isVideoFile(postUrl);
+    final int viewCount = (post['viewers_count'] as num?)?.toInt() ?? 0;
 
     return FutureBuilder<bool>(
       future: SupabaseBlockMethods().isMutuallyBlocked(
@@ -1993,29 +1611,21 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
           return Container(
             margin: const EdgeInsets.all(1),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(4),
-              color: colors.avatarBackgroundColor,
-            ),
+                borderRadius: BorderRadius.circular(4),
+                color: colors.avatarBackgroundColor),
             child: const Center(
-              child: Icon(
-                Icons.block,
-                color: Colors.red,
-                size: 24,
-              ),
-            ),
+                child: Icon(Icons.block, color: Colors.red, size: 24)),
           );
         }
 
         return GestureDetector(
           onTap: () {
-            // Pause any currently playing video before navigation
             _pauseAllVideos();
-            _muteProfileVideo(); // Mute profile video
-
+            _muteProfileVideo();
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => ImageViewScreen(
+                builder: (_) => ImageViewScreen(
                   imageUrl: postUrl,
                   postId: post['postId'] ?? '',
                   description: post['description'] ?? '',
@@ -2026,11 +1636,10 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
                 ),
               ),
             ).then((_) {
-              // Resume videos when returning (after a small delay)
               Future.delayed(const Duration(milliseconds: 300), () {
                 if (mounted) {
                   _resumeAllVideos();
-                  _unmuteProfileVideo(); // Unmute profile video
+                  _unmuteProfileVideo();
                 }
               });
             });
@@ -2038,12 +1647,48 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
           child: Container(
             margin: const EdgeInsets.all(1),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(4),
-              color: isVideo ? colors.avatarBackgroundColor : null,
+                borderRadius: BorderRadius.circular(4),
+                color: isVideo ? colors.avatarBackgroundColor : null),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // ── media ────────────────────────────────────────────
+                isVideo
+                    ? _buildPostVideoPlayer(postUrl, colors)
+                    : _buildImageThumbnail(postUrl, colors),
+
+                // ── view count badge — only for A/B treatment group ──
+                if (_showViewCount)
+                  Positioned(
+                    bottom: 4,
+                    left: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.55),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.visibility,
+                              size: 10, color: Colors.white),
+                          const SizedBox(width: 3),
+                          Text(
+                            _formatViewCount(viewCount),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
             ),
-            child: isVideo
-                ? _buildPostVideoPlayer(postUrl, colors)
-                : _buildImageThumbnail(postUrl, colors),
           ),
         );
       },
@@ -2056,18 +1701,14 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
         gallery['gallery_posts'] != null && gallery['gallery_posts'].isNotEmpty
             ? gallery['gallery_posts'][0]['count'] ?? 0
             : 0;
-
     final coverImageUrl =
         gallery['posts'] != null ? gallery['posts']['postUrl'] ?? '' : '';
-
     final isVideoCover = _isVideoFile(coverImageUrl);
 
     return GestureDetector(
       onTap: () async {
-        // Pause any currently playing video before navigation
         _pauseAllVideos();
-        _muteProfileVideo(); // Mute profile video
-
+        _muteProfileVideo();
         try {
           final galleryPostsResponse =
               await _supabase.from('gallery_posts').select('''
@@ -2077,15 +1718,15 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
 
           final List<Map<String, dynamic>> posts =
               (galleryPostsResponse as List).map<Map<String, dynamic>>((item) {
-            final post = item['posts'];
+            final p = item['posts'];
             return {
-              'postId': post['postId']?.toString() ?? '',
-              'postUrl': post['postUrl']?.toString() ?? '',
-              'description': post['description']?.toString() ?? '',
-              'uid': post['uid']?.toString() ?? '',
-              'datePublished': post['datePublished']?.toString() ?? '',
-              'username': post['username']?.toString() ?? '',
-              'profImage': post['profImage']?.toString() ?? '',
+              'postId': p['postId']?.toString() ?? '',
+              'postUrl': p['postUrl']?.toString() ?? '',
+              'description': p['description']?.toString() ?? '',
+              'uid': p['uid']?.toString() ?? '',
+              'datePublished': p['datePublished']?.toString() ?? '',
+              'username': p['username']?.toString() ?? '',
+              'profImage': p['profImage']?.toString() ?? '',
             };
           }).toList();
 
@@ -2093,116 +1734,91 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => GalleryPostViewScreen(
+                builder: (_) => GalleryPostViewScreen(
                   posts: posts,
                   initialIndex: 0,
                   galleryName: gallery['name'] ?? 'Unnamed Gallery',
                 ),
               ),
             ).then((_) {
-              // Resume videos when returning (after a small delay)
               Future.delayed(const Duration(milliseconds: 300), () {
                 if (mounted) {
                   _resumeAllVideos();
-                  _unmuteProfileVideo(); // Unmute profile video
+                  _unmuteProfileVideo();
                 }
               });
             });
           }
         } catch (e) {
-          if (mounted) {
+          if (mounted)
             showSnackBar(context, 'Failed to load gallery posts: $e');
-          }
         }
       },
       child: Container(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          color: colors.avatarBackgroundColor,
-        ),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (coverImageUrl.isNotEmpty)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: isVideoCover
-                    ? _buildGalleryVideoPlayer(coverImageUrl, colors)
-                    : Image.network(
-                        coverImageUrl,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
+            borderRadius: BorderRadius.circular(8),
+            color: colors.avatarBackgroundColor),
+        child: Stack(fit: StackFit.expand, children: [
+          if (coverImageUrl.isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: isVideoCover
+                  ? _buildGalleryVideoPlayer(coverImageUrl, colors)
+                  : Image.network(coverImageUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
                             decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(8),
-                              color:
-                                  colors.avatarBackgroundColor.withOpacity(0.5),
-                            ),
-                            child: Icon(
-                              Icons.collections,
-                              size: 40,
-                              color: colors.errorTextColor,
-                            ),
-                          );
-                        },
-                      ),
-              )
-            else
-              Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  color: colors.avatarBackgroundColor.withOpacity(0.5),
-                ),
-                child: Icon(
-                  Icons.collections,
-                  size: 40,
-                  color: colors.errorTextColor,
-                ),
-              ),
+                                borderRadius: BorderRadius.circular(8),
+                                color: colors.avatarBackgroundColor
+                                    .withOpacity(0.5)),
+                            child: Icon(Icons.collections,
+                                size: 40, color: colors.errorTextColor),
+                          )),
+            )
+          else
             Container(
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [
-                    Colors.black.withOpacity(0.7),
-                    Colors.transparent,
-                  ],
-                ),
+                  borderRadius: BorderRadius.circular(8),
+                  color: colors.avatarBackgroundColor.withOpacity(0.5)),
+              child: Icon(Icons.collections,
+                  size: 40, color: colors.errorTextColor),
+            ),
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [
+                  Colors.black.withOpacity(0.7),
+                  Colors.transparent,
+                ],
               ),
-              child: Align(
-                alignment: Alignment.bottomLeft,
-                child: Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Column(
+            ),
+            child: Align(
+              alignment: Alignment.bottomLeft,
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        gallery['name'] ?? 'Unnamed Gallery',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        '$postCount ${postCount == 1 ? 'post' : 'posts'}',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.8),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                      Text(gallery['name'] ?? 'Unnamed Gallery',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                      Text('$postCount ${postCount == 1 ? 'post' : 'posts'}',
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.8),
+                              fontSize: 12)),
+                    ]),
               ),
             ),
-          ],
-        ),
+          ),
+        ]),
       ),
     );
   }
@@ -2211,23 +1827,13 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
     return Container(
       color: colors.avatarBackgroundColor,
       child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(
-              color: colors.progressIndicatorColor,
-              strokeWidth: 1.5,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Loading...',
-              style: TextStyle(
-                color: colors.textColor,
-                fontSize: 8,
-              ),
-            ),
-          ],
-        ),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          CircularProgressIndicator(
+              color: colors.progressIndicatorColor, strokeWidth: 1.5),
+          const SizedBox(height: 4),
+          Text('Loading...',
+              style: TextStyle(color: colors.textColor, fontSize: 8)),
+        ]),
       ),
     );
   }
@@ -2254,18 +1860,12 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
             ),
           );
         },
-        errorBuilder: (context, error, stackTrace) {
-          return Container(
-            color: colors.avatarBackgroundColor,
-            child: Center(
-              child: Icon(
-                Icons.broken_image,
-                color: colors.errorTextColor,
-                size: 20,
-              ),
-            ),
-          );
-        },
+        errorBuilder: (_, __, ___) => Container(
+          color: colors.avatarBackgroundColor,
+          child: Center(
+              child: Icon(Icons.broken_image,
+                  color: colors.errorTextColor, size: 20)),
+        ),
       ),
     );
   }
@@ -2275,21 +1875,14 @@ class _OtherUserProfileScreenState extends State<OtherUserProfileScreen>
     WidgetsBinding.instance.removeObserver(this);
     _scrollController.removeListener(_scrollListener);
     _scrollController.dispose();
-
-    // Dispose all video controllers
-    for (final controller in _videoControllers.values) {
-      controller.pause();
-      controller.dispose();
+    for (final c in _videoControllers.values) {
+      c.pause();
+      c.dispose();
     }
     _videoControllers.clear();
     _videoControllersInitialized.clear();
-
-    // Dispose profile video controller
-    if (_profileVideoController != null) {
-      _profileVideoController!.dispose();
-      _profileVideoController = null;
-    }
-
+    _profileVideoController?.dispose();
+    _profileVideoController = null;
     super.dispose();
   }
 }
