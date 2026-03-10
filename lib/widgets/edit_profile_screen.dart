@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:Ratedly/resources/storage_methods.dart';
 import 'package:Ratedly/utils/theme_provider.dart';
@@ -14,6 +13,7 @@ import 'package:video_trimmer/video_trimmer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:async';
+import 'package:Ratedly/providers/user_provider.dart';
 
 // Define color schemes for both themes at top level
 class _EditProfileColorSet {
@@ -79,7 +79,9 @@ class _EditProfileLightColors extends _EditProfileColorSet {
 }
 
 class EditProfileScreen extends StatefulWidget {
-  const EditProfileScreen({Key? key}) : super(key: key);
+  // ── FIX: accept uid so we never rely on FirebaseAuth ──
+  final String? uid;
+  const EditProfileScreen({Key? key, this.uid}) : super(key: key);
 
   @override
   State<EditProfileScreen> createState() => _EditProfileScreenState();
@@ -120,6 +122,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   // Track if user wants to remove current profile media
   bool _shouldRemoveCurrentMedia = false;
 
+  // ── Resolved UID (widget param → UserProvider → Supabase session) ──
+  String? get _resolvedUid {
+    if (widget.uid != null && widget.uid!.isNotEmpty) return widget.uid;
+    final userProvider = Provider.of<UserProvider>(context, listen: false);
+    final providerUid = userProvider.firebaseUid ?? userProvider.supabaseUid;
+    if (providerUid != null && providerUid.isNotEmpty) return providerUid;
+    return _supabase.auth.currentUser?.id;
+  }
+
   // Helper method to get the appropriate color scheme
   _EditProfileColorSet _getColors(ThemeProvider themeProvider) {
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
@@ -138,7 +149,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return url.contains('supabase.co/storage');
   }
 
-  // Check if URL is a video (by extension) - IMPORTANT: Match the profile_page.dart method
+  // Check if URL is a video (by extension)
   bool _isVideoUrl(String? url) {
     if (url == null || url == 'default') return false;
     final urlLower = url.toLowerCase();
@@ -169,7 +180,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   void initState() {
     super.initState();
     _loadUserData();
-    _testFirebaseAuth();
     _checkIfUserAgreed();
   }
 
@@ -263,22 +273,21 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
   }
 
+  // ── FIX: use _resolvedUid instead of FirebaseAuth ──
   void _loadUserData() async {
     setState(() => _isLoading = true);
     try {
-      final currentUser = FirebaseAuth.instance.currentUser;
-      if (currentUser == null) {
+      final uid = _resolvedUid;
+      if (uid == null || uid.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('User not authenticated')),
+            const SnackBar(content: Text('User not authenticated')),
           );
         }
+        setState(() => _isLoading = false);
         return;
       }
 
-      await FirebaseSupabaseService.debugAuthState();
-
-      String uid = currentUser.uid;
       final userData =
           await _supabase.from('users').select().eq('uid', uid).single();
 
@@ -376,19 +385,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
   }
 
-  void _testFirebaseAuth() async {
-    try {
-      final currentUser = FirebaseAuth.instance.currentUser;
-      if (currentUser == null) return;
-
-      await FirebaseSupabaseService.debugAuthState();
-      final response = await _supabase
-          .from('users')
-          .select('uid, email')
-          .eq('uid', currentUser.uid);
-    } catch (e) {}
-  }
-
   // Show only 2 options - Choose from Gallery and Remove
   void _showEditOptions(_EditProfileColorSet colors) {
     final bool hasAnyPhoto =
@@ -482,7 +478,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         _isTrimming = false;
         _videoFile = null;
         _shouldRemoveCurrentMedia = false;
-        // Dispose video controller when picking image
         if (_profileVideoController != null) {
           _profileVideoController!.dispose();
           _profileVideoController = null;
@@ -526,7 +521,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         _isLoading = true;
         _image = null;
         _shouldRemoveCurrentMedia = false;
-        // Dispose video controller when picking new video
         if (_profileVideoController != null) {
           _profileVideoController!.dispose();
           _profileVideoController = null;
@@ -542,20 +536,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (pickedFile != null) {
         final File videoFile = File(pickedFile.path);
 
-        // Check if file exists and get its size
-        if (await videoFile.exists()) {
-          final fileSize = await videoFile.length();
-        }
-
-        // KEY CHANGE: Don't await loadVideo, match AddPostScreen exactly
         _videoFile = videoFile;
-        _loadVideo(); // Load video in background
+        _loadVideo();
 
         setState(() {
           _image = null;
           _pickedFileName = pickedFile.name;
           _currentPhotoUrl = null;
-          _isTrimming = true; // Show trimmer screen immediately
+          _isTrimming = true;
           _isLoading = false;
         });
       } else {
@@ -571,7 +559,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
-  // KEY CHANGE: Match AddPostScreen exactly - load video without awaiting
   void _loadVideo() {
     if (_videoFile != null) {
       _trimmer.loadVideo(videoFile: _videoFile!);
@@ -599,14 +586,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return trimmedPath;
   }
 
-  // UPDATED: Delete old media with proper video handling
   Future<void> _deleteOldMedia(String mediaUrl) async {
     try {
       if (mediaUrl.contains('supabase.co/storage')) {
-        // Check if it's a video
         if (_isVideoUrl(mediaUrl)) {
-          // It's a video - delete from the videos bucket
-          // Extract the file path from the URL
           final uri = Uri.parse(mediaUrl);
           final pathSegments = uri.pathSegments;
           final videosIndex = pathSegments.indexOf('videos');
@@ -615,7 +598,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             await StorageMethods().deleteVideoFromSupabase('videos', filePath);
           }
         } else {
-          // It's an image
           await StorageMethods().deleteImage(mediaUrl);
         }
       }
@@ -624,16 +606,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
-  // UPDATED: Remove photo immediately without confirmation
   void _removePhoto() {
-    // Check if current photo is a video or image
     final bool isVideo = _currentPhotoUrl != null &&
         _currentPhotoUrl != 'default' &&
         _isVideoUrl(_currentPhotoUrl!);
 
     final mediaType = isVideo ? 'video' : 'picture';
 
-    // Optimistically update UI
     setState(() {
       _image = null;
       _videoFile = null;
@@ -643,7 +622,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       _isTrimming = false;
       _shouldRemoveCurrentMedia = true;
 
-      // Dispose video controller when removing photo
       if (_profileVideoController != null) {
         _profileVideoController!.dispose();
         _profileVideoController = null;
@@ -654,17 +632,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Profile $mediaType removed. Save to update.'),
-        duration: Duration(seconds: 2),
+        duration: const Duration(seconds: 2),
       ),
     );
   }
 
-  // UPDATED: Save profile with proper media deletion
+  // ── FIX: use _resolvedUid instead of FirebaseAuth ──
   Future<void> _saveProfile() async {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) {
+    final uid = _resolvedUid;
+    if (uid == null || uid.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('User not authenticated')),
+        const SnackBar(content: Text('User not authenticated')),
       );
       return;
     }
@@ -681,7 +659,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     setState(() => _isLoading = true);
 
-    // Show saving dialog
     final colors =
         _getColors(Provider.of<ThemeProvider>(context, listen: false));
     showDialog(
@@ -717,12 +694,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
 
     try {
-      String uid = currentUser.uid;
       Map<String, dynamic> updatedData = {
         'bio': _bioController.text,
       };
 
-      // Check if we need to delete old media
       String? oldMediaToDelete;
 
       if (_shouldRemoveCurrentMedia &&
@@ -731,9 +706,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         oldMediaToDelete = _initialPhotoUrl;
       }
 
-      // Handle profile picture changes
       if (_image != null) {
-        // User selected a new image
         String fileName = _pickedFileName ??
             'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
         String photoUrl = await StorageMethods().uploadImageToSupabase(
@@ -743,23 +716,21 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         );
         updatedData['photoUrl'] = photoUrl;
 
-        // Mark old media for deletion if it exists
         if (_initialPhotoUrl != null &&
             _initialPhotoUrl != 'default' &&
             _initialPhotoUrl!.contains('supabase.co/storage')) {
           oldMediaToDelete = _initialPhotoUrl;
         }
       } else if (_videoFile != null) {
-        // User selected a new video - trim if needed
         if (_isTrimming) {
           setState(() => _progressVisibility = true);
           final String? trimmedPath = await _trimVideo();
           setState(() => _progressVisibility = false);
 
           if (trimmedPath == null) {
-            if (mounted) Navigator.of(context).pop(); // Close loading dialog
+            if (mounted) Navigator.of(context).pop();
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Failed to trim video')),
+              const SnackBar(content: Text('Failed to trim video')),
             );
             setState(() => _isLoading = false);
             return;
@@ -768,11 +739,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           _videoFile = File(trimmedPath);
         }
 
-        // Upload video
         String fileName = _pickedFileName ??
             'profile_video_${DateTime.now().millisecondsSinceEpoch}.mp4';
 
-        // Read video file as bytes
         Uint8List videoBytes = await _videoFile!.readAsBytes();
 
         String videoUrl = await StorageMethods().uploadVideoToSupabase(
@@ -782,33 +751,27 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         );
         updatedData['photoUrl'] = videoUrl;
 
-        // Mark old media for deletion if it exists
         if (_initialPhotoUrl != null &&
             _initialPhotoUrl != 'default' &&
             _initialPhotoUrl!.contains('supabase.co/storage')) {
           oldMediaToDelete = _initialPhotoUrl;
         }
       } else if (_shouldRemoveCurrentMedia) {
-        // User wants to remove current photo/video
         updatedData['photoUrl'] = 'default';
-        // oldMediaToDelete is already set above
       }
 
-      // Update user data first (optimistic)
       await FirebaseSupabaseService.update(
         'users',
         updates: updatedData,
         filters: {'uid': uid},
       );
 
-      // Now delete old media in the background
       if (oldMediaToDelete != null &&
           oldMediaToDelete.contains('supabase.co/storage')) {
         _deleteOldMediaInBackground(oldMediaToDelete);
       }
 
       if (mounted) {
-        // Close loading dialog
         Navigator.of(context).pop();
 
         setState(() {
@@ -816,7 +779,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             _initialPhotoUrl = updatedData['photoUrl'];
           }
           _currentPhotoUrl = _initialPhotoUrl;
-          // REMOVED: Clear preview media after saving
           _image = null;
           _videoFile = null;
           _isTrimming = false;
@@ -824,7 +786,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           _shouldRemoveCurrentMedia = false;
         });
 
-        // Initialize video controller if new photo is a video
         if (updatedData.containsKey('photoUrl') &&
             updatedData['photoUrl'] != 'default' &&
             _isVideoUrl(updatedData['photoUrl'])) {
@@ -832,7 +793,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         }
 
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Profile updated successfully!')),
+          const SnackBar(content: Text('Profile updated successfully!')),
         );
 
         Navigator.pop(context, {
@@ -842,7 +803,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       }
     } catch (e) {
       if (mounted) {
-        // Close loading dialog
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to update profile: $e')),
@@ -852,12 +812,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     setState(() => _isLoading = false);
   }
 
-  // Delete old media in background (fire and forget)
   void _deleteOldMediaInBackground(String mediaUrl) {
     Future.delayed(Duration.zero, () async {
       try {
         await _deleteOldMedia(mediaUrl);
-        print('Old media deleted successfully: $mediaUrl');
       } catch (e) {
         print('Failed to delete old media in background: $e');
       }
@@ -868,7 +826,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final colors = _getColors(themeProvider);
 
-    // KEY CHANGE: Match AddPostScreen structure exactly
     return Scaffold(
       appBar: AppBar(
         iconTheme: IconThemeData(color: colors.iconColor),
@@ -883,13 +840,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           },
         ),
         title: Text('Trim Video', style: TextStyle(color: colors.textColor)),
-        // REMOVED: Save button from top-right corner
       ),
       body: Column(
         children: [
           Expanded(
             child: Container(
-              padding: EdgeInsets.only(bottom: 16.0),
+              padding: const EdgeInsets.only(bottom: 16.0),
               color: Colors.black,
               child: Column(
                 children: <Widget>[
@@ -916,16 +872,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ),
                   TextButton(
                     child: _isPlaying
-                        ? Icon(
-                            Icons.pause,
-                            size: 80.0,
-                            color: Colors.white,
-                          )
-                        : Icon(
-                            Icons.play_arrow,
-                            size: 80.0,
-                            color: Colors.white,
-                          ),
+                        ? const Icon(Icons.pause,
+                            size: 80.0, color: Colors.white)
+                        : const Icon(Icons.play_arrow,
+                            size: 80.0, color: Colors.white),
                     onPressed: () async {
                       bool playbackState = await _trimmer.videoPlaybackControl(
                         startValue: _startValue,
@@ -936,8 +886,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       });
                     },
                   ),
-                  SizedBox(height: 16),
-                  // ADDED: Save button at the bottom for video trimming screen
+                  const SizedBox(height: 16),
                   Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: ElevatedButton(
@@ -945,7 +894,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: colors.buttonBackgroundColor,
                         foregroundColor: colors.buttonTextColor,
-                        minimumSize: Size(double.infinity, 50),
+                        minimumSize: const Size(double.infinity, 50),
                       ),
                       child: const Text('Save'),
                     ),
@@ -960,7 +909,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Widget _buildProfileImage(_EditProfileColorSet colors) {
-    // Check if we have a new image
     if (_image != null) {
       return ClipOval(
         child: Image.memory(
@@ -972,7 +920,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       );
     }
 
-    // Check if we have a new video file (not trimming)
     if (_videoFile != null && !_isTrimming) {
       return Container(
         width: 100,
@@ -982,22 +929,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           color: colors.cardColor,
         ),
         child: Center(
-          child: Icon(
-            Icons.videocam,
-            size: 40,
-            color: colors.iconColor,
-          ),
+          child: Icon(Icons.videocam, size: 40, color: colors.iconColor),
         ),
       );
     }
 
-    // Check if we have a current photo URL
     if (_currentPhotoUrl != null && _currentPhotoUrl != 'default') {
-      // Check if current photo is a video
       if (_isVideoUrl(_currentPhotoUrl)) {
         return _buildProfileVideoPlayer(colors);
       } else {
-        // It's an image
         return ClipOval(
           child: Image.network(
             _currentPhotoUrl!,
@@ -1027,7 +967,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       }
     }
 
-    // Default avatar
     return _buildDefaultAvatar(colors);
   }
 
@@ -1039,7 +978,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     final themeProvider = Provider.of<ThemeProvider>(context);
     final colors = _getColors(themeProvider);
-    final currentUser = FirebaseAuth.instance.currentUser;
+    final uid = _resolvedUid;
 
     return Scaffold(
       backgroundColor: colors.backgroundColor,
@@ -1052,7 +991,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         centerTitle: true,
         backgroundColor: colors.backgroundColor,
         elevation: 0,
-        // REMOVED: Save button from top-right corner
       ),
       body: _isLoading
           ? Center(
@@ -1063,12 +1001,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  if (currentUser != null && _username != null)
+                  if (uid != null && _username != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 20.0),
                       child: VerifiedUsernameWidget(
                         username: _username!,
-                        uid: currentUser.uid,
+                        uid: uid,
                         countryCode: _countryCode,
                         style: TextStyle(
                           fontSize: 20,
@@ -1117,7 +1055,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                 ),
                               ),
                             ),
-                            // Show video icon if current photo is a video
                             if (_currentPhotoUrl != null &&
                                 _currentPhotoUrl != 'default' &&
                                 _isVideoUrl(_currentPhotoUrl))
@@ -1125,12 +1062,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                 top: 4,
                                 right: 4,
                                 child: Container(
-                                  padding: EdgeInsets.all(2),
-                                  decoration: BoxDecoration(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(
                                     color: Colors.black54,
                                     shape: BoxShape.circle,
                                   ),
-                                  child: Icon(
+                                  child: const Icon(
                                     Icons.videocam,
                                     size: 12,
                                     color: Colors.white,
