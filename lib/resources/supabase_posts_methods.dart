@@ -1,18 +1,16 @@
-// lib/resources/supabase_posts_methods.dart
 import 'dart:typed_data';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
-import 'package:Ratedly/resources/storage_methods.dart';
-import 'package:Ratedly/services/notification_service.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
-class SupabasePostsMethods {
+class StorageMethods {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
   final SupabaseClient _supabase = Supabase.instance.client;
-  final NotificationService _notificationService = NotificationService();
-  final Uuid _uuid = const Uuid();
-  final StorageMethods _storageMethods = StorageMethods();
+  final ImagePicker _picker = ImagePicker();
 
   // ===========================================================================
   // ERROR LOGGING HELPER
@@ -38,1480 +36,933 @@ class SupabasePostsMethods {
     }
   }
 
-  // Helper to normalise different client return shapes
-  dynamic _unwrap(dynamic res) {
-    try {
-      if (res == null) return null;
-      // PostgrestResponse-like map
-      if (res is Map && res.containsKey('data')) return res['data'];
-    } catch (_) {}
-    return res;
+  // Helper to get the current user ID from Supabase session
+  String? _getCurrentUserId() {
+    final session = _supabase.auth.currentSession;
+    return session?.user.id;
   }
 
-  // Helper method to check if URL is from Supabase Storage (video)
-  bool _isVideoUrl(String url) {
-    final isSupabaseVideo =
-        url.contains('supabase.co/storage/v1/object/public/videos');
-    final hasVideoExtension = url.endsWith('.mp4') ||
-        url.endsWith('.mov') ||
-        url.endsWith('.avi') ||
-        url.endsWith('.mkv');
-
-    return isSupabaseVideo || hasVideoExtension;
-  }
-
-  // Helper method to delete video from Supabase Storage using URL
-  Future<void> _deleteVideoFromUrl(String videoUrl) async {
+  // ===========================================================================
+  // URL VERIFICATION
+  // Performs an HTTP HEAD request on the returned CDN URL to confirm the file
+  // is actually accessible. getPublicUrl() is pure string construction — it
+  // does not verify the file exists. This catches silent upload failures before
+  // the post row is inserted.
+  // ===========================================================================
+  Future<void> _verifyUrlAccessible(String publicUrl) async {
     try {
-      // Extract the file path from the Supabase storage URL
-      final uri = Uri.parse(videoUrl);
-      final pathSegments = uri.pathSegments;
+      final headResponse = await http
+          .head(Uri.parse(publicUrl))
+          .timeout(const Duration(seconds: 8));
 
-      // Find the index of 'videos' in the path
-      final videosIndex = pathSegments.indexOf('videos');
-
-      if (videosIndex != -1 && videosIndex < pathSegments.length - 1) {
-        // The path after 'videos' is the file path (user-uid/filename.mp4)
-        final filePath = pathSegments.sublist(videosIndex + 1).join('/');
-
-        await _storageMethods.deleteVideoFromSupabase('videos', filePath);
-      } else {
-        throw Exception('Invalid video URL format');
+      if (headResponse.statusCode != 200) {
+        throw Exception(
+          'File uploaded but not accessible at CDN URL '
+          '(HTTP ${headResponse.statusCode}). '
+          'Upload may have failed silently.',
+        );
       }
+    } on http.ClientException catch (e) {
+      throw Exception('URL verification network error: $e');
+    } on SocketException catch (e) {
+      throw Exception('URL verification socket error: $e');
+    }
+    // TimeoutException propagates up as-is — caller catches it
+  }
+
+  // ===========================================================================
+  // IMAGE METHODS - SUPABASE ONLY
+  // ===========================================================================
+
+  // Upload image to Supabase Storage
+  Future<String> uploadImageToSupabase(Uint8List file, String fileName,
+      {bool useUserFolder = true}) async {
+    try {
+      final userId = _getCurrentUserId();
+      if (userId == null) {
+        throw Exception('User must be logged in to upload image');
+      }
+
+      String extension = fileName.split('.').last.toLowerCase();
+
+      if (!['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].contains(extension)) {
+        throw Exception(
+            'Invalid image file type. Supported: jpg, jpeg, png, gif, webp, bmp');
+      }
+
+      final String uniqueFileName = '${const Uuid().v1()}.$extension';
+
+      final String filePath =
+          useUserFolder ? '$userId/$uniqueFileName' : uniqueFileName;
+
+      final tempFile = await _createTempFile(uniqueFileName, file);
+
+      await _supabase.storage.from('Images').upload(filePath, tempFile,
+          fileOptions: FileOptions(
+            contentType: _getMimeType(extension),
+            upsert: true,
+          ));
+
+      await tempFile.delete();
+
+      final String publicUrl =
+          _supabase.storage.from('Images').getPublicUrl(filePath);
+
+      // Verify the file is actually accessible on the CDN before returning.
+      // This prevents inserting a post row with a URL that returns 404.
+      await _verifyUrlAccessible(publicUrl);
+
+      return publicUrl;
     } catch (e) {
-      rethrow;
+      final userId = _getCurrentUserId();
+      await _logPostError(
+        operationType: 'upload_image',
+        userId: userId,
+        mediaUrl: fileName,
+        error: e,
+        additionalData: {'useUserFolder': useUserFolder},
+      );
+      throw Exception('Failed to upload image to Supabase: $e');
     }
   }
 
-  // Record push notification (insert into Firestore only, not Supabase)
-  Future<void> _recordPushNotification({
-    required String type,
-    required String targetUserId,
-    required String title,
-    required String body,
-    required Map<String, dynamic> customData,
-  }) async {
+  // Upload image file to Supabase (from File object)
+  Future<String> uploadImageFileToSupabase(File imageFile, String fileName,
+      {bool useUserFolder = true}) async {
     try {
-      // This uses Firebase for push notifications (Firestore only)
-      final FirebaseFirestore firestore = FirebaseFirestore.instance;
-      await firestore.collection('Push Not').add({
-        'type': type,
-        'targetUserId': targetUserId,
-        'title': title,
-        'body': body,
-        'customData': customData,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
+      final userId = _getCurrentUserId();
+      if (userId == null) {
+        throw Exception('User must be logged in to upload image');
+      }
+
+      String extension = fileName.split('.').last.toLowerCase();
+
+      if (!['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].contains(extension)) {
+        throw Exception('Invalid image file type');
+      }
+
+      final String uniqueFileName = '${const Uuid().v1()}.$extension';
+
+      final String filePath =
+          useUserFolder ? '$userId/$uniqueFileName' : uniqueFileName;
+
+      await _supabase.storage.from('Images').upload(filePath, imageFile,
+          fileOptions: FileOptions(
+            contentType: _getMimeType(extension),
+            upsert: true,
+          ));
+
+      final String publicUrl =
+          _supabase.storage.from('Images').getPublicUrl(filePath);
+
+      // Verify the file is actually accessible on the CDN before returning.
+      await _verifyUrlAccessible(publicUrl);
+
+      return publicUrl;
     } catch (e) {
-      if (kDebugMode) {}
-    }
-  }
-
-  // ----------------------
-  // UPLOAD POST METHODS
-  // ----------------------
-
-  // Upload video post
-  Future<String> uploadVideoPost(
-    String description,
-    Uint8List file,
-    String uid,
-    String username,
-    String profImage,
-    String gender, {
-    int boostViews = 0,
-    bool isBoosted = false,
-  }) async {
-    String res = "Some error occurred";
-    try {
-      String postId = _uuid.v1();
-      String fileName = 'video_$postId.mp4';
-
-      final String videoUrl = await _storageMethods.uploadVideoToSupabase(
-        file,
-        fileName,
-        useUserFolder: true,
-      );
-
-      final payload = {
-        'postId': postId,
-        'description': description,
-        'gender': gender,
-        'postUrl': videoUrl,
-        'profImage': profImage,
-        'uid': uid,
-        'username': username,
-        'commentsCount': 0,
-        'datePublished': DateTime.now().toUtc().toIso8601String(),
-        'boost_views': boostViews,
-        'is_boosted': isBoosted,
-        'viewers_count': boostViews,
-      };
-
-      await _supabase.from('posts').insert(payload);
-
-      res = "success";
-    } catch (err) {
-      res = err.toString();
+      final userId = _getCurrentUserId();
       await _logPostError(
-        operationType: 'upload_video_post',
-        userId: uid,
-        mediaUrl: description,
-        error: err,
-        additionalData: {
-          'username': username,
-          'gender': gender,
-          'boostViews': boostViews,
-          'isBoosted': isBoosted,
-        },
+        operationType: 'upload_image_file',
+        userId: userId,
+        mediaUrl: fileName,
+        error: e,
+        additionalData: {'useUserFolder': useUserFolder},
       );
+      throw Exception('Failed to upload image file to Supabase: $e');
     }
-    return res;
   }
 
-  // Upload image post
-  Future<String> uploadPost(
-    String description,
-    Uint8List file,
-    String uid,
-    String username,
-    String profImage,
-    String gender, {
-    int boostViews = 0,
-    bool isBoosted = false,
-  }) async {
-    String res = "Some error occurred";
+  // Pick image from gallery and upload to Supabase
+  Future<String?> pickAndUploadImageToSupabase() async {
     try {
-      String postId = _uuid.v1();
-      String fileName = 'post_$postId.jpg';
-
-      final String photoUrl = await _storageMethods.uploadImageToSupabase(
-        file,
-        fileName,
-        useUserFolder: true,
+      final XFile? pickedFile = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+        maxWidth: 1080,
       );
 
-      final payload = {
-        'postId': postId,
-        'description': description,
-        'gender': gender,
-        'postUrl': photoUrl,
-        'profImage': profImage,
-        'uid': uid,
-        'username': username,
-        'commentsCount': 0,
-        'datePublished': DateTime.now().toUtc().toIso8601String(),
-        'boost_views': boostViews,
-        'is_boosted': isBoosted,
-        'viewers_count': boostViews,
-      };
+      if (pickedFile == null) return null;
 
-      await _supabase.from('posts').insert(payload);
-      res = "success";
-    } catch (err) {
-      res = err.toString();
-      await _logPostError(
-        operationType: 'upload_post',
-        userId: uid,
-        mediaUrl: description,
-        error: err,
-        additionalData: {
-          'username': username,
-          'gender': gender,
-          'boostViews': boostViews,
-          'isBoosted': isBoosted,
-        },
-      );
-    }
-    return res;
-  }
+      final File imageFile = File(pickedFile.path);
+      final fileName = pickedFile.name;
 
-  // Upload video post from File
-  Future<String> uploadVideoPostFromFile(
-    String description,
-    File videoFile,
-    String uid,
-    String username,
-    String profImage,
-    String gender, {
-    int boostViews = 0,
-    bool isBoosted = false,
-  }) async {
-    String res = "Some error occurred";
-    try {
-      String postId = _uuid.v1();
-      String fileName = 'video_$postId.mp4';
-
-      final String videoUrl = await _storageMethods.uploadVideoFileToSupabase(
-        videoFile,
-        fileName,
-        useUserFolder: true,
-      );
-
-      final payload = {
-        'postId': postId,
-        'description': description,
-        'gender': gender,
-        'postUrl': videoUrl,
-        'profImage': profImage,
-        'uid': uid,
-        'username': username,
-        'commentsCount': 0,
-        'datePublished': DateTime.now().toUtc().toIso8601String(),
-        'boost_views': boostViews,
-        'is_boosted': isBoosted,
-        'viewers_count': boostViews,
-      };
-
-      await _supabase.from('posts').insert(payload);
-      res = "success";
-    } catch (err) {
-      res = err.toString();
-      await _logPostError(
-        operationType: 'upload_video_post_file',
-        userId: uid,
-        mediaUrl: description,
-        error: err,
-        additionalData: {
-          'username': username,
-          'gender': gender,
-          'boostViews': boostViews,
-          'isBoosted': isBoosted,
-        },
-      );
-    }
-    return res;
-  }
-
-  // Upload image post from File
-  Future<String> uploadPostFromFile(
-    String description,
-    File imageFile,
-    String uid,
-    String username,
-    String profImage,
-    String gender, {
-    int boostViews = 0,
-    bool isBoosted = false,
-  }) async {
-    String res = "Some error occurred";
-    try {
-      String postId = _uuid.v1();
-      String fileName = 'post_$postId.jpg';
-
-      final String photoUrl = await _storageMethods.uploadImageFileToSupabase(
+      final url = await uploadImageFileToSupabase(
         imageFile,
         fileName,
         useUserFolder: true,
       );
 
-      final payload = {
-        'postId': postId,
-        'description': description,
-        'gender': gender,
-        'postUrl': photoUrl,
-        'profImage': profImage,
-        'uid': uid,
-        'username': username,
-        'commentsCount': 0,
-        'datePublished': DateTime.now().toUtc().toIso8601String(),
-        'boost_views': boostViews,
-        'is_boosted': isBoosted,
-        'viewers_count': boostViews,
-      };
-
-      await _supabase.from('posts').insert(payload);
-      res = "success";
-    } catch (err) {
-      res = err.toString();
+      return url;
+    } catch (e) {
+      final userId = _getCurrentUserId();
       await _logPostError(
-        operationType: 'upload_post_file',
-        userId: uid,
-        mediaUrl: description,
-        error: err,
-        additionalData: {
-          'username': username,
-          'gender': gender,
-          'boostViews': boostViews,
-          'isBoosted': isBoosted,
-        },
+        operationType: 'pick_and_upload_image',
+        userId: userId,
+        error: e,
       );
+      throw Exception('Failed to pick and upload image: $e');
     }
-    return res;
   }
 
-  // ----------------------
-  // Delete a post
-  // ----------------------
-  Future<String> deletePost(String postId) async {
-    String res = "Some error occurred";
-    String? postOwnerUid;
-    String? postUrl;
+  // Capture image from camera and upload to Supabase
+  Future<String?> captureAndUploadImageToSupabase() async {
     try {
-      final postSel = await _supabase
-          .from('posts')
-          .select('postUrl, uid')
-          .eq('postId', postId)
-          .maybeSingle();
-      final postData = _unwrap(postSel) ?? postSel;
-
-      if (postData == null) {
-        throw Exception('Post does not exist');
-      }
-
-      postUrl = postData['postUrl']?.toString() ?? '';
-      postOwnerUid = postData['uid']?.toString() ?? '';
-
-      if (postUrl.isNotEmpty) {
-        if (_isVideoUrl(postUrl)) {
-          await _deleteVideoFromUrl(postUrl);
-        } else {
-          await _storageMethods.deleteImage(postUrl);
-        }
-      }
-
-      // Delete post views first (before deleting the post)
-      await _supabase.from('user_post_views').delete().eq('post_id', postId);
-
-      // Delete post row
-      await _supabase.from('posts').delete().eq('postId', postId);
-
-      // Delete related comments/replies/ratings/notifications
-      await _supabase.from('comments').delete().eq('postid', postId);
-      await _supabase.from('replies').delete().eq('postid', postId);
-      await _supabase.from('post_rating').delete().eq('postid', postId);
-      await _supabase
-          .from('notifications')
-          .delete()
-          .eq('custom_data->>postId', postId);
-
-      res = 'success';
-    } catch (err) {
-      res = err.toString();
-      await _logPostError(
-        operationType: 'delete_post',
-        userId: postOwnerUid,
-        mediaUrl: postUrl,
-        error: err,
-        additionalData: {'postId': postId},
+      final XFile? capturedFile = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 85,
+        maxWidth: 1080,
       );
+
+      if (capturedFile == null) return null;
+
+      final File imageFile = File(capturedFile.path);
+      final fileName = capturedFile.name;
+
+      final url = await uploadImageFileToSupabase(
+        imageFile,
+        fileName,
+        useUserFolder: true,
+      );
+
+      return url;
+    } catch (e) {
+      final userId = _getCurrentUserId();
+      await _logPostError(
+        operationType: 'capture_and_upload_image',
+        userId: userId,
+        error: e,
+      );
+      throw Exception('Failed to capture and upload image: $e');
     }
-    return res;
   }
 
-  // ----------------------
-  // Like/unlike a comment
-  // ----------------------
-  Future<String> likeComment(
-      String postId, String commentId, String uid) async {
+  // ===========================================================================
+  // IMAGE DELETION METHODS
+  // ===========================================================================
+
+  Future<void> deleteImageFromSupabase(String filePath) async {
     try {
-      // Check if user already liked this comment
-      final likeCheck = await _supabase
-          .from('comment_likes')
-          .select()
-          .eq('comment_id', commentId)
-          .eq('uid', uid)
-          .maybeSingle();
+      await _supabase.storage.from('Images').remove([filePath]);
+    } catch (e) {
+      final userId = _getCurrentUserId();
+      await _logPostError(
+        operationType: 'delete_image_from_supabase',
+        userId: userId,
+        mediaUrl: filePath,
+        error: e,
+      );
+      await _deleteViaRestApi('Images', filePath);
+    }
+  }
 
-      final alreadyLiked = likeCheck != null;
+  Future<void> deleteImage(String imageUrl) async {
+    try {
+      if (imageUrl.isEmpty || imageUrl == 'default') return;
 
-      if (alreadyLiked) {
-        // Unlike: Remove the like record
-        await _supabase
-            .from('comment_likes')
-            .delete()
-            .eq('comment_id', commentId)
-            .eq('uid', uid);
-
-        // Get current like_count and decrement it
-        final commentSel = await _supabase
-            .from('comments')
-            .select('like_count')
-            .eq('id', commentId)
-            .maybeSingle();
-
-        final commentData = _unwrap(commentSel) ?? commentSel;
-        if (commentData != null) {
-          int currentCount = commentData['like_count'] ?? 0;
-          int newCount = currentCount - 1;
-          if (newCount < 0) newCount = 0;
-
-          await _supabase
-              .from('comments')
-              .update({'like_count': newCount}).eq('id', commentId);
-        }
-
-        // Delete notification
-        await deleteCommentLikeNotification(postId, commentId, uid);
+      if (_isSupabaseUrl(imageUrl)) {
+        await deleteImageByUrl(imageUrl);
+      } else if (_isFirebaseUrl(imageUrl)) {
+        // Firebase URL — migration to Supabase required
+      } else if (_isGooglePhoto(imageUrl)) {
+        return;
       } else {
-        // Like: Add a like record
-        await _supabase.from('comment_likes').insert({
-          'comment_id': commentId,
-          'uid': uid,
-          'liked_at': DateTime.now().toUtc().toIso8601String()
-        });
+        throw Exception('Unknown storage provider for URL: $imageUrl');
+      }
+    } catch (e) {
+      final userId = _getCurrentUserId();
+      await _logPostError(
+        operationType: 'delete_image',
+        userId: userId,
+        mediaUrl: imageUrl,
+        error: e,
+      );
+      throw Exception('Failed to delete image: $e');
+    }
+  }
 
-        // Get current like_count and increment it
-        final commentSel = await _supabase
-            .from('comments')
-            .select('like_count, uid, comment_text')
-            .eq('id', commentId)
-            .maybeSingle();
+  Future<void> deleteImageByUrl(String imageUrl) async {
+    try {
+      final pattern = RegExp(r'storage/v1/object/public/Images/(.+)');
+      final match = pattern.firstMatch(imageUrl);
 
-        final commentData = _unwrap(commentSel) ?? commentSel;
-        if (commentData != null) {
-          int currentCount = commentData['like_count'] ?? 0;
-          int newCount = currentCount + 1;
-
-          await _supabase
-              .from('comments')
-              .update({'like_count': newCount}).eq('id', commentId);
-
-          final String commentOwnerId = commentData['uid'];
-          final String commentText = commentData['comment_text'] ?? '';
-
-          if (commentOwnerId != uid) {
-            // Create notification
-            await createCommentLikeNotification(
-              postId: postId,
-              commentId: commentId,
-              commentOwnerUid: commentOwnerId,
-              likerUid: uid,
-              commentText: commentText,
-            );
-
-            // Get liker's username for push notification
-            final likerSel = await _supabase
-                .from('users')
-                .select('username')
-                .eq('uid', uid)
-                .maybeSingle();
-            final likerData = _unwrap(likerSel) ?? likerSel;
-            final String likerUsername = likerData?['username'] ?? 'Someone';
-
-            // Record push notification
-            await _recordPushNotification(
-              type: 'comment_like',
-              targetUserId: commentOwnerId,
-              title: 'New Like',
-              body: '$likerUsername liked your comment: $commentText',
-              customData: {
-                'likerId': uid,
-                'postId': postId,
-                'commentId': commentId
-              },
-            );
-
-            // Trigger server notification
-            _notificationService.triggerServerNotification(
-              type: 'comment_like',
-              targetUserId: commentOwnerId,
-              title: 'New Like',
-              body: '$likerUsername liked your comment: $commentText',
-              customData: {
-                'likerId': uid,
-                'postId': postId,
-                'commentId': commentId
-              },
-            );
-          }
-        }
+      if (match == null || match.groupCount < 1) {
+        throw Exception('Invalid Supabase image URL');
       }
 
-      return 'success';
-    } catch (err) {
-      await _logPostError(
-        operationType: 'like_comment',
-        userId: uid,
-        error: err,
-        additionalData: {'postId': postId, 'commentId': commentId},
-      );
-      return err.toString();
-    }
-  }
-
-  // ----------------------
-  // Create comment-like notification
-  // ----------------------
-  Future<void> createCommentLikeNotification({
-    required String postId,
-    required String commentId,
-    required String commentOwnerUid,
-    required String likerUid,
-    required String commentText,
-  }) async {
-    try {
-      final payload = {
-        'type': 'comment_like',
-        'target_user_id': commentOwnerUid,
-        'custom_data': {
-          'likerUid': likerUid,
-          'postId': postId,
-          'commentId': commentId,
-          'commentText': commentText,
-        },
-        'created_at': DateTime.now().toUtc().toIso8601String(),
-      };
-
-      // Insert notification row
-      await _supabase.from('notifications').insert(payload);
+      final filePath = match.group(1)!;
+      await deleteImageFromSupabase(filePath);
     } catch (e) {
-      // Log error but don't throw
+      final userId = _getCurrentUserId();
       await _logPostError(
-        operationType: 'create_comment_like_notification',
-        userId: likerUid,
+        operationType: 'delete_image_by_url',
+        userId: userId,
+        mediaUrl: imageUrl,
         error: e,
-        additionalData: {
-          'postId': postId,
-          'commentId': commentId,
-          'commentOwnerUid': commentOwnerUid,
-        },
       );
+      throw Exception('Failed to delete image by URL: $e');
     }
   }
 
-  // ----------------------
-  // Create general notification for rating (and others)
-  // ----------------------
-  Future<void> createNotification({
-    required String postId,
-    required String postOwnerUid,
-    required String raterUid,
-    required double rating,
-  }) async {
+  // ===========================================================================
+  // PROFILE IMAGE METHODS
+  // ===========================================================================
+
+  Future<void> updateUserProfileImage(String imageUrl) async {
     try {
-      if (raterUid == postOwnerUid) return;
+      final userId = _getCurrentUserId();
+      if (userId == null) {
+        throw Exception('User must be logged in');
+      }
 
-      final payload = {
-        'type': 'post_rating',
-        'target_user_id': postOwnerUid,
-        'custom_data': {
-          'postId': postId,
-          'raterUid': raterUid,
-          'rating': rating,
-        },
-        'created_at': DateTime.now().toUtc().toIso8601String()
-      };
-
-      await _supabase.from('notifications').insert(payload);
-
-      // Get rater's username for push notification
-      final raterSel = await _supabase
+      await _supabase
           .from('users')
-          .select('username')
-          .eq('uid', raterUid)
-          .maybeSingle();
-      final raterData = _unwrap(raterSel) ?? raterSel;
-      final String raterUsername = raterData?['username'] ?? 'Someone';
-
-      // record push notification (and trigger server)
-      await _recordPushNotification(
-        type: 'rating',
-        targetUserId: postOwnerUid,
-        title: 'New Rating',
-        body: '$raterUsername rated your post: ${rating.toStringAsFixed(1)}/10',
-        customData: {'raterId': raterUid, 'postId': postId},
-      );
-
-      _notificationService.triggerServerNotification(
-        type: 'rating',
-        targetUserId: postOwnerUid,
-        title: 'New Rating',
-        body: '$raterUsername rated your post: ${rating.toStringAsFixed(1)}★',
-        customData: {'raterId': raterUid, 'postId': postId},
-      );
+          .update({'photoUrl': imageUrl}).eq('uid', userId);
     } catch (e) {
+      final userId = _getCurrentUserId();
       await _logPostError(
-        operationType: 'create_notification',
-        userId: raterUid,
+        operationType: 'update_user_profile_image',
+        userId: userId,
+        mediaUrl: imageUrl,
         error: e,
-        additionalData: {
-          'postId': postId,
-          'postOwnerUid': postOwnerUid,
-          'rating': rating,
-        },
       );
+      throw Exception('Failed to update user profile image: $e');
     }
   }
 
-  // ----------------------
-  // Get viewed post ids (from post_views table)
-  // ----------------------
-  Future<List<String>> getViewedPostIds(String userId) async {
+  Future<String> uploadProfileImage(
+      Uint8List imageBytes, String fileName) async {
     try {
-      final sel = await _supabase
-          .from('user_post_views')
-          .select('post_id, viewed_at')
-          .eq('user_id', userId);
+      final imageUrl = await uploadImageToSupabase(
+        imageBytes,
+        fileName,
+        useUserFolder: true,
+      );
 
-      final data = _unwrap(sel) ?? sel;
-      if (data is List) {
-        final rows = List<Map<String, dynamic>>.from(data);
-        rows.sort((a, b) => (b['viewed_at'] ?? '')
-            .toString()
-            .compareTo((a['viewed_at'] ?? '').toString()));
-        return rows.map((r) => r['post_id'].toString()).toList();
-      }
-      return [];
+      await updateUserProfileImage(imageUrl);
+
+      return imageUrl;
     } catch (e) {
+      final userId = _getCurrentUserId();
       await _logPostError(
-        operationType: 'get_viewed_post_ids',
+        operationType: 'upload_profile_image',
+        userId: userId,
+        mediaUrl: fileName,
+        error: e,
+      );
+      throw Exception('Failed to upload and set profile image: $e');
+    }
+  }
+
+  Future<String> uploadProfileImageFile(File imageFile, String fileName) async {
+    try {
+      final imageUrl = await uploadImageFileToSupabase(
+        imageFile,
+        fileName,
+        useUserFolder: true,
+      );
+
+      await updateUserProfileImage(imageUrl);
+
+      return imageUrl;
+    } catch (e) {
+      final userId = _getCurrentUserId();
+      await _logPostError(
+        operationType: 'upload_profile_image_file',
+        userId: userId,
+        mediaUrl: fileName,
+        error: e,
+      );
+      throw Exception('Failed to upload and set profile image: $e');
+    }
+  }
+
+  // ===========================================================================
+  // IMAGE LISTING & INFO METHODS
+  // ===========================================================================
+
+  Future<List<String>> listUserImages() async {
+    try {
+      final userId = _getCurrentUserId();
+      if (userId == null) {
+        throw Exception('User must be logged in');
+      }
+
+      final response =
+          await _supabase.storage.from('Images').list(path: userId);
+
+      final List<String> imageUrls = [];
+      for (final file in response) {
+        final publicUrl = _supabase.storage
+            .from('Images')
+            .getPublicUrl('$userId/${file.name}');
+        imageUrls.add(publicUrl);
+      }
+
+      return imageUrls;
+    } catch (e) {
+      final userId = _getCurrentUserId();
+      await _logPostError(
+        operationType: 'list_user_images',
         userId: userId,
         error: e,
       );
-      return [];
+      throw Exception('Failed to list user images: $e');
     }
   }
 
-  // ----------------------
-  // Delete comment + decrement count + remove related notifications
-  // ----------------------
-  Future<String> deleteComment(String postId, String commentId) async {
-    String res = "Some error occurred";
+  Future<bool> imageExists(String filePath) async {
     try {
-      // Delete the comment
-      await _supabase.from('comments').delete().eq('id', commentId);
+      final response = await _supabase.storage
+          .from('Images')
+          .list(path: filePath.contains('/') ? filePath.split('/').first : '');
 
-      // Decrement commentsCount on the post (best effort; not atomic)
-      await _changeCommentsCount(postId, -1);
-
-      // Remove related notifications
-      await _supabase
-          .from('notifications')
-          .delete()
-          .eq('custom_data->>commentId', commentId);
-
-      res = 'success';
-    } catch (err) {
-      res = err.toString();
-      await _logPostError(
-        operationType: 'delete_comment',
-        error: err,
-        additionalData: {'postId': postId, 'commentId': commentId},
-      );
-    }
-    return res;
-  }
-
-  // ----------------------
-  // Delete single comment-like notification
-  // ----------------------
-  Future<void> deleteCommentLikeNotification(
-      String postId, String commentId, String likerUid) async {
-    try {
-      await _supabase
-          .from('notifications')
-          .delete()
-          .eq('type', 'comment_like')
-          .eq('custom_data->>postId', postId)
-          .eq('custom_data->>commentId', commentId)
-          .eq('custom_data->>likerUid', likerUid);
+      final fileName = filePath.split('/').last;
+      return response.any((file) => file.name == fileName);
     } catch (e) {
+      final userId = _getCurrentUserId();
       await _logPostError(
-        operationType: 'delete_comment_like_notification',
-        userId: likerUid,
-        error: e,
-        additionalData: {'postId': postId, 'commentId': commentId},
-      );
-    }
-  }
-
-  // ----------------------
-  // Rate a post (uses post_rating table)
-  // ----------------------
-  Future<String> ratePost(String postId, String uid, double rating) async {
-    String res = "Some error occurred";
-    String postOwnerUid = '';
-    try {
-      final roundedRating = double.parse(rating.toStringAsFixed(1));
-
-      // Fetch post owner
-      final postSel = await _supabase
-          .from('posts')
-          .select('uid')
-          .eq('postId', postId)
-          .maybeSingle();
-      final postData = _unwrap(postSel) ?? postSel;
-      if (postData == null) throw Exception('Post not found');
-      postOwnerUid = postData['uid']?.toString() ?? '';
-
-      // Check if user already rated this post
-      final existingRating = await _supabase
-          .from('post_rating')
-          .select('rating')
-          .eq('postid', postId)
-          .eq('userid', uid)
-          .maybeSingle();
-
-      final bool isUpdate = existingRating != null;
-
-      // Upsert rating
-      await _supabase.from('post_rating').upsert({
-        'postid': postId,
-        'userid': uid,
-        'rating': roundedRating,
-        'timestamp': DateTime.now().toUtc().toIso8601String()
-      }, onConflict: 'postid,userid');
-
-      // Notification for non-self rating
-      if (uid != postOwnerUid) {
-        if (isUpdate) {
-          // If updating rating, delete previous notification first
-          await _deletePreviousRatingNotification(postId, uid);
-        }
-
-        await createNotification(
-          postId: postId,
-          postOwnerUid: postOwnerUid,
-          raterUid: uid,
-          rating: roundedRating,
-        );
-      }
-
-      res = "success";
-    } catch (err) {
-      res = err.toString();
-      await _logPostError(
-        operationType: 'rate_post',
-        userId: uid,
-        error: err,
-        additionalData: {'postId': postId, 'rating': rating},
-      );
-    }
-    return res;
-  }
-
-  // Helper method to delete previous rating notification
-  Future<void> _deletePreviousRatingNotification(
-      String postId, String raterUid) async {
-    try {
-      await _supabase
-          .from('notifications')
-          .delete()
-          .eq('type', 'post_rating')
-          .eq('custom_data->>postId', postId)
-          .eq('custom_data->>raterUid', raterUid);
-    } catch (e) {
-      await _logPostError(
-        operationType: 'delete_previous_rating_notification',
-        userId: raterUid,
-        error: e,
-        additionalData: {'postId': postId},
-      );
-    }
-  }
-
-  // ----------------------
-  // Create comment (and notify)
-  // ----------------------
-  Future<String> postComment(String postId, String text, String uid,
-      String name, String profilePic) async {
-    String res = "Some error occurred";
-    try {
-      if (text.isEmpty) return "Please enter text";
-
-      final commentId = _uuid.v1();
-      final payload = {
-        'id': commentId,
-        'postid': postId,
-        'uid': uid,
-        'name': name,
-        'comment_text': text,
-        'date_published': DateTime.now().toUtc().toIso8601String(),
-        'like_count': 0
-      };
-
-      await _supabase.from('comments').insert(payload);
-
-      // increment commentsCount (best effort; not atomic)
-      await _changeCommentsCount(postId, 1);
-
-      // Get post owner
-      final postSel = await _supabase
-          .from('posts')
-          .select('uid')
-          .eq('postId', postId)
-          .maybeSingle();
-      final postData = _unwrap(postSel) ?? postSel;
-      final postOwnerUid = postData?['uid']?.toString() ?? '';
-
-      if (uid != postOwnerUid && postOwnerUid.isNotEmpty) {
-        // Create the in-app notification
-        await createCommentNotification(postId, uid, text, commentId);
-
-        // Record push notification (to Firestore)
-        await _recordPushNotification(
-          type: 'comment',
-          targetUserId: postOwnerUid,
-          title: 'New Comment',
-          body: '$name commented: $text',
-          customData: {
-            'commenterId': uid,
-            'postId': postId,
-            'commentId': commentId
-          },
-        );
-
-        // Trigger server notification
-        _notificationService.triggerServerNotification(
-          type: 'comment',
-          targetUserId: postOwnerUid,
-          title: 'New Comment',
-          body: '$name commented: $text',
-          customData: {
-            'commenterId': uid,
-            'postId': postId,
-            'commentId': commentId
-          },
-        );
-      }
-
-      res = 'success';
-    } catch (e) {
-      res = e.toString();
-      await _logPostError(
-        operationType: 'post_comment',
-        userId: uid,
-        error: e,
-        additionalData: {'postId': postId, 'text': text},
-      );
-    }
-    return res;
-  }
-
-  Future<void> createCommentNotification(
-    String postId,
-    String commenterUid,
-    String commentText,
-    String commentId,
-  ) async {
-    try {
-      final postSel = await _supabase
-          .from('posts')
-          .select('uid')
-          .eq('postId', postId)
-          .maybeSingle();
-      final postData = _unwrap(postSel) ?? postSel;
-      final postOwnerUid = postData?['uid']?.toString() ?? '';
-      if (postOwnerUid.isEmpty || postOwnerUid == commenterUid) return;
-
-      final payload = {
-        'type': 'comment',
-        'target_user_id': postOwnerUid,
-        'custom_data': {
-          'commenterUid': commenterUid,
-          'commentText': commentText,
-          'postId': postId,
-          'commentId': commentId,
-        },
-        'created_at': DateTime.now().toUtc().toIso8601String()
-      };
-
-      await _supabase.from('notifications').insert(payload);
-    } catch (e) {
-      await _logPostError(
-        operationType: 'create_comment_notification',
-        userId: commenterUid,
-        error: e,
-        additionalData: {'postId': postId, 'commentId': commentId},
-      );
-    }
-  }
-
-  // ----------------------
-  // Share a post through chat
-  // ----------------------
-  Future<String> sharePostThroughChat({
-    required String chatId,
-    required String senderId,
-    required String receiverId,
-    required String postId,
-    required String postImageUrl,
-    required String postCaption,
-    required String postOwnerId,
-    String? postOwnerUsername,
-    String? postOwnerPhotoUrl,
-  }) async {
-    try {
-      final messageId = _uuid.v1();
-
-      // Create the post_share JSON object
-      final postShareData = {
-        'postId': postId,
-        'postImageUrl': postImageUrl,
-        'postCaption': postCaption,
-        'postOwnerId': postOwnerId,
-        'postOwnerUsername': postOwnerUsername ?? 'Unknown User',
-        'postOwnerPhotoUrl': postOwnerPhotoUrl ?? '',
-        'sharedAt': DateTime.now().toUtc().toIso8601String(),
-        'isDirectOwner': senderId == postOwnerId,
-      };
-
-      // Insert into messages table with post_share JSONB column
-      final payload = {
-        'id': messageId,
-        'chat_id': chatId,
-        'sender_id': senderId,
-        'receiver_id': receiverId,
-        'message': 'Shared a post: $postCaption',
-        'timestamp': DateTime.now().toUtc().toIso8601String(),
-        'is_read': false,
-        'delivered': false,
-        'post_share': postShareData,
-      };
-
-      await _supabase.from('messages').insert(payload);
-
-      // Update chat metadata
-      await _supabase.from('chats').update({
-        'last_message': 'Shared a post',
-        'last_updated': DateTime.now().toIso8601String(),
-      }).eq('id', chatId);
-
-      return 'success';
-    } catch (e) {
-      await _logPostError(
-        operationType: 'share_post_through_chat',
-        userId: senderId,
-        error: e,
-        additionalData: {
-          'chatId': chatId,
-          'receiverId': receiverId,
-          'postId': postId,
-          'postImageUrl': postImageUrl,
-        },
-      );
-      return e.toString();
-    }
-  }
-
-  // ----------------------
-  // Record post view — uses upsert to silently ignore duplicates
-  // ----------------------
-  Future<void> recordPostView(String postId, String userId) async {
-    try {
-      await _supabase.from('user_post_views').upsert(
-        {
-          'post_id': postId,
-          'user_id': userId,
-          'viewed_at': DateTime.now().toUtc().toIso8601String(),
-        },
-        onConflict: 'user_id,post_id',
-        ignoreDuplicates: true,
-      );
-    } catch (e) {
-      await _logPostError(
-        operationType: 'record_post_view',
+        operationType: 'image_exists',
         userId: userId,
+        mediaUrl: filePath,
         error: e,
-        additionalData: {'postId': postId},
-      );
-    }
-  }
-
-  // ----------------------
-  // Mutual block check (reads users.blockedUsers jsonb)
-  // ----------------------
-  Future<bool> checkMutualBlock(String userId1, String userId2) async {
-    try {
-      final sel1 = await _supabase
-          .from('users')
-          .select('blockedUsers')
-          .eq('uid', userId1)
-          .maybeSingle();
-      final sel2 = await _supabase
-          .from('users')
-          .select('blockedUsers')
-          .eq('uid', userId2)
-          .maybeSingle();
-      final data1 = _unwrap(sel1) ?? sel1;
-      final data2 = _unwrap(sel2) ?? sel2;
-
-      final List<dynamic> blocked1 =
-          data1 != null ? (data1['blockedUsers'] ?? []) : [];
-      final List<dynamic> blocked2 =
-          data2 != null ? (data2['blockedUsers'] ?? []) : [];
-
-      return blocked1.contains(userId2) && blocked2.contains(userId1);
-    } catch (e) {
-      await _logPostError(
-        operationType: 'check_mutual_block',
-        userId: userId1,
-        error: e,
-        additionalData: {'otherUserId': userId2},
       );
       return false;
     }
   }
 
-  // ----------------------
-  // Report post / comment
-  // ----------------------
-  Future<String> reportPost(String postId, String reason) async {
+  Future<Map<String, dynamic>> getImageInfo(String filePath) async {
     try {
-      await _supabase.from('reports').insert({
-        'postId': postId,
-        'reason': reason,
-        'timestamp': DateTime.now().toUtc().toIso8601String(),
-        'type': 'post'
-      });
-      return 'success';
-    } catch (err) {
-      await _logPostError(
-        operationType: 'report_post',
-        error: err,
-        additionalData: {'postId': postId, 'reason': reason},
-      );
-      return err.toString();
-    }
-  }
+      final response = await _supabase.storage
+          .from('Images')
+          .list(path: filePath.contains('/') ? filePath.split('/').first : '');
 
-  Future<String> reportComment({
-    required String postId,
-    required String commentId,
-    required String reason,
-  }) async {
-    try {
-      await _supabase.from('reports').insert({
-        'postId': postId,
-        'commentId': commentId,
-        'reason': reason,
-        'timestamp': DateTime.now().toUtc().toIso8601String(),
-        'type': 'comment'
-      });
-      return 'success';
-    } catch (err) {
-      await _logPostError(
-        operationType: 'report_comment',
-        error: err,
-        additionalData: {
-          'postId': postId,
-          'commentId': commentId,
-          'reason': reason,
-        },
-      );
-      return err.toString();
-    }
-  }
+      final file = response.firstWhere(
+          (f) => f.name == filePath.split('/').last,
+          orElse: () => throw Exception('File not found'));
 
-  // ----------------------
-  // Replies (create/delete/like) - similar to comments
-  // ----------------------
-  Future<String> postReply({
-    required String postId,
-    required String commentId,
-    required String uid,
-    required String name,
-    required String profilePic,
-    required String text,
-    String? parentReplyId,
-  }) async {
-    try {
-      final replyId = _uuid.v1();
-
-      final payload = {
-        'id': replyId,
-        'postid': postId,
-        'commentid': commentId,
-        'uid': uid,
-        'name': name,
-        'reply_text': text,
-        'date_published': DateTime.now().toUtc().toIso8601String(),
-        'like_count': 0,
-        'parent_reply_id': parentReplyId
+      return {
+        'name': file.name,
+        'size': file.metadata?['size'] ?? 0,
+        'mimeType': file.metadata?['mimetype'] ?? 'unknown',
+        'createdAt': file.createdAt,
+        'updatedAt': file.updatedAt,
       };
-
-      await _supabase.from('replies').insert(payload);
-
-      // Determine parent owner
-      String parentOwnerUid = '';
-      if (parentReplyId != null) {
-        final sel = await _supabase
-            .from('replies')
-            .select('uid')
-            .eq('id', parentReplyId)
-            .maybeSingle();
-        final d = _unwrap(sel) ?? sel;
-        parentOwnerUid = d?['uid']?.toString() ?? '';
-      } else {
-        final sel = await _supabase
-            .from('comments')
-            .select('uid')
-            .eq('id', commentId)
-            .maybeSingle();
-        final d = _unwrap(sel) ?? sel;
-        parentOwnerUid = d?['uid']?.toString() ?? '';
-      }
-
-      if (parentOwnerUid.isNotEmpty && parentOwnerUid != uid) {
-        await createReplyNotification(
-          postId: postId,
-          commentId: commentId,
-          replyId: replyId,
-          replyOwnerUid: parentOwnerUid,
-          replierUid: uid,
-          replyText: text,
-        );
-      }
-
-      return 'success';
     } catch (e) {
+      final userId = _getCurrentUserId();
       await _logPostError(
-        operationType: 'post_reply',
-        userId: uid,
+        operationType: 'get_image_info',
+        userId: userId,
+        mediaUrl: filePath,
         error: e,
-        additionalData: {
-          'postId': postId,
-          'commentId': commentId,
-          'text': text,
-          'parentReplyId': parentReplyId,
-        },
       );
-      return e.toString();
+      throw Exception('Failed to get image info: $e');
     }
   }
 
-  Future<String> deleteReply({
-    required String postId,
-    required String commentId,
-    required String replyId,
-  }) async {
-    try {
-      await _supabase.from('replies').delete().eq('id', replyId);
+  // ===========================================================================
+  // VIDEO METHODS - SUPABASE ONLY
+  // ===========================================================================
 
-      // remove notifications
-      await _supabase
-          .from('notifications')
-          .delete()
-          .eq('custom_data->>replyId', replyId);
-      return 'success';
+  Future<String> uploadVideoToSupabase(Uint8List file, String fileName,
+      {bool useUserFolder = true}) async {
+    try {
+      final userId = _getCurrentUserId();
+      if (userId == null) {
+        throw Exception('User must be logged in to upload video');
+      }
+
+      String extension = fileName.split('.').last.toLowerCase();
+
+      if (!['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv'].contains(extension)) {
+        throw Exception(
+            'Invalid video file type. Supported: mp4, mov, avi, mkv, webm, flv');
+      }
+
+      final String uniqueFileName = '${const Uuid().v1()}.$extension';
+
+      final String filePath =
+          useUserFolder ? '$userId/$uniqueFileName' : uniqueFileName;
+
+      final tempFile = await _createTempFile(uniqueFileName, file);
+
+      await _supabase.storage.from('videos').upload(filePath, tempFile);
+
+      await tempFile.delete();
+
+      final String publicUrl =
+          _supabase.storage.from('videos').getPublicUrl(filePath);
+
+      // Verify the file is actually accessible on the CDN before returning.
+      await _verifyUrlAccessible(publicUrl);
+
+      return publicUrl;
     } catch (e) {
+      final userId = _getCurrentUserId();
       await _logPostError(
-        operationType: 'delete_reply',
+        operationType: 'upload_video',
+        userId: userId,
+        mediaUrl: fileName,
         error: e,
-        additionalData: {
-          'postId': postId,
-          'commentId': commentId,
-          'replyId': replyId,
-        },
+        additionalData: {'useUserFolder': useUserFolder},
       );
-      return e.toString();
+      throw Exception('Failed to upload video to Supabase: $e');
     }
   }
 
-  Future<Map<String, dynamic>> likeReply({
-    required String postId,
-    required String commentId,
-    required String replyId,
-    required String uid,
-  }) async {
+  // Upload video from File
+  Future<String> uploadVideoFileToSupabase(File videoFile, String fileName,
+      {bool useUserFolder = true}) async {
     try {
-      final likeCheck = await _supabase
-          .from('reply_likes')
-          .select()
-          .eq('reply_id', replyId)
-          .eq('uid', uid)
-          .maybeSingle();
+      final userId = _getCurrentUserId();
+      if (userId == null) {
+        throw Exception('User must be logged in to upload video');
+      }
 
-      final alreadyLiked = likeCheck != null;
+      String extension = fileName.split('.').last.toLowerCase();
 
-      if (alreadyLiked) {
-        // Unlike handling
-        await _supabase
-            .from('reply_likes')
-            .delete()
-            .eq('reply_id', replyId)
-            .eq('uid', uid);
+      if (!['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv'].contains(extension)) {
+        throw Exception('Invalid video file type');
+      }
 
-        final replySel = await _supabase
-            .from('replies')
-            .select('like_count')
-            .eq('id', replyId)
-            .maybeSingle();
+      final String uniqueFileName = '${const Uuid().v1()}.$extension';
 
-        final replyData = _unwrap(replySel) ?? replySel;
-        int newCount = 0;
-        if (replyData != null) {
-          int currentCount = replyData['like_count'] ?? 0;
-          newCount = currentCount - 1;
-          if (newCount < 0) newCount = 0;
+      final String filePath =
+          useUserFolder ? '$userId/$uniqueFileName' : uniqueFileName;
 
-          await _supabase
-              .from('replies')
-              .update({'like_count': newCount}).eq('id', replyId);
+      await _supabase.storage.from('videos').upload(filePath, videoFile);
+
+      final String publicUrl =
+          _supabase.storage.from('videos').getPublicUrl(filePath);
+
+      // Verify the file is actually accessible on the CDN before returning.
+      await _verifyUrlAccessible(publicUrl);
+
+      return publicUrl;
+    } catch (e) {
+      final userId = _getCurrentUserId();
+      await _logPostError(
+        operationType: 'upload_video_file',
+        userId: userId,
+        mediaUrl: fileName,
+        error: e,
+        additionalData: {'useUserFolder': useUserFolder},
+      );
+      throw Exception('Failed to upload video file to Supabase: $e');
+    }
+  }
+
+  // Pick video from gallery and upload to Supabase
+  Future<String?> pickAndUploadVideoToSupabase() async {
+    try {
+      final XFile? pickedFile = await _picker.pickVideo(
+        source: ImageSource.gallery,
+      );
+
+      if (pickedFile == null) return null;
+
+      final File videoFile = File(pickedFile.path);
+      final fileName = pickedFile.name;
+
+      final url = await uploadVideoFileToSupabase(
+        videoFile,
+        fileName,
+        useUserFolder: true,
+      );
+
+      return url;
+    } catch (e) {
+      final userId = _getCurrentUserId();
+      await _logPostError(
+        operationType: 'pick_and_upload_video',
+        userId: userId,
+        error: e,
+      );
+      throw Exception('Failed to pick and upload video: $e');
+    }
+  }
+
+  // MAIN DELETE VIDEO METHOD
+  Future<void> deleteVideoFromSupabase(
+      String bucketName, String filePath) async {
+    try {
+      try {
+        final response =
+            await _supabase.storage.from(bucketName).remove([filePath]);
+
+        if (response.isNotEmpty) {
+          await _verifyDeletion(bucketName, filePath);
+          return;
+        }
+      } catch (e) {
+        // Continue to next method
+      }
+
+      await _deleteViaRestApi(bucketName, filePath);
+    } catch (e) {
+      final userId = _getCurrentUserId();
+      await _logPostError(
+        operationType: 'delete_video',
+        userId: userId,
+        mediaUrl: filePath,
+        error: e,
+        additionalData: {'bucketName': bucketName},
+      );
+      throw Exception('Failed to delete video: $e');
+    }
+  }
+
+  Future<String> getSignedUrlForVideo(String fileName,
+      {int expiresIn = 60}) async {
+    try {
+      final userId = _getCurrentUserId();
+      if (userId == null) {
+        throw Exception('User must be logged in to get signed URL');
+      }
+
+      String actualFileName = fileName;
+      if (fileName.contains('/')) {
+        actualFileName = fileName.split('/').last;
+      }
+
+      final String userFolderPath = '$userId/$actualFileName';
+
+      final String signedUrl = await _supabase.storage
+          .from('videos')
+          .createSignedUrl(userFolderPath, expiresIn);
+      return signedUrl;
+    } catch (e) {
+      final userId = _getCurrentUserId();
+      await _logPostError(
+        operationType: 'get_signed_url',
+        userId: userId,
+        mediaUrl: fileName,
+        error: e,
+        additionalData: {'expiresIn': expiresIn},
+      );
+      throw Exception('Failed to get signed URL: $e');
+    }
+  }
+
+  Future<List<String>> listUserVideos() async {
+    try {
+      final userId = _getCurrentUserId();
+      if (userId == null) {
+        throw Exception('User must be logged in');
+      }
+
+      final response =
+          await _supabase.storage.from('videos').list(path: userId);
+
+      final List<String> videoFiles = [];
+      for (final file in response) {
+        final fileName = file.name;
+        if (fileName != null && fileName is String && _isVideoFile(fileName)) {
+          videoFiles.add(fileName);
+        }
+      }
+      return videoFiles;
+    } catch (e) {
+      final userId = _getCurrentUserId();
+      await _logPostError(
+        operationType: 'list_user_videos',
+        userId: userId,
+        error: e,
+      );
+      throw Exception('Failed to list user videos: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> getVideoInfo(String filePath) async {
+    try {
+      final response = await _supabase.storage
+          .from('videos')
+          .list(path: filePath.contains('/') ? filePath.split('/').first : '');
+
+      final file = response.firstWhere(
+          (f) => f.name == filePath.split('/').last,
+          orElse: () => throw Exception('File not found'));
+
+      return {
+        'name': file.name,
+        'size': file.metadata?['size'] ?? 0,
+        'mimeType': file.metadata?['mimetype'] ?? 'unknown',
+        'createdAt': file.createdAt,
+        'updatedAt': file.updatedAt,
+      };
+    } catch (e) {
+      final userId = _getCurrentUserId();
+      await _logPostError(
+        operationType: 'get_video_info',
+        userId: userId,
+        mediaUrl: filePath,
+        error: e,
+      );
+      throw Exception('Failed to get video info: $e');
+    }
+  }
+
+  // ===========================================================================
+  // HELPER METHODS
+  // ===========================================================================
+
+  Future<File> _createTempFile(String fileName, Uint8List data) async {
+    try {
+      final systemTemp = Directory.systemTemp;
+      if (await systemTemp.exists()) {
+        final tempFile = File('${systemTemp.path}/$fileName');
+        await tempFile.writeAsBytes(data);
+        return tempFile;
+      }
+    } catch (e) {
+      // Fall through
+    }
+
+    try {
+      final currentDir = Directory.current;
+      final tempFile = File('${currentDir.path}/$fileName');
+      await tempFile.writeAsBytes(data);
+      return tempFile;
+    } catch (e) {
+      // Fall through
+    }
+
+    try {
+      final tempFile = File(fileName);
+      await tempFile.writeAsBytes(data);
+      return tempFile;
+    } catch (e) {
+      throw Exception('Cannot create temporary file: $e');
+    }
+  }
+
+  String _getMimeType(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      case 'bmp':
+        return 'image/bmp';
+      case 'mp4':
+        return 'video/mp4';
+      case 'mov':
+        return 'video/quicktime';
+      case 'avi':
+        return 'video/x-msvideo';
+      case 'mkv':
+        return 'video/x-matroska';
+      case 'webm':
+        return 'video/webm';
+      default:
+        return 'application/octet-stream';
+    }
+  }
+
+  bool _isVideoFile(String fileName) {
+    final videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv'];
+    final extension = fileName.split('.').last.toLowerCase();
+    return videoExtensions.contains(extension);
+  }
+
+  bool _isSupabaseUrl(String url) {
+    return url.contains('supabase.co/storage');
+  }
+
+  bool _isFirebaseUrl(String url) {
+    return url.contains('firebasestorage.googleapis.com');
+  }
+
+  bool _isGooglePhoto(String url) {
+    return url.contains('googleusercontent.com') ||
+        url.contains('lh3.googleusercontent.com');
+  }
+
+  // ===========================================================================
+  // MIGRATION HELPERS
+  // ===========================================================================
+
+  Future<String> migrateImageToSupabase(String firebaseUrl) async {
+    try {
+      final response = await http.get(Uri.parse(firebaseUrl));
+      if (response.statusCode != 200) {
+        throw Exception(
+            'Failed to download image from Firebase: ${response.statusCode}');
+      }
+
+      final bytes = response.bodyBytes;
+      final fileName = firebaseUrl.split('/').last.split('?').first;
+
+      final supabaseUrl = await uploadImageToSupabase(
+        Uint8List.fromList(bytes),
+        fileName,
+        useUserFolder: true,
+      );
+
+      return supabaseUrl;
+    } catch (e) {
+      final userId = _getCurrentUserId();
+      await _logPostError(
+        operationType: 'migrate_image_to_supabase',
+        userId: userId,
+        mediaUrl: firebaseUrl,
+        error: e,
+      );
+      throw Exception('Failed to migrate image to Supabase: $e');
+    }
+  }
+
+  // ===========================================================================
+  // REST API METHODS (INTERNAL)
+  // ===========================================================================
+
+  Future<void> _deleteViaRestApi(String bucketName, String filePath) async {
+    try {
+      final projectRef = 'tbiemcbqjjjsgumnjlqq';
+      final anonKey =
+          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRiaWVtY2Jxampqc3VtbmpscXEiLCJyb2xlIjoiYW5vbiIsImlhdCI6MTcyODU1OTY0NywiZXhwIjoyMDQ0MTM1NjQ3fQ.0t_lxOQkF4K9cEEmhJ4w1b2q6y6q2q9Q2q9Q2q9Q2q9Q';
+
+      final List<Map<String, dynamic>> endpoints = [
+        {
+          'name': 'Single file DELETE',
+          'url':
+              'https://$projectRef.supabase.co/storage/v1/object/$bucketName/${Uri.encodeComponent(filePath)}',
+          'method': 'DELETE',
+          'body': null
+        },
+        {
+          'name': 'Batch deletion POST',
+          'url':
+              'https://$projectRef.supabase.co/storage/v1/object/$bucketName',
+          'method': 'POST',
+          'body': {
+            'prefixes': [filePath]
+          }
+        },
+      ];
+
+      for (var endpoint in endpoints) {
+        final String name = endpoint['name'] as String;
+        final String url = endpoint['url'] as String;
+        final String method = endpoint['method'] as String;
+        final dynamic body = endpoint['body'];
+
+        try {
+          final uri = Uri.parse(url);
+          final http.Response response = method == 'POST'
+              ? await http.post(
+                  uri,
+                  headers: {
+                    'Authorization': 'Bearer $anonKey',
+                    'Content-Type': 'application/json',
+                  },
+                  body: body != null ? json.encode(body) : null,
+                )
+              : await http.delete(
+                  uri,
+                  headers: {
+                    'Authorization': 'Bearer $anonKey',
+                  },
+                );
+
+          if (response.statusCode == 200 || response.statusCode == 204) {
+            await _verifyDeletion(bucketName, filePath);
+            return;
+          }
+        } catch (e) {
+          // Continue to next endpoint
         }
 
-        // Delete notification
-        await deleteReplyLikeNotification(postId, commentId, replyId, uid);
+        await Future.delayed(Duration(milliseconds: 500));
+      }
 
-        return {'action': 'unliked', 'like_count': newCount, 'is_liked': false};
-      } else {
-        // Like handling
-        await _supabase.from('reply_likes').insert({
-          'reply_id': replyId,
-          'uid': uid,
-          'liked_at': DateTime.now().toUtc().toIso8601String()
-        });
+      throw Exception('All REST API endpoints failed');
+    } catch (e) {
+      rethrow;
+    }
+  }
 
-        // Fetch reply data including owner and text
-        final replySel = await _supabase
-            .from('replies')
-            .select('like_count, uid, reply_text')
-            .eq('id', replyId)
-            .maybeSingle();
+  Future<void> _verifyDeletion(String bucketName, String filePath) async {
+    try {
+      await Future.delayed(Duration(seconds: 2));
 
-        final replyData = _unwrap(replySel) ?? replySel;
-        int newCount = 0;
-        if (replyData != null) {
-          int currentCount = replyData['like_count'] ?? 0;
-          newCount = currentCount + 1;
+      bool deletionVerified = false;
 
-          await _supabase
-              .from('replies')
-              .update({'like_count': newCount}).eq('id', replyId);
+      try {
+        final publicUrl =
+            _supabase.storage.from(bucketName).getPublicUrl(filePath);
+        final headResponse = await http.head(Uri.parse(publicUrl));
 
-          final String replyOwnerUid = replyData['uid'];
-          final String replyText = replyData['reply_text'] ?? '';
+        if (headResponse.statusCode == 404) {
+          deletionVerified = true;
+        }
+      } catch (e) {
+        deletionVerified = true;
+      }
 
-          // Create notification if not liking own reply
-          if (replyOwnerUid != uid) {
-            await createReplyLikeNotification(
-              postId: postId,
-              commentId: commentId,
-              replyId: replyId,
-              replyOwnerUid: replyOwnerUid,
-              likerUid: uid,
-              replyText: replyText,
-            );
+      if (!deletionVerified) {
+        try {
+          final userFolder = filePath.split('/').first;
+          final files =
+              await _supabase.storage.from(bucketName).list(path: userFolder);
+
+          bool fileExists = false;
+          for (final file in files) {
+            final fileName = file.name;
+            if (fileName != null &&
+                fileName is String &&
+                fileName == filePath.split('/').last) {
+              fileExists = true;
+              break;
+            }
+          }
+
+          if (!fileExists) {
+            deletionVerified = true;
+          }
+        } catch (e) {
+          deletionVerified = true;
+        }
+      }
+    } catch (e) {
+      // Error verifying deletion
+    }
+  }
+
+  Future<void> deleteMediaByUrl(String mediaUrl) async {
+    try {
+      if (mediaUrl.isEmpty || mediaUrl == 'default') return;
+
+      if (_isSupabaseUrl(mediaUrl)) {
+        if (mediaUrl.contains('/videos/')) {
+          final pattern = RegExp(r'storage/v1/object/public/videos/(.+)');
+          final match = pattern.firstMatch(mediaUrl);
+
+          if (match != null && match.groupCount >= 1) {
+            final filePath = match.group(1)!;
+            await deleteVideoFromSupabase('videos', filePath);
+          }
+        } else if (mediaUrl.contains('/Images/')) {
+          final pattern = RegExp(r'storage/v1/object/public/Images/(.+)');
+          final match = pattern.firstMatch(mediaUrl);
+
+          if (match != null && match.groupCount >= 1) {
+            final filePath = match.group(1)!;
+            await deleteImageFromSupabase(filePath);
           }
         }
-
-        return {'action': 'liked', 'like_count': newCount, 'is_liked': true};
       }
     } catch (e) {
+      final userId = _getCurrentUserId();
       await _logPostError(
-        operationType: 'like_reply',
-        userId: uid,
+        operationType: 'delete_media_by_url',
+        userId: userId,
+        mediaUrl: mediaUrl,
         error: e,
-        additionalData: {
-          'postId': postId,
-          'commentId': commentId,
-          'replyId': replyId,
-        },
-      );
-      return {'action': 'error', 'error': e.toString()};
-    }
-  }
-
-  Future<void> deleteReplyLikeNotification(
-    String postId,
-    String commentId,
-    String replyId,
-    String likerUid,
-  ) async {
-    try {
-      await _supabase
-          .from('notifications')
-          .delete()
-          .eq('type', 'reply_like')
-          .eq('custom_data->>postId', postId)
-          .eq('custom_data->>commentId', commentId)
-          .eq('custom_data->>replyId', replyId)
-          .eq('custom_data->>likerUid', likerUid);
-    } catch (e) {
-      await _logPostError(
-        operationType: 'delete_reply_like_notification',
-        userId: likerUid,
-        error: e,
-        additionalData: {
-          'postId': postId,
-          'commentId': commentId,
-          'replyId': replyId,
-        },
-      );
-    }
-  }
-
-  Future<void> createReplyNotification({
-    required String postId,
-    required String commentId,
-    required String replyId,
-    required String replyOwnerUid,
-    required String replierUid,
-    required String replyText,
-  }) async {
-    try {
-      if (replyOwnerUid == replierUid) return;
-
-      final payload = {
-        'type': 'reply',
-        'target_user_id': replyOwnerUid,
-        'custom_data': {
-          'replierUid': replierUid,
-          'postId': postId,
-          'commentId': commentId,
-          'replyId': replyId,
-          'replyText': replyText,
-        },
-        'created_at': DateTime.now().toUtc().toIso8601String()
-      };
-
-      await _supabase.from('notifications').insert(payload);
-
-      // Get replier's name for push notification
-      final replierSel = await _supabase
-          .from('users')
-          .select('username')
-          .eq('uid', replierUid)
-          .maybeSingle();
-      final replierData = _unwrap(replierSel) ?? replierSel;
-      final String replierName = replierData?['username'] ?? 'Someone';
-
-      await _recordPushNotification(
-        type: 'reply',
-        targetUserId: replyOwnerUid,
-        title: 'New Reply',
-        body: '$replierName replied: $replyText',
-        customData: {
-          'replierId': replierUid,
-          'postId': postId,
-          'commentId': commentId,
-          'replyId': replyId
-        },
-      );
-
-      _notificationService.triggerServerNotification(
-        type: 'reply',
-        targetUserId: replyOwnerUid,
-        title: 'New Reply',
-        body: '$replierName replied: $replyText',
-        customData: {
-          'replierId': replierUid,
-          'postId': postId,
-          'commentId': commentId,
-          'replyId': replyId
-        },
-      );
-    } catch (e) {
-      await _logPostError(
-        operationType: 'create_reply_notification',
-        userId: replierUid,
-        error: e,
-        additionalData: {
-          'postId': postId,
-          'commentId': commentId,
-          'replyId': replyId,
-          'replyOwnerUid': replyOwnerUid,
-        },
-      );
-    }
-  }
-
-  Future<void> createReplyLikeNotification({
-    required String postId,
-    required String commentId,
-    required String replyId,
-    required String replyOwnerUid,
-    required String likerUid,
-    required String replyText,
-  }) async {
-    try {
-      if (replyOwnerUid == likerUid) return;
-
-      final payload = {
-        'type': 'reply_like',
-        'target_user_id': replyOwnerUid,
-        'custom_data': {
-          'likerUid': likerUid,
-          'postId': postId,
-          'commentId': commentId,
-          'replyId': replyId,
-          'replyText': replyText,
-        },
-        'created_at': DateTime.now().toUtc().toIso8601String()
-      };
-
-      await _supabase.from('notifications').insert(payload);
-
-      // Get liker's name for push notification
-      final likerSel = await _supabase
-          .from('users')
-          .select('username')
-          .eq('uid', likerUid)
-          .maybeSingle();
-      final likerData = _unwrap(likerSel) ?? likerSel;
-      final String likerName = likerData?['username'] ?? 'Someone';
-
-      await _recordPushNotification(
-        type: 'reply_like',
-        targetUserId: replyOwnerUid,
-        title: 'Reply Liked',
-        body: '$likerName liked your reply: $replyText',
-        customData: {
-          'likerId': likerUid,
-          'postId': postId,
-          'commentId': commentId,
-          'replyId': replyId,
-        },
-      );
-
-      _notificationService.triggerServerNotification(
-        type: 'reply_like',
-        targetUserId: replyOwnerUid,
-        title: 'Reply Liked',
-        body: '$likerName liked your reply',
-        customData: {
-          'likerId': likerUid,
-          'postId': postId,
-          'commentId': commentId,
-          'replyId': replyId,
-        },
-      );
-    } catch (e) {
-      await _logPostError(
-        operationType: 'create_reply_like_notification',
-        userId: likerUid,
-        error: e,
-        additionalData: {
-          'postId': postId,
-          'commentId': commentId,
-          'replyId': replyId,
-          'replyOwnerUid': replyOwnerUid,
-        },
-      );
-    }
-  }
-
-  // ----------------------
-  // Helper: change commentsCount safely (not atomic)
-  // ----------------------
-  Future<void> _changeCommentsCount(String postId, int delta) async {
-    try {
-      final sel = await _supabase
-          .from('posts')
-          .select('commentsCount')
-          .eq('postId', postId)
-          .maybeSingle();
-      final data = _unwrap(sel) ?? sel;
-      int current = 0;
-      if (data != null) {
-        final val = data['commentsCount'];
-        if (val is int)
-          current = val;
-        else if (val is String)
-          current = int.tryParse(val) ?? current;
-        else if (val is num) current = val.toInt();
-      }
-      int updated = current + delta;
-      if (updated < 0) updated = 0;
-      await _supabase
-          .from('posts')
-          .update({'commentsCount': updated}).eq('postId', postId);
-    } catch (e) {
-      await _logPostError(
-        operationType: 'change_comments_count',
-        error: e,
-        additionalData: {'postId': postId, 'delta': delta},
       );
     }
   }
