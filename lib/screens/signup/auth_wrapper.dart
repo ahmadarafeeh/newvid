@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -331,6 +332,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
           'country': null,
           'migrated': true,
           'supabase_uid': session.user.id,
+          'test': Random().nextBool(), // ← randomly assign A/B test group
         };
         await _supabase.from('users').upsert(newUser, onConflict: 'uid');
         userData = newUser;
