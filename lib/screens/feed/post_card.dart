@@ -1234,7 +1234,7 @@ class _PostCardState extends State<PostCard>
                       )
                     : _totalRatingsCount == 0
                         ? Text(
-                            'No ratings yet',
+                            'Be the first to rate!',
                             style: TextStyle(
                               fontSize: 14,
                               color: Colors.white,
