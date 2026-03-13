@@ -43,6 +43,34 @@ class StorageMethods {
   }
 
   // ===========================================================================
+  // URL VERIFICATION
+  // Performs an HTTP HEAD request on the returned CDN URL to confirm the file
+  // is actually accessible. getPublicUrl() is pure string construction — it
+  // does not verify the file exists. This catches silent upload failures before
+  // the post row is inserted.
+  // ===========================================================================
+  Future<void> _verifyUrlAccessible(String publicUrl) async {
+    try {
+      final headResponse = await http
+          .head(Uri.parse(publicUrl))
+          .timeout(const Duration(seconds: 8));
+
+      if (headResponse.statusCode != 200) {
+        throw Exception(
+          'File uploaded but not accessible at CDN URL '
+          '(HTTP ${headResponse.statusCode}). '
+          'Upload may have failed silently.',
+        );
+      }
+    } on http.ClientException catch (e) {
+      throw Exception('URL verification network error: $e');
+    } on SocketException catch (e) {
+      throw Exception('URL verification socket error: $e');
+    }
+    // TimeoutException propagates up as-is — caller catches it
+  }
+
+  // ===========================================================================
   // IMAGE METHODS - SUPABASE ONLY
   // ===========================================================================
 
@@ -55,42 +83,34 @@ class StorageMethods {
         throw Exception('User must be logged in to upload image');
       }
 
-      // Get file extension
       String extension = fileName.split('.').last.toLowerCase();
 
-      // Validate it's an image
       if (!['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].contains(extension)) {
         throw Exception(
             'Invalid image file type. Supported: jpg, jpeg, png, gif, webp, bmp');
       }
 
-      // Create unique filename
       final String uniqueFileName = '${const Uuid().v1()}.$extension';
 
-      // Create path
-      final String filePath;
-      if (useUserFolder) {
-        filePath = '$userId/$uniqueFileName';
-      } else {
-        filePath = uniqueFileName;
-      }
+      final String filePath =
+          useUserFolder ? '$userId/$uniqueFileName' : uniqueFileName;
 
-      // Convert Uint8List to File (temporary file)
       final tempFile = await _createTempFile(uniqueFileName, file);
 
-      // Upload to Supabase Storage
       await _supabase.storage.from('Images').upload(filePath, tempFile,
           fileOptions: FileOptions(
             contentType: _getMimeType(extension),
             upsert: true,
           ));
 
-      // Clean up temp file
       await tempFile.delete();
 
-      // Get public URL
       final String publicUrl =
           _supabase.storage.from('Images').getPublicUrl(filePath);
+
+      // Verify the file is actually accessible on the CDN before returning.
+      // This prevents inserting a post row with a URL that returns 404.
+      await _verifyUrlAccessible(publicUrl);
 
       return publicUrl;
     } catch (e) {
@@ -115,35 +135,28 @@ class StorageMethods {
         throw Exception('User must be logged in to upload image');
       }
 
-      // Get file extension
       String extension = fileName.split('.').last.toLowerCase();
 
-      // Validate it's an image
       if (!['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].contains(extension)) {
         throw Exception('Invalid image file type');
       }
 
-      // Create unique filename
       final String uniqueFileName = '${const Uuid().v1()}.$extension';
 
-      // Create path
-      final String filePath;
-      if (useUserFolder) {
-        filePath = '$userId/$uniqueFileName';
-      } else {
-        filePath = uniqueFileName;
-      }
+      final String filePath =
+          useUserFolder ? '$userId/$uniqueFileName' : uniqueFileName;
 
-      // Upload to Supabase Storage
       await _supabase.storage.from('Images').upload(filePath, imageFile,
           fileOptions: FileOptions(
             contentType: _getMimeType(extension),
             upsert: true,
           ));
 
-      // Get public URL
       final String publicUrl =
           _supabase.storage.from('Images').getPublicUrl(filePath);
+
+      // Verify the file is actually accessible on the CDN before returning.
+      await _verifyUrlAccessible(publicUrl);
 
       return publicUrl;
     } catch (e) {
@@ -227,7 +240,6 @@ class StorageMethods {
   // IMAGE DELETION METHODS
   // ===========================================================================
 
-  // Delete image from Supabase Storage by file path
   Future<void> deleteImageFromSupabase(String filePath) async {
     try {
       await _supabase.storage.from('Images').remove([filePath]);
@@ -243,7 +255,6 @@ class StorageMethods {
     }
   }
 
-  // MAIN DELETE IMAGE METHOD - For compatibility with existing code
   Future<void> deleteImage(String imageUrl) async {
     try {
       if (imageUrl.isEmpty || imageUrl == 'default') return;
@@ -251,7 +262,7 @@ class StorageMethods {
       if (_isSupabaseUrl(imageUrl)) {
         await deleteImageByUrl(imageUrl);
       } else if (_isFirebaseUrl(imageUrl)) {
-        // Firebase URL detected. Please migrate to Supabase first.
+        // Firebase URL — migration to Supabase required
       } else if (_isGooglePhoto(imageUrl)) {
         return;
       } else {
@@ -269,7 +280,6 @@ class StorageMethods {
     }
   }
 
-  // Delete image by URL (extracts path from URL)
   Future<void> deleteImageByUrl(String imageUrl) async {
     try {
       final pattern = RegExp(r'storage/v1/object/public/Images/(.+)');
@@ -297,7 +307,6 @@ class StorageMethods {
   // PROFILE IMAGE METHODS
   // ===========================================================================
 
-  // Update user profile image in users table
   Future<void> updateUserProfileImage(String imageUrl) async {
     try {
       final userId = _getCurrentUserId();
@@ -320,7 +329,6 @@ class StorageMethods {
     }
   }
 
-  // Upload and set as profile image (all in one)
   Future<String> uploadProfileImage(
       Uint8List imageBytes, String fileName) async {
     try {
@@ -345,7 +353,6 @@ class StorageMethods {
     }
   }
 
-  // Upload and set as profile image from File
   Future<String> uploadProfileImageFile(File imageFile, String fileName) async {
     try {
       final imageUrl = await uploadImageFileToSupabase(
@@ -373,7 +380,6 @@ class StorageMethods {
   // IMAGE LISTING & INFO METHODS
   // ===========================================================================
 
-  // List user's images from Supabase
   Future<List<String>> listUserImages() async {
     try {
       final userId = _getCurrentUserId();
@@ -404,7 +410,6 @@ class StorageMethods {
     }
   }
 
-  // Check if file exists in Supabase
   Future<bool> imageExists(String filePath) async {
     try {
       final response = await _supabase.storage
@@ -425,7 +430,6 @@ class StorageMethods {
     }
   }
 
-  // Get image info
   Future<Map<String, dynamic>> getImageInfo(String filePath) async {
     try {
       final response = await _supabase.storage
@@ -459,7 +463,6 @@ class StorageMethods {
   // VIDEO METHODS - SUPABASE ONLY
   // ===========================================================================
 
-  // Upload video to Supabase
   Future<String> uploadVideoToSupabase(Uint8List file, String fileName,
       {bool useUserFolder = true}) async {
     try {
@@ -477,12 +480,8 @@ class StorageMethods {
 
       final String uniqueFileName = '${const Uuid().v1()}.$extension';
 
-      final String filePath;
-      if (useUserFolder) {
-        filePath = '$userId/$uniqueFileName';
-      } else {
-        filePath = uniqueFileName;
-      }
+      final String filePath =
+          useUserFolder ? '$userId/$uniqueFileName' : uniqueFileName;
 
       final tempFile = await _createTempFile(uniqueFileName, file);
 
@@ -492,6 +491,10 @@ class StorageMethods {
 
       final String publicUrl =
           _supabase.storage.from('videos').getPublicUrl(filePath);
+
+      // Verify the file is actually accessible on the CDN before returning.
+      await _verifyUrlAccessible(publicUrl);
+
       return publicUrl;
     } catch (e) {
       final userId = _getCurrentUserId();
@@ -523,17 +526,16 @@ class StorageMethods {
 
       final String uniqueFileName = '${const Uuid().v1()}.$extension';
 
-      final String filePath;
-      if (useUserFolder) {
-        filePath = '$userId/$uniqueFileName';
-      } else {
-        filePath = uniqueFileName;
-      }
+      final String filePath =
+          useUserFolder ? '$userId/$uniqueFileName' : uniqueFileName;
 
       await _supabase.storage.from('videos').upload(filePath, videoFile);
 
       final String publicUrl =
           _supabase.storage.from('videos').getPublicUrl(filePath);
+
+      // Verify the file is actually accessible on the CDN before returning.
+      await _verifyUrlAccessible(publicUrl);
 
       return publicUrl;
     } catch (e) {
@@ -609,7 +611,6 @@ class StorageMethods {
     }
   }
 
-  // Get signed URL for video
   Future<String> getSignedUrlForVideo(String fileName,
       {int expiresIn = 60}) async {
     try {
@@ -642,7 +643,6 @@ class StorageMethods {
     }
   }
 
-  // List user's videos
   Future<List<String>> listUserVideos() async {
     try {
       final userId = _getCurrentUserId();
@@ -672,7 +672,6 @@ class StorageMethods {
     }
   }
 
-  // Get video info
   Future<Map<String, dynamic>> getVideoInfo(String filePath) async {
     try {
       final response = await _supabase.storage
@@ -893,7 +892,6 @@ class StorageMethods {
 
       bool deletionVerified = false;
 
-      // Method 1: Try to access via public URL
       try {
         final publicUrl =
             _supabase.storage.from(bucketName).getPublicUrl(filePath);
@@ -906,7 +904,6 @@ class StorageMethods {
         deletionVerified = true;
       }
 
-      // Method 2: Check via storage API list
       if (!deletionVerified) {
         try {
           final userFolder = filePath.split('/').first;
