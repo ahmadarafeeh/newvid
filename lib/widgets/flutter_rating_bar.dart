@@ -1,17 +1,16 @@
 // RatingBar widget with animations + looping nudge + bouncing arrow
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:Ratedly/providers/user_provider.dart';
 import 'package:Ratedly/utils/theme_provider.dart';
 
 // ── Custom thumb that renders the 👆 emoji + bouncing arrow above it ─────────
-// By painting both in the same paint() call they are guaranteed to be
-// pixel-perfect in sync — no separate layout/rebuild cycle can drift them.
 class _EmojiThumbShape extends SliderComponentShape {
   final String emoji;
   final double size;
-  // Live animation values injected each frame so the arrow moves with the thumb.
-  final double arrowBounce; // vertical offset in px (0..10)
-  final double arrowOpacity; // 0..1
+  final double arrowBounce;
+  final double arrowOpacity;
   final bool showArrow;
 
   const _EmojiThumbShape({
@@ -42,12 +41,10 @@ class _EmojiThumbShape extends SliderComponentShape {
   }) {
     final canvas = context.canvas;
 
-    // ── Draw arrow above thumb ──────────────────────────────────────────
     if (showArrow && arrowOpacity > 0) {
-      final arrowSize = 48.0;
-      final arrowScaleY = 2.2;
-      final arrowH = arrowSize * arrowScaleY;
-      // Position: centre horizontally on thumb, sit above it with bounce offset
+      const arrowSize = 48.0;
+      const arrowScaleY = 2.2;
+      const arrowH = arrowSize * arrowScaleY;
       final arrowTop = center.dy - size / 2 - arrowH - 8 - arrowBounce;
       final arrowCenter = Offset(center.dx, arrowTop + arrowH / 2);
 
@@ -75,10 +72,8 @@ class _EmojiThumbShape extends SliderComponentShape {
       canvas.restore();
     }
 
-    // ── Draw emoji thumb ────────────────────────────────────────────────
     final tp = TextPainter(
-      text:
-          TextSpan(text: emoji, style: TextStyle(fontSize: size, height: 1.0)),
+      text: TextSpan(text: emoji, style: TextStyle(fontSize: size, height: 1.0)),
       textDirection: TextDirection.ltr,
     )..layout();
     tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
@@ -94,11 +89,9 @@ class RatingBar extends StatefulWidget {
   final bool showSlider;
   final VoidCallback onEditRating;
 
-  /// Controls whether the nudge UI (arrow, "Slide to rate", animated thumb)
-  /// is shown. Parent is responsible for the threshold logic:
-  ///   test=true  → show while user's total rating count < 3
-  ///   test=false → show while user's total rating count < 1
-  final bool showGuidance;
+  /// Optional override from parent.  When null (default) the widget
+  /// self-resolves guidance by querying Supabase.
+  final bool? showGuidance;
 
   const RatingBar({
     Key? key,
@@ -109,7 +102,7 @@ class RatingBar extends StatefulWidget {
     required this.userRating,
     required this.showSlider,
     required this.onEditRating,
-    this.showGuidance = false,
+    this.showGuidance,        // nullable — null means "auto-detect"
   }) : super(key: key);
 
   @override
@@ -117,6 +110,14 @@ class RatingBar extends StatefulWidget {
 }
 
 class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
+  // ── guidance (self-resolved) ─────────────────────────────────────────────
+  /// True once we've finished loading, so we don't start nudging on a stale false.
+  bool _guidanceLoaded = false;
+  bool _resolvedGuidance = false;        // set by _loadGuidanceFlag()
+
+  bool get _effectiveShowGuidance =>
+      widget.showGuidance ?? _resolvedGuidance;
+
   // ── existing controllers ─────────────────────────────────────────────────
   late AnimationController _scaleController;
   late Animation<double> _scaleAnimation;
@@ -131,25 +132,20 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
   late AnimationController _shimmerController;
   late Animation<double> _shimmerAnimation;
 
-  // ── nudge: loops forever until user touches ──────────────────────────────
   late AnimationController _nudgeController;
   late Animation<double> _nudgeRating;
   late Animation<double> _nudgeThumbPos;
 
-  // ── bouncing down-arrow ──────────────────────────────────────────────────
   late AnimationController _arrowBounceController;
   late Animation<double> _arrowBounce;
 
-  // ── glow ─────────────────────────────────────────────────────────────────
   late AnimationController _nudgeGlowController;
   late Animation<double> _nudgeGlow;
 
-  // ── swipe icon wiggle (synced to nudge cycle) ─────────────────────────────
   late AnimationController _iconWiggleController;
   late Animation<double> _iconWiggle;
 
   bool _isNudging = false;
-
   late double _currentRating;
   bool _isDragging = false;
   bool _justSubmitted = false;
@@ -162,7 +158,7 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
   static const double _nudgePeak = 8.5;
 
   bool get _shouldNudge =>
-      widget.showSlider && !widget.hasRated && widget.showGuidance;
+      widget.showSlider && !widget.hasRated && _effectiveShowGuidance;
 
   // ── init ─────────────────────────────────────────────────────────────────
 
@@ -171,102 +167,47 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
     super.initState();
     _currentRating = widget.initialRating;
 
-    // Scale bounce
-    _scaleController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 450),
-    );
-    _scaleAnimation = CurvedAnimation(
-      parent: _scaleController,
-      curve: Curves.elasticOut,
-    );
+    _scaleController = AnimationController(vsync: this, duration: const Duration(milliseconds: 450));
+    _scaleAnimation = CurvedAnimation(parent: _scaleController, curve: Curves.elasticOut);
 
-    // Slider entrance
-    _sliderEntranceController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
+    _sliderEntranceController = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
     _sliderSlide = Tween<double>(begin: 12.0, end: 0.0).animate(
-      CurvedAnimation(parent: _sliderEntranceController, curve: Curves.easeOut),
-    );
-    _sliderFade = CurvedAnimation(
-      parent: _sliderEntranceController,
-      curve: Curves.easeIn,
-    );
+        CurvedAnimation(parent: _sliderEntranceController, curve: Curves.easeOut));
+    _sliderFade = CurvedAnimation(parent: _sliderEntranceController, curve: Curves.easeIn);
 
-    // Drag pulse
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 120),
-    );
+    _pulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 120));
     _pulseScale = Tween<double>(begin: 1.0, end: 1.18).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeOut),
-    );
+        CurvedAnimation(parent: _pulseController, curve: Curves.easeOut));
 
-    // Shimmer
-    _shimmerController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 800),
-    );
+    _shimmerController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
     _shimmerAnimation = Tween<double>(begin: -1.0, end: 2.0).animate(
-      CurvedAnimation(parent: _shimmerController, curve: Curves.easeInOut),
-    );
+        CurvedAnimation(parent: _shimmerController, curve: Curves.easeInOut));
 
-    // ── Nudge (loops) ────────────────────────────────────────────────────
-    // Total cycle = 1800 ms
-    //   hold-start   300ms → 16.7%
-    //   sweep right  400ms → 22.2%
-    //   return mid   400ms → 22.2%
-    //   hold-end     700ms → 38.9%
-    _nudgeController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    );
-
+    _nudgeController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800));
     _nudgeRating = TweenSequence<double>([
+      TweenSequenceItem(tween: ConstantTween<double>(_nudgeStart), weight: 16.7),
       TweenSequenceItem(
-        tween: ConstantTween<double>(_nudgeStart),
-        weight: 16.7,
-      ),
+          tween: Tween<double>(begin: _nudgeStart, end: _nudgePeak)
+              .chain(CurveTween(curve: Curves.easeInOut)),
+          weight: 22.2),
       TweenSequenceItem(
-        tween: Tween<double>(begin: _nudgeStart, end: _nudgePeak)
-            .chain(CurveTween(curve: Curves.easeInOut)),
-        weight: 22.2,
-      ),
-      TweenSequenceItem(
-        tween: Tween<double>(begin: _nudgePeak, end: _nudgeStart)
-            .chain(CurveTween(curve: Curves.easeInOut)),
-        weight: 22.2,
-      ),
-      TweenSequenceItem(
-        tween: ConstantTween<double>(_nudgeStart),
-        weight: 38.9,
-      ),
+          tween: Tween<double>(begin: _nudgePeak, end: _nudgeStart)
+              .chain(CurveTween(curve: Curves.easeInOut)),
+          weight: 22.2),
+      TweenSequenceItem(tween: ConstantTween<double>(_nudgeStart), weight: 38.9),
     ]).animate(_nudgeController);
 
     _nudgeThumbPos = TweenSequence<double>([
+      TweenSequenceItem(tween: ConstantTween<double>(_ratingToNorm(_nudgeStart)), weight: 16.7),
       TweenSequenceItem(
-        tween: ConstantTween<double>(_ratingToNorm(_nudgeStart)),
-        weight: 16.7,
-      ),
+          tween: Tween<double>(begin: _ratingToNorm(_nudgeStart), end: _ratingToNorm(_nudgePeak))
+              .chain(CurveTween(curve: Curves.easeInOut)),
+          weight: 22.2),
       TweenSequenceItem(
-        tween: Tween<double>(
-                begin: _ratingToNorm(_nudgeStart),
-                end: _ratingToNorm(_nudgePeak))
-            .chain(CurveTween(curve: Curves.easeInOut)),
-        weight: 22.2,
-      ),
-      TweenSequenceItem(
-        tween: Tween<double>(
-                begin: _ratingToNorm(_nudgePeak),
-                end: _ratingToNorm(_nudgeStart))
-            .chain(CurveTween(curve: Curves.easeInOut)),
-        weight: 22.2,
-      ),
-      TweenSequenceItem(
-        tween: ConstantTween<double>(_ratingToNorm(_nudgeStart)),
-        weight: 38.9,
-      ),
+          tween: Tween<double>(begin: _ratingToNorm(_nudgePeak), end: _ratingToNorm(_nudgeStart))
+              .chain(CurveTween(curve: Curves.easeInOut)),
+          weight: 22.2),
+      TweenSequenceItem(tween: ConstantTween<double>(_ratingToNorm(_nudgeStart)), weight: 38.9),
     ]).animate(_nudgeController);
 
     _nudgeController.addListener(() {
@@ -275,51 +216,32 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
       }
     });
 
-    // ── Bouncing down arrow ──────────────────────────────────────────────
-    _arrowBounceController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    )..repeat(reverse: true);
-
+    _arrowBounceController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500))
+      ..repeat(reverse: true);
     _arrowBounce = Tween<double>(begin: 0.0, end: 10.0).animate(
-      CurvedAnimation(parent: _arrowBounceController, curve: Curves.easeInOut),
-    );
+        CurvedAnimation(parent: _arrowBounceController, curve: Curves.easeInOut));
 
-    // ── Glow ─────────────────────────────────────────────────────────────
-    _nudgeGlowController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
+    _nudgeGlowController = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
     _nudgeGlow = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _nudgeGlowController, curve: Curves.easeInOut),
-    );
+        CurvedAnimation(parent: _nudgeGlowController, curve: Curves.easeInOut));
 
-    // ── Swipe icon wiggle ─────────────────────────────────────────────────
-    // Matches the nudge cycle duration exactly so icon nudges right in sync
-    // with the slider thumb moving right, then returns together.
-    _iconWiggleController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    );
+    _iconWiggleController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800));
     _iconWiggle = TweenSequence<double>([
       TweenSequenceItem(tween: ConstantTween<double>(0.0), weight: 16.7),
       TweenSequenceItem(
-        tween: Tween<double>(begin: 0.0, end: 5.0)
-            .chain(CurveTween(curve: Curves.easeInOut)),
-        weight: 22.2,
-      ),
+          tween: Tween<double>(begin: 0.0, end: 5.0).chain(CurveTween(curve: Curves.easeInOut)),
+          weight: 22.2),
       TweenSequenceItem(
-        tween: Tween<double>(begin: 5.0, end: 0.0)
-            .chain(CurveTween(curve: Curves.easeInOut)),
-        weight: 22.2,
-      ),
+          tween: Tween<double>(begin: 5.0, end: 0.0).chain(CurveTween(curve: Curves.easeInOut)),
+          weight: 22.2),
       TweenSequenceItem(tween: ConstantTween<double>(0.0), weight: 38.9),
     ]).animate(_iconWiggleController);
 
     // ── Boot ─────────────────────────────────────────────────────────────
     if (widget.showSlider) {
+      // Run entrance anim, then load guidance flag, then maybe start nudge.
       _sliderEntranceController.forward().then((_) {
-        if (mounted && _shouldNudge) _startNudge();
+        if (mounted) _loadGuidanceFlag();
       });
     } else if (!widget.showSlider && widget.hasRated) {
       _scaleController.forward();
@@ -331,6 +253,61 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
           });
         }
       });
+    }
+  }
+
+  // ── Guidance flag loader (self-contained, no parent needed) ──────────────
+
+  Future<void> _loadGuidanceFlag() async {
+    // If parent already overrides, skip the DB query.
+    if (widget.showGuidance != null) {
+      setState(() => _guidanceLoaded = true);
+      if (_shouldNudge) _startNudge();
+      return;
+    }
+
+    try {
+      final user = Provider.of<UserProvider>(context, listen: false).user;
+      if (user == null) return;
+
+      final supabase = Supabase.instance.client;
+
+      // 1. Check if user is in the test group (test = true → threshold 3, false → 1)
+      final userRow = await supabase
+          .from('users')
+          .select('test')
+          .eq('uid', user.uid)
+          .maybeSingle();
+
+      final bool isTestGroup = userRow?['test'] ?? true; // default to test group
+      final int threshold = isTestGroup ? 3 : 1;
+
+      // 2. Count how many ratings this user has submitted
+      final ratingsRes = await supabase
+          .from('post_rating')
+          .select('userid')
+          .eq('userid', user.uid);
+
+      final int ratingCount = (ratingsRes as List).length;
+
+      if (!mounted) return;
+
+      final bool shouldShow = ratingCount < threshold;
+      setState(() {
+        _resolvedGuidance = shouldShow;
+        _guidanceLoaded = true;
+      });
+
+      if (_shouldNudge) _startNudge();
+    } catch (_) {
+      // On any error fall back to showing guidance (safer for new users)
+      if (mounted) {
+        setState(() {
+          _resolvedGuidance = true;
+          _guidanceLoaded = true;
+        });
+        if (_shouldNudge) _startNudge();
+      }
     }
   }
 
@@ -351,8 +328,7 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
     _nudgeController.stop();
     _nudgeGlowController.stop();
     _iconWiggleController.stop();
-    _nudgeGlowController.animateTo(0.0,
-        duration: const Duration(milliseconds: 150));
+    _nudgeGlowController.animateTo(0.0, duration: const Duration(milliseconds: 150));
     if (mounted) setState(() => _isNudging = false);
   }
 
@@ -364,11 +340,16 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
 
     if (widget.showSlider && !oldWidget.showSlider) {
       _sliderEntranceController.forward(from: 0.0).then((_) {
-        if (mounted && _shouldNudge) _startNudge();
+        if (mounted) {
+          if (_guidanceLoaded) {
+            if (_shouldNudge) _startNudge();
+          } else {
+            _loadGuidanceFlag();
+          }
+        }
       });
       if (!_isDragging) {
-        _currentRating =
-            widget.userRating > 0 ? widget.userRating : widget.initialRating;
+        _currentRating = widget.userRating > 0 ? widget.userRating : widget.initialRating;
       }
     }
 
@@ -390,16 +371,18 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
         _currentRating = widget.userRating;
       }
     }
+
+    // Re-check guidance if onRatingEnd just fired (rating count changed)
+    if (widget.hasRated && !oldWidget.hasRated && widget.showGuidance == null) {
+      _loadGuidanceFlag();
+    }
   }
 
   // ── interaction ──────────────────────────────────────────────────────────
 
   void _onRatingChanged(double newRating) {
     if (_isNudging) _stopNudge();
-    setState(() {
-      _currentRating = newRating;
-      _isDragging = true;
-    });
+    setState(() { _currentRating = newRating; _isDragging = true; });
     widget.onRatingUpdate?.call(newRating);
     _pulseController.forward(from: 0.0).then((_) => _pulseController.reverse());
   }
@@ -415,10 +398,8 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
     if (_lastThemeProvider != themeProvider) {
       _lastThemeProvider = themeProvider;
       final isDark = themeProvider.themeMode == ThemeMode.dark;
-      _cachedSliderActiveColor =
-          isDark ? const Color(0xFFd9d9d9) : Colors.black;
-      _cachedSliderInactiveColor =
-          isDark ? const Color(0xFF333333) : Colors.grey[400]!;
+      _cachedSliderActiveColor = isDark ? const Color(0xFFd9d9d9) : Colors.black;
+      _cachedSliderInactiveColor = isDark ? const Color(0xFF333333) : Colors.grey[400]!;
     }
   }
 
@@ -444,14 +425,12 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
       scale: _scaleAnimation,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final double buttonWidth =
-              (constraints.maxWidth * 0.6).clamp(200.0, 250.0);
+          final double buttonWidth = (constraints.maxWidth * 0.6).clamp(200.0, 250.0);
           return Container(
             width: buttonWidth,
             height: 40.0,
             padding: const EdgeInsets.symmetric(horizontal: 10.0),
-            child:
-                _justSubmitted ? _buildShimmerButton() : _buildStaticButton(),
+            child: _justSubmitted ? _buildShimmerButton() : _buildStaticButton(),
           );
         },
       ),
@@ -472,12 +451,7 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
         fit: BoxFit.scaleDown,
         child: Text(
           'You rated: ${widget.userRating.toStringAsFixed(1)}',
-          style: const TextStyle(
-            fontSize: 13,
-            color: Colors.white,
-            fontWeight: FontWeight.w500,
-            fontFamily: 'Inter',
-          ),
+          style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w500, fontFamily: 'Inter'),
         ),
       ),
     );
@@ -488,10 +462,7 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
       animation: _shimmerAnimation,
       builder: (context, child) {
         return Container(
-          decoration: BoxDecoration(
-            color: Colors.black54,
-            borderRadius: BorderRadius.circular(8),
-          ),
+          decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: Stack(
@@ -504,11 +475,7 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
                     child: Container(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: [
-                            Colors.transparent,
-                            Colors.white.withOpacity(0.25),
-                            Colors.transparent,
-                          ],
+                          colors: [Colors.transparent, Colors.white.withOpacity(0.25), Colors.transparent],
                         ),
                       ),
                     ),
@@ -522,12 +489,7 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
       child: Center(
         child: Text(
           'You rated: ${widget.userRating.toStringAsFixed(1)}',
-          style: const TextStyle(
-            fontSize: 13,
-            color: Colors.white,
-            fontWeight: FontWeight.w500,
-            fontFamily: 'Inter',
-          ),
+          style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w500, fontFamily: 'Inter'),
         ),
       ),
     );
@@ -541,10 +503,7 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
       builder: (context, child) {
         return Transform.translate(
           offset: Offset(0, _sliderSlide.value),
-          child: Opacity(
-            opacity: _sliderFade.value.clamp(0.0, 1.0),
-            child: child,
-          ),
+          child: Opacity(opacity: _sliderFade.value.clamp(0.0, 1.0), child: child),
         );
       },
       child: Padding(
@@ -552,7 +511,7 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── "Slide to rate" hint (original pulsing-dot style) ─────────
+            // ── "Slide to rate" hint ─────────────────────────────────────
             AnimatedOpacity(
               opacity: _isNudging ? 1.0 : 0.0,
               duration: const Duration(milliseconds: 200),
@@ -563,23 +522,17 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
                   builder: (context, _) {
                     final glow = _nudgeGlow.value;
                     return Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 5),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.9 + 0.1 * glow),
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [
-                          BoxShadow(
-                            color: Colors.white.withOpacity(0.35 * glow),
-                            blurRadius: 10,
-                            spreadRadius: 1,
-                          ),
+                          BoxShadow(color: Colors.white.withOpacity(0.35 * glow), blurRadius: 10, spreadRadius: 1),
                         ],
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Pulsing dot
                           Container(
                             width: 7,
                             height: 7,
@@ -587,20 +540,13 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               color: Colors.black.withOpacity(0.5 + 0.5 * glow),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.2 * glow),
-                                  blurRadius: 4,
-                                  spreadRadius: 1,
-                                ),
-                              ],
+                              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2 * glow), blurRadius: 4, spreadRadius: 1)],
                             ),
                           ),
                           Text(
                             'Slide to rate',
                             style: TextStyle(
-                              color:
-                                  Colors.black.withOpacity(0.75 + 0.25 * glow),
+                              color: Colors.black.withOpacity(0.75 + 0.25 * glow),
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
                               fontFamily: 'Inter',
@@ -615,39 +561,29 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
               ),
             ),
 
-            // ── Slider (arrow painted inside thumb shape for perfect sync) ──
+            // ── Slider ───────────────────────────────────────────────────
             LayoutBuilder(
               builder: (context, constraints) {
                 return AnimatedBuilder(
-                  animation: Listenable.merge([
-                    _nudgeGlow,
-                    _arrowBounceController,
-                    _nudgeController,
-                  ]),
+                  animation: Listenable.merge([_nudgeGlow, _arrowBounceController, _nudgeController]),
                   builder: (context, child) {
                     return SliderTheme(
                       data: SliderTheme.of(context).copyWith(
-                        // Arrow is painted inside the thumb — same canvas call,
-                        // same frame, zero drift possible.
-                        thumbShape: widget.showGuidance
+                        thumbShape: _effectiveShowGuidance
                             ? _EmojiThumbShape(
                                 emoji: '👆',
                                 size: 30.0,
-                                showArrow: _isNudging && widget.showGuidance,
+                                showArrow: _isNudging && _effectiveShowGuidance,
                                 arrowBounce: _arrowBounce.value,
-                                arrowOpacity:
-                                    (_isNudging && widget.showGuidance)
-                                        ? 0.6 + 0.4 * _nudgeGlow.value
-                                        : 0.0,
+                                arrowOpacity: (_isNudging && _effectiveShowGuidance)
+                                    ? 0.6 + 0.4 * _nudgeGlow.value
+                                    : 0.0,
                               )
-                            : const RoundSliderThumbShape(
-                                enabledThumbRadius: 10.0,
-                              ),
+                            : const RoundSliderThumbShape(enabledThumbRadius: 10.0),
                         overlayShape: SliderComponentShape.noOverlay,
                         trackHeight: 3.0,
                         activeTrackColor: _isNudging
-                            ? (_cachedSliderActiveColor ?? Colors.white)
-                                .withOpacity(0.85)
+                            ? (_cachedSliderActiveColor ?? Colors.white).withOpacity(0.85)
                             : _cachedSliderActiveColor,
                         inactiveTrackColor: _cachedSliderInactiveColor,
                       ),
@@ -655,29 +591,17 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
                         decoration: _isNudging
                             ? BoxDecoration(
                                 borderRadius: BorderRadius.circular(12),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.white
-                                        .withOpacity(0.07 * _nudgeGlow.value),
-                                    blurRadius: 12,
-                                    spreadRadius: 2,
-                                  ),
-                                ],
+                                boxShadow: [BoxShadow(color: Colors.white.withOpacity(0.07 * _nudgeGlow.value), blurRadius: 12, spreadRadius: 2)],
                               )
                             : const BoxDecoration(),
                         child: Slider(
-                          value: _isNudging
-                              ? _nudgeRating.value.clamp(1.0, 10.0)
-                              : _currentRating,
+                          value: _isNudging ? _nudgeRating.value.clamp(1.0, 10.0) : _currentRating,
                           min: 1,
                           max: 10,
                           divisions: 100,
-                          label:
-                              (_isNudging ? _nudgeRating.value : _currentRating)
-                                  .toStringAsFixed(1),
+                          label: (_isNudging ? _nudgeRating.value : _currentRating).toStringAsFixed(1),
                           activeColor: _isNudging
-                              ? (_cachedSliderActiveColor ?? Colors.white)
-                                  .withOpacity(0.85)
+                              ? (_cachedSliderActiveColor ?? Colors.white).withOpacity(0.85)
                               : _cachedSliderActiveColor,
                           inactiveColor: _cachedSliderInactiveColor,
                           onChanged: _onRatingChanged,
@@ -710,19 +634,11 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
           duration: const Duration(milliseconds: 250),
           switchInCurve: Curves.easeOut,
           switchOutCurve: Curves.easeIn,
-          transitionBuilder: (child, animation) =>
-              FadeTransition(opacity: animation, child: child),
+          transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
           child: !widget.showSlider && widget.hasRated
-              ? Center(
-                  key: const ValueKey('button'),
-                  child: _buildRatingButton(),
-                )
+              ? Center(key: const ValueKey('button'), child: _buildRatingButton())
               : widget.showSlider
-                  ? SizedBox(
-                      key: const ValueKey('slider'),
-                      width: double.infinity,
-                      child: _buildRatingSlider(themeProvider),
-                    )
+                  ? SizedBox(key: const ValueKey('slider'), width: double.infinity, child: _buildRatingSlider(themeProvider))
                   : const SizedBox.shrink(key: ValueKey('empty')),
         ),
       ],
