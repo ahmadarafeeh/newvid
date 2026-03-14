@@ -27,16 +27,15 @@
             <string>com.yourcompany.ratedly</string>
         </dict>
     </array>
-    
-    <!-- CRITICAL FIX: Add 'ratedly' to this list -->
+
     <key>LSApplicationQueriesSchemes</key>
     <array>
-        <string>ratedly</string> <!-- ✅ ADD THIS LINE -->
+        <string>ratedly</string>
         <string>googlechromes</string>
         <string>comgooglemaps</string>
         <string>comgooglemapsurl</string>
     </array>
-    
+
     <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
     <key>CFBundleDevelopmentRegion</key>
@@ -63,11 +62,20 @@
     <true/>
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
-    
-    <!-- Photo Library Access for Video Upload -->
+
+    <!-- Media Permissions -->
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>We need access to your photo library to upload videos</string>
-    
+    <string>We need access to your photo library to upload photos and videos for your posts.</string>
+
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>We need permission to save photos to your library.</string>
+
+    <key>NSCameraUsageDescription</key>
+    <string>We need camera access to take photos and videos for your posts.</string>
+
+    <key>NSMicrophoneUsageDescription</key>
+    <string>We need microphone access to record videos for your posts.</string>
+
     <key>UIBackgroundModes</key>
     <array>
         <string>fetch</string>
@@ -90,7 +98,6 @@
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
-
     <key>GADApplicationIdentifier</key>
     <string>ca-app-pub-8139457472126187~8421574907</string>
 </dict>
