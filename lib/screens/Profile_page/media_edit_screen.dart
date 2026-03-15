@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:Ratedly/screens/Profile_page/add_post_screen.dart';
 
@@ -73,17 +74,15 @@ const List<_Filter> _filters = [
 
 class _TextOverlay {
   String text;
-  Offset position;
+  Offset position; // fractional 0..1 within image area
   Color color;
   double fontSize;
-  bool isBold;
 
   _TextOverlay({
     required this.text,
     required this.position,
     this.color = Colors.white,
     this.fontSize = 28.0,
-    this.isBold = true,
   });
 
   _TextOverlay copyWith({
@@ -91,17 +90,32 @@ class _TextOverlay {
     Offset? position,
     Color? color,
     double? fontSize,
-    bool? isBold,
   }) {
     return _TextOverlay(
       text: text ?? this.text,
       position: position ?? this.position,
       color: color ?? this.color,
       fontSize: fontSize ?? this.fontSize,
-      isBold: isBold ?? this.isBold,
     );
   }
 }
+
+// =============================================================================
+// AVAILABLE TEXT COLOURS
+// =============================================================================
+
+const List<Color> _textColors = [
+  Colors.white,
+  Colors.black,
+  Colors.yellow,
+  Colors.red,
+  Colors.blue,
+  Colors.green,
+  Colors.pink,
+  Colors.orange,
+  Colors.cyan,
+  Colors.purple,
+];
 
 // =============================================================================
 // MEDIA EDIT SCREEN
@@ -121,20 +135,22 @@ class MediaEditScreen extends StatefulWidget {
   State<MediaEditScreen> createState() => _MediaEditScreenState();
 }
 
-class _MediaEditScreenState extends State<MediaEditScreen> {
+class _MediaEditScreenState extends State<MediaEditScreen>
+    with SingleTickerProviderStateMixin {
   final GlobalKey _previewKey = GlobalKey();
 
   int _selectedFilterIndex = 0;
   final List<_TextOverlay> _textOverlays = [];
   int? _selectedOverlayIndex;
   bool _isRendering = false;
-
-  final TextEditingController _textController = TextEditingController();
-  Color _textColor = Colors.white;
-
   int _rotationQuarters = 0;
 
-  // Fixed heights for the bottom panel so image always gets the remaining space
+  // ── Text editing overlay state ────────────────────────────────────────
+  bool _isTyping = false;
+  final TextEditingController _textController = TextEditingController();
+  final FocusNode _textFocusNode = FocusNode();
+  Color _currentTextColor = Colors.white;
+
   static const double _topBarHeight = 56.0;
   static const double _toolBarHeight = 72.0;
   static const double _filterStripHeight = 100.0;
@@ -142,6 +158,7 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   @override
   void dispose() {
     _textController.dispose();
+    _textFocusNode.dispose();
     super.dispose();
   }
 
@@ -149,7 +166,8 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   // ROTATION
   // ===========================================================================
 
-  void _rotate() => setState(() => _rotationQuarters = (_rotationQuarters + 1) % 4);
+  void _rotate() =>
+      setState(() => _rotationQuarters = (_rotationQuarters + 1) % 4);
 
   Uint8List _applyRotation(Uint8List bytes) {
     if (_rotationQuarters == 0) return bytes;
@@ -163,119 +181,42 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   }
 
   // ===========================================================================
-  // TEXT OVERLAY
+  // TEXT — Instagram/TikTok style: type directly on image
   // ===========================================================================
 
-  void _addTextOverlay() {
+  void _enterTextMode() {
     _textController.clear();
-    showDialog(
-      context: context,
-      barrierColor: Colors.black87,
-      builder: (ctx) {
-        Color pickedColor = _textColor;
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) => AlertDialog(
-            backgroundColor: const Color(0xFF1C1C1E),
-            title: const Text(
-              'Add Text',
-              style: TextStyle(color: Colors.white, fontSize: 16),
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: _textController,
-                  autofocus: true,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    hintText: 'Type something...',
-                    hintStyle:
-                        TextStyle(color: Colors.white.withOpacity(0.4)),
-                    border: const OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white24)),
-                    focusedBorder: const OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white54)),
-                    enabledBorder: const OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white24)),
-                  ),
-                  maxLines: 3,
-                ),
-                const SizedBox(height: 16),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      Colors.white,
-                      Colors.black,
-                      Colors.yellow,
-                      Colors.red,
-                      Colors.blue,
-                      Colors.green,
-                      Colors.pink,
-                      Colors.orange,
-                    ].map((c) {
-                      final selected = pickedColor == c;
-                      return GestureDetector(
-                        onTap: () =>
-                            setDialogState(() => pickedColor = c),
-                        child: Container(
-                          margin:
-                              const EdgeInsets.symmetric(horizontal: 4),
-                          width: 28,
-                          height: 28,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: c,
-                            border: Border.all(
-                              color: selected
-                                  ? Colors.white
-                                  : Colors.transparent,
-                              width: 2.5,
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  _textController.clear();
-                  Navigator.pop(ctx);
-                },
-                child: Text('Cancel',
-                    style:
-                        TextStyle(color: Colors.white.withOpacity(0.5))),
-              ),
-              TextButton(
-                onPressed: () {
-                  final text = _textController.text.trim();
-                  if (text.isNotEmpty) {
-                    setState(() {
-                      _textColor = pickedColor;
-                      _textOverlays.add(_TextOverlay(
-                        text: text,
-                        position: const Offset(0.1, 0.35),
-                        color: pickedColor,
-                      ));
-                    });
-                  }
-                  _textController.clear();
-                  Navigator.pop(ctx);
-                },
-                child: const Text('Add',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700)),
-              ),
-            ],
-          ),
-        );
-      },
-    );
+    setState(() {
+      _isTyping = true;
+      _currentTextColor = Colors.white;
+    });
+    // Small delay so the overlay is built before requesting focus
+    Future.delayed(const Duration(milliseconds: 80), () {
+      if (mounted) _textFocusNode.requestFocus();
+    });
+  }
+
+  void _confirmText() {
+    final text = _textController.text.trim();
+    if (text.isNotEmpty) {
+      setState(() {
+        _textOverlays.add(_TextOverlay(
+          text: text,
+          // Place in centre of image by default; user can drag later
+          position: const Offset(0.5, 0.45),
+          color: _currentTextColor,
+        ));
+      });
+    }
+    _textController.clear();
+    _textFocusNode.unfocus();
+    setState(() => _isTyping = false);
+  }
+
+  void _cancelText() {
+    _textController.clear();
+    _textFocusNode.unfocus();
+    setState(() => _isTyping = false);
   }
 
   // ===========================================================================
@@ -343,301 +284,421 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
     final topPadding = MediaQuery.of(context).padding.top;
     final bottomPadding = MediaQuery.of(context).padding.bottom;
 
-    // Image preview gets whatever space is left after the fixed panels
     final imageHeight = screenSize.height -
         topPadding -
         _topBarHeight -
         _toolBarHeight -
         _filterStripHeight -
         bottomPadding -
-        8; // small gap
+        8;
 
     return Scaffold(
+      // resizeToAvoidBottomInset false so the image doesn't jump when
+      // keyboard opens during text entry
+      resizeToAvoidBottomInset: false,
       backgroundColor: Colors.black,
-      body: Column(
+      body: Stack(
         children: [
-          // ── Safe area top spacer ─────────────────────────────────────
-          SizedBox(height: topPadding),
+          // ── Main editing UI ────────────────────────────────────────────
+          Column(
+            children: [
+              SizedBox(height: topPadding),
 
-          // ── Top bar ──────────────────────────────────────────────────
-          SizedBox(
-            height: _topBarHeight,
-            child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      child: const Icon(Icons.arrow_back_ios_new,
-                          color: Colors.white, size: 20),
-                    ),
-                  ),
-                  const Text(
-                    'Edit',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: _isRendering ? null : _onNext,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 18, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: _isRendering
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                  color: Colors.black, strokeWidth: 2),
-                            )
-                          : const Text(
-                              'Next',
-                              style: TextStyle(
-                                color: Colors.black,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // ── Image preview ─────────────────────────────────────────────
-          SizedBox(
-            height: imageHeight,
-            child: GestureDetector(
-              onTap: () =>
-                  setState(() => _selectedOverlayIndex = null),
-              child: RepaintBoundary(
-                key: _previewKey,
-                child: Stack(
-                  children: [
-                    // Filtered + rotated image
-                    Positioned.fill(
-                      child: ColorFiltered(
-                        colorFilter: ColorFilter.matrix(
-                            _filters[_selectedFilterIndex].matrix),
-                        child: Transform.rotate(
-                          angle: _rotationQuarters * 3.14159265 / 2,
-                          child: Image.memory(
-                            widget.imageBytes,
-                            fit: BoxFit.contain,
-                            width: double.infinity,
-                            height: double.infinity,
-                          ),
+              // Top bar
+              SizedBox(
+                height: _topBarHeight,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      GestureDetector(
+                        onTap: () => Navigator.pop(context),
+                        child: const Padding(
+                          padding: EdgeInsets.all(8),
+                          child: Icon(Icons.arrow_back_ios_new,
+                              color: Colors.white, size: 20),
                         ),
                       ),
-                    ),
-
-                    // Draggable text overlays
-                    ..._textOverlays.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final overlay = entry.value;
-                      final isSelected =
-                          _selectedOverlayIndex == index;
-
-                      return Positioned(
-                        left: overlay.position.dx * screenSize.width,
-                        top: overlay.position.dy * imageHeight,
-                        child: GestureDetector(
-                          onTap: () => setState(
-                              () => _selectedOverlayIndex = index),
-                          onPanUpdate: (details) {
-                            setState(() {
-                              _textOverlays[index] =
-                                  overlay.copyWith(
-                                position: Offset(
-                                  (overlay.position.dx +
-                                          details.delta.dx /
-                                              screenSize.width)
-                                      .clamp(0.0, 0.85),
-                                  (overlay.position.dy +
-                                          details.delta.dy /
-                                              imageHeight)
-                                      .clamp(0.0, 0.88),
-                                ),
-                              );
-                            });
-                          },
-                          child: Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              // Shadow pass
-                              Text(
-                                overlay.text,
-                                style: TextStyle(
-                                  fontSize: overlay.fontSize,
-                                  fontWeight: overlay.isBold
-                                      ? FontWeight.w800
-                                      : FontWeight.w400,
-                                  color:
-                                      Colors.black.withOpacity(0.35),
-                                  shadows: const [
-                                    Shadow(
-                                      offset: Offset(1, 1),
-                                      blurRadius: 3,
-                                      color: Colors.black45,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              // Colour pass
-                              Text(
-                                overlay.text,
-                                style: TextStyle(
-                                  fontSize: overlay.fontSize,
-                                  fontWeight: overlay.isBold
-                                      ? FontWeight.w800
-                                      : FontWeight.w400,
-                                  color: overlay.color,
-                                  shadows: const [
-                                    Shadow(
-                                      offset: Offset(1, 1),
-                                      blurRadius: 4,
-                                      color: Colors.black54,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              // Delete handle
-                              if (isSelected)
-                                Positioned(
-                                  top: -12,
-                                  right: -12,
-                                  child: GestureDetector(
-                                    onTap: () => setState(() {
-                                      _textOverlays.removeAt(index);
-                                      _selectedOverlayIndex = null;
-                                    }),
-                                    child: Container(
-                                      width: 22,
-                                      height: 22,
-                                      decoration: const BoxDecoration(
-                                        color: Colors.red,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const Icon(Icons.close,
-                                          color: Colors.white,
-                                          size: 14),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // ── Tool buttons (Text + Rotate) ──────────────────────────────
-          Container(
-            height: _toolBarHeight,
-            color: const Color(0xFF111111),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _ToolButton(
-                  icon: Icons.text_fields_rounded,
-                  label: 'Text',
-                  onTap: _addTextOverlay,
-                ),
-                const SizedBox(width: 40),
-                _ToolButton(
-                  icon: Icons.rotate_90_degrees_cw_rounded,
-                  label: 'Rotate',
-                  onTap: _rotate,
-                ),
-              ],
-            ),
-          ),
-
-          // ── Filter strip ──────────────────────────────────────────────
-          Container(
-            height: _filterStripHeight,
-            color: Colors.black,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              itemCount: _filters.length,
-              itemBuilder: (ctx, i) {
-                final isSelected = _selectedFilterIndex == i;
-                return GestureDetector(
-                  onTap: () =>
-                      setState(() => _selectedFilterIndex = i),
-                  child: Container(
-                    margin:
-                        const EdgeInsets.symmetric(horizontal: 5),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          width: 60,
-                          height: 60,
+                      const Text('Edit',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600)),
+                      GestureDetector(
+                        onTap: _isRendering ? null : _onNext,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 18, vertical: 8),
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: isSelected
-                                  ? Colors.white
-                                  : Colors.transparent,
-                              width: 2.5,
-                            ),
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(20),
                           ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(6),
-                            child: ColorFiltered(
-                              colorFilter: ColorFilter.matrix(
-                                  _filters[i].matrix),
+                          child: _isRendering
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.black, strokeWidth: 2),
+                                )
+                              : const Text('Next',
+                                  style: TextStyle(
+                                      color: Colors.black,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Image + overlays
+              SizedBox(
+                height: imageHeight,
+                child: GestureDetector(
+                  onTap: () =>
+                      setState(() => _selectedOverlayIndex = null),
+                  child: RepaintBoundary(
+                    key: _previewKey,
+                    child: Stack(
+                      children: [
+                        // Filtered image
+                        Positioned.fill(
+                          child: ColorFiltered(
+                            colorFilter: ColorFilter.matrix(
+                                _filters[_selectedFilterIndex].matrix),
+                            child: Transform.rotate(
+                              angle: _rotationQuarters * 3.14159265 / 2,
                               child: Image.memory(
                                 widget.imageBytes,
-                                fit: BoxFit.cover,
+                                fit: BoxFit.contain,
+                                width: double.infinity,
+                                height: double.infinity,
                               ),
                             ),
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _filters[i].name,
-                          style: TextStyle(
-                            color: isSelected
-                                ? Colors.white
-                                : Colors.white.withOpacity(0.45),
-                            fontSize: 10,
-                            fontWeight: isSelected
-                                ? FontWeight.w600
-                                : FontWeight.normal,
-                          ),
-                        ),
+
+                        // Placed text overlays
+                        ..._textOverlays.asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final overlay = entry.value;
+                          final isSelected =
+                              _selectedOverlayIndex == index;
+
+                          return Positioned(
+                            left: (overlay.position.dx *
+                                    screenSize.width)
+                                .clamp(0.0, screenSize.width - 10),
+                            top: (overlay.position.dy * imageHeight)
+                                .clamp(0.0, imageHeight - 10),
+                            child: GestureDetector(
+                              onTap: () => setState(
+                                  () => _selectedOverlayIndex = index),
+                              onPanUpdate: (d) {
+                                setState(() {
+                                  _textOverlays[index] =
+                                      overlay.copyWith(
+                                    position: Offset(
+                                      (overlay.position.dx +
+                                              d.delta.dx /
+                                                  screenSize.width)
+                                          .clamp(0.0, 0.9),
+                                      (overlay.position.dy +
+                                              d.delta.dy / imageHeight)
+                                          .clamp(0.0, 0.9),
+                                    ),
+                                  );
+                                });
+                              },
+                              child: Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  // Shadow
+                                  Text(overlay.text,
+                                      style: TextStyle(
+                                        fontSize: overlay.fontSize,
+                                        fontWeight: FontWeight.w800,
+                                        foreground: Paint()
+                                          ..style = PaintingStyle.stroke
+                                          ..strokeWidth = 3
+                                          ..color =
+                                              Colors.black.withOpacity(0.5),
+                                      )),
+                                  // Fill
+                                  Text(overlay.text,
+                                      style: TextStyle(
+                                        fontSize: overlay.fontSize,
+                                        fontWeight: FontWeight.w800,
+                                        color: overlay.color,
+                                      )),
+                                  // Delete handle
+                                  if (isSelected)
+                                    Positioned(
+                                      top: -14,
+                                      right: -14,
+                                      child: GestureDetector(
+                                        onTap: () => setState(() {
+                                          _textOverlays.removeAt(index);
+                                          _selectedOverlayIndex = null;
+                                        }),
+                                        child: Container(
+                                          width: 24,
+                                          height: 24,
+                                          decoration: const BoxDecoration(
+                                              color: Colors.red,
+                                              shape: BoxShape.circle),
+                                          child: const Icon(Icons.close,
+                                              color: Colors.white,
+                                              size: 14),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
                       ],
                     ),
                   ),
-                );
-              },
-            ),
+                ),
+              ),
+
+              // Tool bar
+              Container(
+                height: _toolBarHeight,
+                color: const Color(0xFF111111),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 20, vertical: 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _ToolButton(
+                      icon: Icons.text_fields_rounded,
+                      label: 'Text',
+                      onTap: _enterTextMode,
+                    ),
+                    const SizedBox(width: 40),
+                    _ToolButton(
+                      icon: Icons.rotate_90_degrees_cw_rounded,
+                      label: 'Rotate',
+                      onTap: _rotate,
+                    ),
+                  ],
+                ),
+              ),
+
+              // Filter strip
+              Container(
+                height: _filterStripHeight,
+                color: Colors.black,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 8),
+                  itemCount: _filters.length,
+                  itemBuilder: (ctx, i) {
+                    final isSelected = _selectedFilterIndex == i;
+                    return GestureDetector(
+                      onTap: () =>
+                          setState(() => _selectedFilterIndex = i),
+                      child: Container(
+                        margin:
+                            const EdgeInsets.symmetric(horizontal: 5),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 150),
+                              width: 60,
+                              height: 60,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? Colors.white
+                                      : Colors.transparent,
+                                  width: 2.5,
+                                ),
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: ColorFiltered(
+                                  colorFilter: ColorFilter.matrix(
+                                      _filters[i].matrix),
+                                  child: Image.memory(
+                                    widget.imageBytes,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _filters[i].name,
+                              style: TextStyle(
+                                color: isSelected
+                                    ? Colors.white
+                                    : Colors.white.withOpacity(0.45),
+                                fontSize: 10,
+                                fontWeight: isSelected
+                                    ? FontWeight.w600
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+
+              SizedBox(height: bottomPadding),
+            ],
           ),
 
-          // ── Bottom safe area ──────────────────────────────────────────
-          SizedBox(height: bottomPadding),
+          // ── Instagram/TikTok-style text entry overlay ──────────────────
+          // Shown on top of everything when _isTyping == true
+          if (_isTyping)
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: _confirmText, // tap outside = done
+                child: Container(
+                  color: Colors.black.withOpacity(0.55),
+                  child: Column(
+                    children: [
+                      // Top row: Cancel | colour swatches | Done
+                      SafeArea(
+                        bottom: false,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          child: Row(
+                            children: [
+                              // Cancel
+                              GestureDetector(
+                                onTap: _cancelText,
+                                child: const Padding(
+                                  padding: EdgeInsets.all(8),
+                                  child: Text('Cancel',
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 15)),
+                                ),
+                              ),
+
+                              // Colour swatches
+                              Expanded(
+                                child: SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.center,
+                                    children: _textColors.map((c) {
+                                      final selected =
+                                          _currentTextColor == c;
+                                      return GestureDetector(
+                                        onTap: () => setState(
+                                            () => _currentTextColor = c),
+                                        child: AnimatedContainer(
+                                          duration: const Duration(
+                                              milliseconds: 150),
+                                          margin: const EdgeInsets
+                                              .symmetric(horizontal: 5),
+                                          width: selected ? 30 : 24,
+                                          height: selected ? 30 : 24,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: c,
+                                            border: Border.all(
+                                              color: selected
+                                                  ? Colors.white
+                                                  : Colors.white
+                                                      .withOpacity(0.3),
+                                              width: selected ? 2.5 : 1.5,
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                                ),
+                              ),
+
+                              // Done
+                              GestureDetector(
+                                onTap: _confirmText,
+                                child: const Padding(
+                                  padding: EdgeInsets.all(8),
+                                  child: Text('Done',
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      // Centred text field — renders text in the chosen colour
+                      // so it looks like you're typing directly on the photo
+                      Expanded(
+                        child: Center(
+                          child: GestureDetector(
+                            onTap: () {}, // prevent tap-outside dismiss here
+                            child: IntrinsicWidth(
+                              child: TextField(
+                                controller: _textController,
+                                focusNode: _textFocusNode,
+                                autofocus: true,
+                                textAlign: TextAlign.center,
+                                maxLines: null,
+                                keyboardType: TextInputType.multiline,
+                                textInputAction: TextInputAction.done,
+                                onSubmitted: (_) => _confirmText(),
+                                style: TextStyle(
+                                  color: _currentTextColor,
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w800,
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black.withOpacity(0.6),
+                                      offset: const Offset(1, 1),
+                                      blurRadius: 4,
+                                    ),
+                                  ],
+                                ),
+                                decoration: const InputDecoration(
+                                  border: InputBorder.none,
+                                  hintText: 'Add text...',
+                                  hintStyle: TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 32,
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                ),
+                                cursorColor: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // Space at the bottom so keyboard doesn't overlap
+                      const SizedBox(height: 300),
+                    ],
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
