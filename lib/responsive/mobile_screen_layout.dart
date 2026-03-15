@@ -10,6 +10,7 @@ import 'package:Ratedly/resources/notification_read.dart';
 import 'package:Ratedly/utils/theme_provider.dart';
 import 'package:Ratedly/screens/feed/post_card.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:Ratedly/screens/Profile_page/custom_camera_screen.dart';
 
 // Define color schemes for both themes at top level
 class _NavColorSet {
@@ -97,6 +98,17 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
     pageController.jumpToPage(page);
   }
 
+  /// Opens the camera screen directly without changing the active nav page.
+  void _openCamera() {
+    _pauseCurrentVideo();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const CustomCameraScreen(),
+      ),
+    );
+  }
+
   _NavColorSet _getColors(ThemeProvider themeProvider) {
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
     return isDarkMode ? _NavDarkColors() : _NavLightColors();
@@ -111,8 +123,6 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
         FirebaseAuth.instance.currentUser?.uid ??
         '';
 
-    // INSTANT: Always show the feed interface immediately
-    // Let individual screens handle their own loading states
     return Scaffold(
       body: Stack(
         children: [
@@ -122,8 +132,7 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
             child: PageView(
               controller: pageController,
               onPageChanged: onPageChanged,
-              children: homeScreenItems(
-                  context), // Fixed: Call the function with context
+              children: homeScreenItems(context),
               physics: const NeverScrollableScrollPhysics(),
             ),
           ),
@@ -131,35 +140,40 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
             left: 0,
             right: 0,
             bottom: 0,
-            child: _buildUltraCompactBottomNavBar(currentUserUid, colors),
+            child: _buildBottomNavBar(currentUserUid, colors),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildUltraCompactBottomNavBar(
-      String currentUserId, _NavColorSet colors) {
+  Widget _buildBottomNavBar(String currentUserId, _NavColorSet colors) {
     return SafeArea(
       top: false,
       child: Container(
-        height: 50, // Ultra compact height
+        height: 50,
         margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _buildUltraCompactNavItem(Icons.home, 0, colors),
-            _buildUltraCompactNavItem(Icons.search, 1, colors),
-            _buildUltraCompactNotificationNavItem(currentUserId, 2, colors),
-            _buildUltraCompactNavItem(Icons.person, 3, colors),
+            // Home
+            _buildNavItem(Icons.home, 0, colors),
+            // Search
+            _buildNavItem(Icons.search, 1, colors),
+            // Plus — opens camera, not a PageView page
+            _buildPlusButton(colors),
+            // Notifications
+            _buildNotificationNavItem(currentUserId, 2, colors),
+            // Profile
+            _buildNavItem(Icons.person, 3, colors),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildUltraCompactNavItem(
-      IconData icon, int index, _NavColorSet colors) {
+  // ── Standard nav item ────────────────────────────────────────────────────
+  Widget _buildNavItem(IconData icon, int index, _NavColorSet colors) {
     final isActive = _page == index;
 
     return InkWell(
@@ -168,12 +182,11 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
       highlightColor: Colors.transparent,
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        width: 40, // Much smaller
-        height: 40, // Much smaller
+        width: 40,
+        height: 40,
         decoration: BoxDecoration(
           color: isActive
-              ? colors.indicatorColor
-                  .withOpacity(0.08) // Very subtle active state
+              ? colors.indicatorColor.withOpacity(0.08)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
         ),
@@ -185,7 +198,7 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
               color: isActive
                   ? colors.indicatorColor
                   : colors.iconColor.withOpacity(0.9),
-              size: 20, // Smaller icon
+              size: 20,
             ),
             if (isActive) ...[
               const SizedBox(height: 2),
@@ -204,7 +217,31 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
     );
   }
 
-  Widget _buildUltraCompactNotificationNavItem(
+  // ── Plus button — navigates to camera, never "active" ───────────────────
+  Widget _buildPlusButton(_NavColorSet colors) {
+    return GestureDetector(
+      onTap: _openCamera,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: colors.iconColor.withOpacity(0.7),
+            width: 1.5,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          Icons.add,
+          color: colors.iconColor.withOpacity(0.9),
+          size: 20,
+        ),
+      ),
+    );
+  }
+
+  // ── Notification nav item ────────────────────────────────────────────────
+  Widget _buildNotificationNavItem(
       String userId, int index, _NavColorSet colors) {
     final isActive = _page == index;
 
@@ -253,7 +290,10 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
   }
 }
 
-// Ultra compact notification badge
+// =============================================================================
+// Notification badge icon — unchanged
+// =============================================================================
+
 class _UltraCompactNotificationBadgeIcon extends StatefulWidget {
   final String currentUserId;
   final int currentPage;
@@ -298,10 +338,7 @@ class _UltraCompactNotificationBadgeIconState
 
   Future<void> _loadNotificationCount() async {
     try {
-      // Skip if no user ID
-      if (widget.currentUserId.isEmpty) {
-        return;
-      }
+      if (widget.currentUserId.isEmpty) return;
 
       final supabase = Supabase.instance.client;
       final response = await supabase
@@ -319,21 +356,13 @@ class _UltraCompactNotificationBadgeIconState
         });
       }
     } catch (e) {
-      // Error loading notification count
-      if (mounted) {
-        setState(() {
-          _hasLoaded = true;
-        });
-      }
+      if (mounted) setState(() => _hasLoaded = true);
     }
   }
 
   void _setupNotificationStream() {
     try {
-      // Skip if no user ID
-      if (widget.currentUserId.isEmpty) {
-        return;
-      }
+      if (widget.currentUserId.isEmpty) return;
 
       final supabase = Supabase.instance.client;
 
@@ -342,31 +371,25 @@ class _UltraCompactNotificationBadgeIconState
           .stream(primaryKey: ['id'])
           .eq('target_user_id', widget.currentUserId)
           .listen((List<Map<String, dynamic>> notifications) {
-            final unreadNotifications = notifications.where((notification) {
-              final targetUserId = notification['target_user_id']?.toString();
-              final isRead = notification['is_read'] == true;
-              final type = notification['type']?.toString();
-
+            final unreadNotifications = notifications.where((n) {
+              final targetUserId = n['target_user_id']?.toString();
+              final isRead = n['is_read'] == true;
+              final type = n['type']?.toString();
               return targetUserId == widget.currentUserId &&
                   !isRead &&
                   type != 'message';
             }).toList();
 
             if (mounted) {
-              setState(() {
-                _notificationCount = unreadNotifications.length;
-              });
+              setState(
+                  () => _notificationCount = unreadNotifications.length);
             }
-          }, onError: (error) {
-            // Notification stream error
-          });
-    } catch (e) {
-      // Error setting up notification stream
-    }
+          }, onError: (_) {});
+    } catch (e) {}
   }
 
   void _startPolling() {
-    _pollingTimer = Timer.periodic(Duration(seconds: 30), (timer) {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       if (mounted && widget.currentUserId.isNotEmpty) {
         _loadNotificationCount();
       }
@@ -376,7 +399,6 @@ class _UltraCompactNotificationBadgeIconState
   @override
   void didUpdateWidget(_UltraCompactNotificationBadgeIcon oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Reload if user ID changed
     if (oldWidget.currentUserId != widget.currentUserId) {
       _loadNotificationCount();
     }
@@ -391,13 +413,9 @@ class _UltraCompactNotificationBadgeIconState
 
   String _formatCount(int count) {
     if (count <= 0) return '0';
-    if (count < 1000) {
-      return count.toString();
-    } else if (count < 10000) {
-      return '${(count / 1000).toStringAsFixed(1)}k';
-    } else {
-      return '9+';
-    }
+    if (count < 1000) return count.toString();
+    if (count < 10000) return '${(count / 1000).toStringAsFixed(1)}k';
+    return '9+';
   }
 
   @override
@@ -407,7 +425,8 @@ class _UltraCompactNotificationBadgeIconState
 
     final badgeBackgroundColor =
         isDarkMode ? const Color(0xFF333333) : Colors.white;
-    final badgeTextColor = isDarkMode ? const Color(0xFFd9d9d9) : Colors.black;
+    final badgeTextColor =
+        isDarkMode ? const Color(0xFFd9d9d9) : Colors.black;
 
     final shouldShowBadge = _notificationCount > 0;
     final displayCount = _formatCount(_notificationCount);
@@ -416,28 +435,22 @@ class _UltraCompactNotificationBadgeIconState
       alignment: Alignment.center,
       clipBehavior: Clip.none,
       children: [
-        // Heart icon
         Icon(
           Icons.favorite,
           color: widget.isActive
               ? widget.indicatorColor
               : widget.iconColor.withOpacity(0.9),
-          size: 20, // Smaller icon
+          size: 20,
         ),
-
-        // Notification badge - ultra compact
         Positioned(
           top: -4,
           right: -5,
           child: AnimatedOpacity(
             opacity: shouldShowBadge ? 1.0 : 0.0,
-            duration: Duration(milliseconds: 200),
+            duration: const Duration(milliseconds: 200),
             child: Container(
               padding: const EdgeInsets.all(2),
-              constraints: const BoxConstraints(
-                minWidth: 14,
-                minHeight: 14,
-              ),
+              constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
               decoration: BoxDecoration(
                 color: badgeBackgroundColor,
                 shape: BoxShape.circle,
@@ -447,7 +460,7 @@ class _UltraCompactNotificationBadgeIconState
                   displayCount.length > 2 ? '9+' : displayCount,
                   style: TextStyle(
                     color: badgeTextColor,
-                    fontSize: 7, // Very small font
+                    fontSize: 7,
                     fontWeight: FontWeight.bold,
                     height: 1.0,
                   ),
