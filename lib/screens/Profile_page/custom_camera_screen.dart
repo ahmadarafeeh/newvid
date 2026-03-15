@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:image/image.dart' as img;
 import 'package:photo_manager/photo_manager.dart';
 import 'package:Ratedly/screens/Profile_page/media_edit_screen.dart';
 import 'package:Ratedly/screens/Profile_page/add_post_screen.dart';
@@ -179,9 +180,18 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
 
     try {
       final XFile photo = await _controller!.takePicture();
-      // Read bytes as-is — the camera package on iOS already saves
-      // front camera photos correctly without mirroring.
-      final Uint8List bytes = await photo.readAsBytes();
+      Uint8List bytes = await photo.readAsBytes();
+
+      // The camera package saves front camera photos as a mirror image
+      // (left-right flipped). Flip horizontally so the result looks natural,
+      // matching how Instagram and Snapchat handle front camera photos.
+      if (_isFrontCamera) {
+        final decoded = img.decodeJpg(bytes);
+        if (decoded != null) {
+          final flipped = img.flipHorizontal(decoded);
+          bytes = Uint8List.fromList(img.encodeJpg(flipped, quality: 92));
+        }
+      }
 
       if (mounted) {
         Navigator.push(
