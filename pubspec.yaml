@@ -36,6 +36,8 @@ dependencies:
   country_detector: ^1.0.2+1
   share_plus: ^11.1.0
   permission_handler: ^11.0.0
+  camera: ^0.10.5+9
+  photo_manager: ^3.3.0
 
 
 dev_dependencies:
