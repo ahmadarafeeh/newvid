@@ -4,7 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:Ratedly/utils/utils.dart';
 import 'package:Ratedly/widgets/edit_profile_screen.dart';
 import 'package:Ratedly/screens/Profile_page/image_screen.dart';
-import 'package:Ratedly/screens/Profile_page/add_post_screen.dart';
+import 'package:Ratedly/screens/Profile_page/custom_camera_screen.dart';
 import 'package:Ratedly/widgets/settings_screen.dart';
 import 'package:Ratedly/widgets/user_list_screen.dart';
 import 'package:Ratedly/resources/profile_firestore_methods.dart';
@@ -505,7 +505,6 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
       final postsLimit =
           _isFirstLoad ? _initialPostsLimit : _subsequentPostsLimit;
 
-      // viewers_count + fetch A/B flag in the same user row read below
       final initialPosts = await _supabase
           .from('posts')
           .select(
@@ -540,9 +539,9 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         return;
       }
 
-      // ── Read A/B test flag from own user row ─────────────────────────
+      // ── Read A/B test flag ───────────────────────────────────────────
       final bool abTest = userResponse['test'] == true;
-      // ──────────────────────────────────────────────────────────────────
+      // ─────────────────────────────────────────────────────────────────
 
       final followersResponse = await _supabase
           .from('user_followers')
@@ -597,7 +596,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
           _postsOffset = initialPosts.length;
           _hasMorePosts = totalPostCount > initialPosts.length;
           _isFirstLoad = false;
-          _showViewCount = abTest; // ← apply A/B flag
+          _showViewCount = abTest;
         });
       }
     } catch (e, stackTrace) {
@@ -988,6 +987,7 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
     );
   }
 
+  // ========== ADD POST — opens CustomCameraScreen directly ==========
   Widget _buildAddPostButton(_ColorSet colors) {
     return GestureDetector(
       onTap: () {
@@ -995,8 +995,10 @@ class _CurrentUserProfileScreenState extends State<CurrentUserProfileScreen>
         Navigator.push(
           context,
           MaterialPageRoute(
-              builder: (_) =>
-                  AddPostScreen(onPostUploaded: () async => getData())),
+            builder: (_) => CustomCameraScreen(
+              onPostUploaded: () async => getData(),
+            ),
+          ),
         ).then((_) {
           Future.delayed(const Duration(milliseconds: 300), () {
             if (mounted) _unmuteProfileVideo();
