@@ -116,11 +116,9 @@ class _AddPostScreenState extends State<AddPostScreen>
   }
 
   // ===========================================================================
-  // ENTRY POINT — tapping the upload button
+  // ENTRY POINT
   // ===========================================================================
 
-  /// Called when the upload button is tapped.
-  /// Shows guidelines dialog first if needed, then opens the camera directly.
   Future<void> _onUploadButtonPressed() async {
     if (!_hasAgreedToWarning) {
       final agreed = await _showWarningDialog();
@@ -138,7 +136,8 @@ class _AddPostScreenState extends State<AddPostScreen>
         backgroundColor: mobileBackgroundColor,
         title: Text(
           'Ratedly Guidelines',
-          style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold),
+          style:
+              TextStyle(color: primaryColor, fontWeight: FontWeight.bold),
         ),
         content: Text.rich(
           TextSpan(children: [
@@ -148,7 +147,8 @@ class _AddPostScreenState extends State<AddPostScreen>
             ),
             TextSpan(
               text: 'permanently banned',
-              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                  color: Colors.red, fontWeight: FontWeight.bold),
             ),
             TextSpan(text: '.', style: TextStyle(color: primaryColor)),
           ]),
@@ -158,8 +158,8 @@ class _AddPostScreenState extends State<AddPostScreen>
             onPressed: () => Navigator.of(ctx).pop(true),
             child: Text(
               'I Understand',
-              style:
-                  TextStyle(color: primaryColor, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                  color: primaryColor, fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -168,71 +168,72 @@ class _AddPostScreenState extends State<AddPostScreen>
   }
 
   // ===========================================================================
-  // PERMISSION + CAMERA LAUNCH
+  // CAMERA LAUNCH
+  // Just try to open the camera directly via image_picker.
+  // image_picker handles its own native permission prompt on iOS.
+  // We only show our permission sheet if it actually throws a
+  // permission-related error — never based on permission_handler status alone,
+  // which can lie on iOS.
   // ===========================================================================
 
-  /// Checks camera permission and opens the front camera immediately.
-  /// If permission is denied, shows the permission sheet instead.
   Future<void> _launchCamera() async {
-    final cameraStatus = await Permission.camera.status;
-
-    if (cameraStatus.isGranted) {
-      // Permission already granted — open camera right away
+    try {
       await _pickAndProcessImage(ImageSource.camera);
-      return;
-    }
+    } catch (e) {
+      final String errStr = e.toString().toLowerCase();
+      final bool isPermissionError = errStr.contains('permission') ||
+          errStr.contains('denied') ||
+          errStr.contains('access') ||
+          errStr.contains('not authorized');
 
-    if (cameraStatus.isPermanentlyDenied) {
-      await _showPermissionSheet(isPermanent: true, needsMic: false);
-      return;
-    }
-
-    // Request permission
-    final result = await Permission.camera.request();
-
-    if (result.isGranted) {
-      await _pickAndProcessImage(ImageSource.camera);
-    } else if (result.isPermanentlyDenied) {
-      await _showPermissionSheet(isPermanent: true, needsMic: false);
-    } else {
-      await _showPermissionSheet(isPermanent: false, needsMic: false);
+      if (isPermissionError) {
+        // Only now do we check whether it's permanently denied
+        final status = await Permission.camera.status;
+        await _showPermissionSheet(
+          isPermanent: status.isPermanentlyDenied,
+          needsMic: false,
+        );
+      } else {
+        await _logError(
+          operation: '_launchCamera',
+          error: e,
+          additionalData: {'errorString': e.toString()},
+        );
+        if (context.mounted) {
+          showSnackBar(context, 'Could not open camera. Please try again.');
+        }
+      }
     }
   }
 
-  /// Same as _launchCamera but also requests microphone for video.
   Future<void> _launchCameraForVideo() async {
-    final cameraStatus = await Permission.camera.status;
-    final micStatus = await Permission.microphone.status;
-
-    final camGranted = cameraStatus.isGranted;
-    final micGranted = micStatus.isGranted;
-
-    if (camGranted && micGranted) {
+    try {
       await _recordVideoFromCamera();
-      return;
-    }
+    } catch (e) {
+      final String errStr = e.toString().toLowerCase();
+      final bool isPermissionError = errStr.contains('permission') ||
+          errStr.contains('denied') ||
+          errStr.contains('access') ||
+          errStr.contains('not authorized');
 
-    final camPermanent = cameraStatus.isPermanentlyDenied;
-    final micPermanent = micStatus.isPermanentlyDenied;
-
-    if (camPermanent || micPermanent) {
-      await _showPermissionSheet(isPermanent: true, needsMic: true);
-      return;
-    }
-
-    // Request what's missing
-    if (!camGranted) await Permission.camera.request();
-    if (!micGranted) await Permission.microphone.request();
-
-    final camFinal = await Permission.camera.status;
-    final micFinal = await Permission.microphone.status;
-
-    if (camFinal.isGranted && micFinal.isGranted) {
-      await _recordVideoFromCamera();
-    } else if (camFinal.isPermanentlyDenied || micFinal.isPermanentlyDenied) {
-      await _showPermissionSheet(isPermanent: true, needsMic: true);
-    } else {
-      await _showPermissionSheet(isPermanent: false, needsMic: true);
+      if (isPermissionError) {
+        final camStatus = await Permission.camera.status;
+        final micStatus = await Permission.microphone.status;
+        await _showPermissionSheet(
+          isPermanent:
+              camStatus.isPermanentlyDenied || micStatus.isPermanentlyDenied,
+          needsMic: true,
+        );
+      } else {
+        await _logError(
+          operation: '_launchCameraForVideo',
+          error: e,
+          additionalData: {'errorString': e.toString()},
+        );
+        if (context.mounted) {
+          showSnackBar(context, 'Could not open camera. Please try again.');
+        }
+      }
     }
   }
 
@@ -311,7 +312,8 @@ class _AddPostScreenState extends State<AddPostScreen>
           );
         }
 
-        if (compressedImage != null && compressedImage.length > _maxFileSize) {
+        if (compressedImage != null &&
+            compressedImage.length > _maxFileSize) {
           await _logError(
             operation:
                 '_pickAndProcessImage/still_over_limit_before_extra_compress',
@@ -355,16 +357,8 @@ class _AddPostScreenState extends State<AddPostScreen>
       }
     } catch (e, stack) {
       setState(() => isLoading = false);
-      await _logError(
-        operation: '_pickAndProcessImage',
-        error: e,
-        stack: stack,
-        additionalData: {'source': source.toString()},
-      );
-      if (context.mounted) {
-        showSnackBar(
-            context, 'Please try again or contact us at ratedly9@gmail.com');
-      }
+      // Re-throw so _launchCamera can catch and handle permission errors
+      rethrow;
     }
   }
 
@@ -479,11 +473,8 @@ class _AddPostScreenState extends State<AddPostScreen>
       }
     } catch (e, stack) {
       setState(() => isLoading = false);
-      await _logError(
-          operation: '_recordVideoFromCamera', error: e, stack: stack);
-      if (context.mounted) {
-        showSnackBar(context, 'Failed to record video: $e');
-      }
+      // Re-throw so _launchCameraForVideo can catch and handle permission errors
+      rethrow;
     }
   }
 
@@ -556,7 +547,8 @@ class _AddPostScreenState extends State<AddPostScreen>
         );
         quality -= 5;
       }
-      if (compressedImage != null && compressedImage.length > _maxFileSize) {
+      if (compressedImage != null &&
+          compressedImage.length > _maxFileSize) {
         await _logError(
           operation: '_compressUntilUnderLimit/still_over_limit',
           error: 'Image still over limit after aggressive compression',
@@ -812,8 +804,8 @@ class _AddPostScreenState extends State<AddPostScreen>
                   hintText: "Write a caption...",
                   hintStyle: TextStyle(color: primaryColor.withOpacity(0.6)),
                   border: InputBorder.none,
-                  contentPadding:
-                      const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                  contentPadding: const EdgeInsets.symmetric(
+                      vertical: 12, horizontal: 16),
                 ),
                 style: TextStyle(color: primaryColor),
                 maxLines: 3,
@@ -1027,7 +1019,8 @@ class _AddPostScreenState extends State<AddPostScreen>
 }
 
 // =============================================================================
-// PERMISSION DENIED SHEET — shown when camera/mic is denied
+// PERMISSION DENIED SHEET
+// Only shown when image_picker actually throws a permission error.
 // =============================================================================
 
 class _PermissionSheet extends StatelessWidget {
@@ -1084,7 +1077,9 @@ class _PermissionSheet extends StatelessWidget {
               shape: BoxShape.circle,
             ),
             child: Icon(
-              needsMic ? Icons.mic_off_rounded : Icons.no_photography_rounded,
+              needsMic
+                  ? Icons.mic_off_rounded
+                  : Icons.no_photography_rounded,
               color: Colors.white.withOpacity(0.55),
               size: 30,
             ),
@@ -1117,7 +1112,7 @@ class _PermissionSheet extends StatelessWidget {
 
           const SizedBox(height: 28),
 
-          // Primary: open settings (permanent) or go back and allow
+          // Primary action
           if (isPermanent && onOpenSettings != null)
             _PermissionButton(
               label: 'Open Settings',
@@ -1133,7 +1128,7 @@ class _PermissionSheet extends StatelessWidget {
 
           const SizedBox(height: 10),
 
-          // Fallback: upload from gallery
+          // Gallery fallback
           _PermissionButton(
             label: needsMic
                 ? 'Upload Video from Library'
