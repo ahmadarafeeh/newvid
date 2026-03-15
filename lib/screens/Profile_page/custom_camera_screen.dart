@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:image/image.dart' as img;
 import 'package:photo_manager/photo_manager.dart';
 import 'package:Ratedly/screens/Profile_page/media_edit_screen.dart';
 import 'package:Ratedly/screens/Profile_page/add_post_screen.dart';
@@ -180,17 +179,9 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
 
     try {
       final XFile photo = await _controller!.takePicture();
-      Uint8List bytes = await photo.readAsBytes();
-
-      // Flip front camera image so final result is NOT mirrored
-      // (matches native iOS camera behaviour)
-      if (_isFrontCamera) {
-        final decoded = img.decodeJpg(bytes);
-        if (decoded != null) {
-          final flipped = img.flipHorizontal(decoded);
-          bytes = Uint8List.fromList(img.encodeJpg(flipped, quality: 92));
-        }
-      }
+      // Read bytes as-is — the camera package on iOS already saves
+      // front camera photos correctly without mirroring.
+      final Uint8List bytes = await photo.readAsBytes();
 
       if (mounted) {
         Navigator.push(
@@ -320,8 +311,6 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
@@ -346,17 +335,15 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
             child: SafeArea(
               bottom: false,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // Close
                     _CircleIconButton(
                       icon: Icons.close,
                       onTap: () => Navigator.pop(context),
                     ),
-
-                    // Flash
                     _CircleIconButton(
                       icon: _flashIcon,
                       onTap: _toggleFlash,
@@ -401,8 +388,8 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
             child: SafeArea(
               top: false,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 28, vertical: 24),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: CrossAxisAlignment.center,
@@ -416,7 +403,8 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                              color: Colors.white.withOpacity(0.6), width: 1.5),
+                              color: Colors.white.withOpacity(0.6),
+                              width: 1.5),
                           color: Colors.grey[900],
                           image: _galleryThumbnail != null
                               ? DecorationImage(
@@ -427,7 +415,8 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
                         ),
                         child: _galleryThumbnail == null
                             ? Icon(Icons.photo_library_rounded,
-                                color: Colors.white.withOpacity(0.6), size: 22)
+                                color: Colors.white.withOpacity(0.6),
+                                size: 22)
                             : _lastGalleryAssetIsVideo
                                 ? const Align(
                                     alignment: Alignment.topRight,
@@ -452,7 +441,9 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
                         height: _isRecordingVideo ? 64 : 76,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: _isRecordingVideo ? Colors.red : Colors.white,
+                          color: _isRecordingVideo
+                              ? Colors.red
+                              : Colors.white,
                           border: Border.all(
                             color: Colors.white.withOpacity(0.8),
                             width: _isRecordingVideo ? 4 : 5,
