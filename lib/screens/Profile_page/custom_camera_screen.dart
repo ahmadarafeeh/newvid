@@ -182,9 +182,9 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
       final XFile photo = await _controller!.takePicture();
       Uint8List bytes = await photo.readAsBytes();
 
-      // The camera package saves front camera photos as a mirror image
-      // (left-right flipped). Flip horizontally so the result looks natural,
-      // matching how Instagram and Snapchat handle front camera photos.
+      // The camera package saves front camera photos as a mirror image.
+      // Flip horizontally so the result looks natural — same as Instagram
+      // and Snapchat.
       if (_isFrontCamera) {
         final decoded = img.decodeJpg(bytes);
         if (decoded != null) {
@@ -206,9 +206,7 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
       }
     } catch (e) {
       await _logError('_capturePhoto', e);
-      if (mounted) {
-        _showError('Could not capture photo. Please try again.');
-      }
+      if (mounted) _showError('Could not capture photo. Please try again.');
     } finally {
       if (mounted) setState(() => _isCapturing = false);
     }
@@ -316,6 +314,41 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
   }
 
   // ===========================================================================
+  // PREVIEW WIDGET
+  // The camera plugin reports its preview size in landscape (width > height).
+  // In portrait we swap the dimensions so FittedBox.cover fills the screen
+  // without any vertical stretching.
+  // ===========================================================================
+
+  Widget _buildPreview() {
+    if (!_isInitialized || _controller == null) {
+      return const Center(
+          child: CircularProgressIndicator(color: Colors.white));
+    }
+
+    final previewSize = _controller!.value.previewSize;
+    if (previewSize == null) {
+      return CameraPreview(_controller!);
+    }
+
+    // previewSize is always landscape (long side first on iOS/Android).
+    // In portrait orientation we want: width = short side, height = long side.
+    final double previewW = previewSize.height; // portrait width
+    final double previewH = previewSize.width;  // portrait height
+
+    return ClipRect(
+      child: FittedBox(
+        fit: BoxFit.cover,
+        child: SizedBox(
+          width: previewW,
+          height: previewH,
+          child: CameraPreview(_controller!),
+        ),
+      ),
+    );
+  }
+
+  // ===========================================================================
   // BUILD
   // ===========================================================================
 
@@ -325,17 +358,8 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // ── Camera preview ───────────────────────────────────────────────
-          if (_isInitialized && _controller != null)
-            Positioned.fill(
-              child: CameraPreview(_controller!),
-            )
-          else
-            const Positioned.fill(
-              child: Center(
-                child: CircularProgressIndicator(color: Colors.white),
-              ),
-            ),
+          // ── Camera preview — fills screen, correct aspect ratio ──────────
+          Positioned.fill(child: _buildPreview()),
 
           // ── Top bar ──────────────────────────────────────────────────────
           Positioned(
@@ -451,9 +475,8 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
                         height: _isRecordingVideo ? 64 : 76,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: _isRecordingVideo
-                              ? Colors.red
-                              : Colors.white,
+                          color:
+                              _isRecordingVideo ? Colors.red : Colors.white,
                           border: Border.all(
                             color: Colors.white.withOpacity(0.8),
                             width: _isRecordingVideo ? 4 : 5,
