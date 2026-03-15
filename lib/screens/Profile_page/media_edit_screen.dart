@@ -73,14 +73,8 @@ const List<_Filter> _filters = [
 
 class _FontOption {
   final String label;
-  final String? family; // null = default system font
-  final FontWeight weight;
-
-  const _FontOption({
-    required this.label,
-    this.family,
-    this.weight = FontWeight.w800,
-  });
+  final String? family;
+  const _FontOption({required this.label, this.family});
 }
 
 const List<_FontOption> _fonts = [
@@ -88,7 +82,7 @@ const List<_FontOption> _fonts = [
   _FontOption(label: 'Serif', family: 'Georgia'),
   _FontOption(label: 'Mono', family: 'Courier'),
   _FontOption(label: 'Classic', family: 'Times New Roman'),
-  _FontOption(label: 'Round', family: 'Helvetica Neue', weight: FontWeight.w700),
+  _FontOption(label: 'Round', family: 'Helvetica Neue'),
 ];
 
 // =============================================================================
@@ -152,12 +146,14 @@ const List<Color> _textColors = [
 // CONSTANTS
 // =============================================================================
 
-const double _topBarHeight   = 56.0;
-const double _toolBarHeight  = 76.0;  // slightly taller so label is not cut
-const double _filterHeight   = 100.0;
+const double _topBarHeight  = 56.0;
+const double _toolBarHeight = 76.0;
+const double _filterHeight  = 100.0;
+const double _minFontSize   = 16.0;
+const double _maxFontSize   = 72.0;
 
-const double _minFontSize = 16.0;
-const double _maxFontSize = 72.0;
+/// Height of the trash drop zone at the bottom of the image area.
+const double _trashZoneHeight = 80.0;
 
 // =============================================================================
 // MEDIA EDIT SCREEN
@@ -185,6 +181,11 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   int? _selectedOverlayIndex;
   bool _isRendering = false;
   int _rotationQuarters = 0;
+
+  // ── Drag-to-trash state ──────────────────────────────────────────────────
+  bool _isDragging = false;       // true while user is dragging any overlay
+  int? _draggingIndex;            // which overlay is being dragged
+  bool _isOverTrash = false;      // true when drag is inside the trash zone
 
   // ── Text-editing state ───────────────────────────────────────────────────
   bool _isTyping = false;
@@ -218,6 +219,55 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
       rotated = img.copyRotate(rotated, angle: 90);
     }
     return Uint8List.fromList(img.encodeJpg(rotated, quality: 92));
+  }
+
+  // ===========================================================================
+  // DRAG-TO-TRASH HELPERS
+  // ===========================================================================
+
+  /// Returns true when the overlay's current fractional position puts it
+  /// inside the trash drop zone (bottom [_trashZoneHeight]px of image area).
+  bool _isPositionOverTrash(Offset fractionalPos, double imageHeight) {
+    final absY = fractionalPos.dy * imageHeight;
+    return absY >= imageHeight - _trashZoneHeight;
+  }
+
+  void _onDragStart(int index) {
+    setState(() {
+      _isDragging = true;
+      _draggingIndex = index;
+      _selectedOverlayIndex = index;
+      _isOverTrash = false;
+    });
+  }
+
+  void _onDragUpdate(
+      int index, DragUpdateDetails details, double screenWidth, double imageHeight) {
+    final overlay = _textOverlays[index];
+    final newPos = Offset(
+      (overlay.position.dx + details.delta.dx / screenWidth).clamp(0.0, 0.9),
+      (overlay.position.dy + details.delta.dy / imageHeight).clamp(0.0, 0.99),
+    );
+
+    setState(() {
+      _textOverlays[index] = overlay.copyWith(position: newPos);
+      _isOverTrash = _isPositionOverTrash(newPos, imageHeight);
+    });
+  }
+
+  void _onDragEnd(int index, double imageHeight) {
+    final overlay = _textOverlays[index];
+    final overTrash = _isPositionOverTrash(overlay.position, imageHeight);
+
+    setState(() {
+      _isDragging = false;
+      _draggingIndex = null;
+      _isOverTrash = false;
+      if (overTrash) {
+        _textOverlays.removeAt(index);
+        _selectedOverlayIndex = null;
+      }
+    });
   }
 
   // ===========================================================================
@@ -271,6 +321,7 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
     setState(() {
       _isRendering = true;
       _selectedOverlayIndex = null;
+      _isDragging = false;
     });
     await Future.delayed(const Duration(milliseconds: 120));
 
@@ -318,34 +369,28 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   }
 
   // ===========================================================================
-  // OVERLAY TEXT STYLE HELPER
+  // TEXT STYLE HELPERS
   // ===========================================================================
 
-  TextStyle _overlayStyle(_TextOverlay overlay) {
-    final font = _fonts[overlay.fontIndex];
-    return TextStyle(
-      fontFamily: font.family,
-      fontSize: overlay.fontSize,
-      fontWeight: overlay.isBold ? FontWeight.w800 : FontWeight.w400,
-      color: overlay.color,
-      shadows: const [
-        Shadow(offset: Offset(1, 1), blurRadius: 4, color: Colors.black54),
-      ],
-    );
-  }
+  TextStyle _overlayStyle(_TextOverlay o) => TextStyle(
+        fontFamily: _fonts[o.fontIndex].family,
+        fontSize: o.fontSize,
+        fontWeight: o.isBold ? FontWeight.w800 : FontWeight.w400,
+        color: o.color,
+        shadows: const [
+          Shadow(offset: Offset(1, 1), blurRadius: 4, color: Colors.black54),
+        ],
+      );
 
-  TextStyle _overlayShadowStyle(_TextOverlay overlay) {
-    final font = _fonts[overlay.fontIndex];
-    return TextStyle(
-      fontFamily: font.family,
-      fontSize: overlay.fontSize,
-      fontWeight: overlay.isBold ? FontWeight.w800 : FontWeight.w400,
-      foreground: Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3
-        ..color = Colors.black.withOpacity(0.45),
-    );
-  }
+  TextStyle _overlayShadowStyle(_TextOverlay o) => TextStyle(
+        fontFamily: _fonts[o.fontIndex].family,
+        fontSize: o.fontSize,
+        fontWeight: o.isBold ? FontWeight.w800 : FontWeight.w400,
+        foreground: Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3
+          ..color = Colors.black.withOpacity(0.45),
+      );
 
   // ===========================================================================
   // BUILD
@@ -370,12 +415,12 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // ── Main editing UI ────────────────────────────────────────────
+          // ── Main editing column ─────────────────────────────────────────
           Column(
             children: [
               SizedBox(height: topPadding),
 
-              // ── Top bar ──────────────────────────────────────────────
+              // Top bar
               SizedBox(
                 height: _topBarHeight,
                 child: Padding(
@@ -425,106 +470,143 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                 ),
               ),
 
-              // ── Image + overlays ─────────────────────────────────────
+              // Image area + overlays + trash zone
               SizedBox(
                 height: imageHeight,
-                child: GestureDetector(
-                  onTap: () =>
-                      setState(() => _selectedOverlayIndex = null),
-                  child: RepaintBoundary(
-                    key: _previewKey,
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: ColorFiltered(
-                            colorFilter: ColorFilter.matrix(
-                                _filters[_selectedFilterIndex].matrix),
-                            child: Transform.rotate(
-                              angle: _rotationQuarters * 3.14159265 / 2,
-                              child: Image.memory(
-                                widget.imageBytes,
-                                fit: BoxFit.contain,
-                                width: double.infinity,
-                                height: double.infinity,
+                child: Stack(
+                  children: [
+                    // Filtered image (captured in RepaintBoundary)
+                    Positioned.fill(
+                      child: GestureDetector(
+                        onTap: () => setState(
+                            () => _selectedOverlayIndex = null),
+                        child: RepaintBoundary(
+                          key: _previewKey,
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                child: ColorFiltered(
+                                  colorFilter: ColorFilter.matrix(
+                                      _filters[_selectedFilterIndex].matrix),
+                                  child: Transform.rotate(
+                                    angle:
+                                        _rotationQuarters * 3.14159265 / 2,
+                                    child: Image.memory(
+                                      widget.imageBytes,
+                                      fit: BoxFit.contain,
+                                      width: double.infinity,
+                                      height: double.infinity,
+                                    ),
+                                  ),
+                                ),
+                              ),
+
+                              // Text overlays — draggable, no delete X
+                              ..._textOverlays.asMap().entries.map((entry) {
+                                final index = entry.key;
+                                final overlay = entry.value;
+                                final isDraggingThis =
+                                    _draggingIndex == index;
+
+                                return Positioned(
+                                  left: (overlay.position.dx *
+                                          screenSize.width)
+                                      .clamp(0.0, screenSize.width - 10),
+                                  top: (overlay.position.dy * imageHeight)
+                                      .clamp(0.0, imageHeight - 10),
+                                  child: GestureDetector(
+                                    onTap: () => setState(() =>
+                                        _selectedOverlayIndex = index),
+                                    onPanStart: (_) => _onDragStart(index),
+                                    onPanUpdate: (d) => _onDragUpdate(
+                                        index, d, screenSize.width, imageHeight),
+                                    onPanEnd: (_) =>
+                                        _onDragEnd(index, imageHeight),
+                                    child: AnimatedOpacity(
+                                      opacity: (isDraggingThis && _isOverTrash)
+                                          ? 0.4
+                                          : 1.0,
+                                      duration:
+                                          const Duration(milliseconds: 100),
+                                      child: Stack(
+                                        clipBehavior: Clip.none,
+                                        children: [
+                                          Text(overlay.text,
+                                              style: _overlayShadowStyle(
+                                                  overlay)),
+                                          Text(overlay.text,
+                                              style: _overlayStyle(overlay)),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // ── Trash zone — visible only while dragging ──────────
+                    if (_isDragging)
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          height: _trashZoneHeight,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: _isOverTrash
+                                  ? [
+                                      Colors.red.withOpacity(0.75),
+                                      Colors.red.withOpacity(0.0),
+                                    ]
+                                  : [
+                                      Colors.black.withOpacity(0.55),
+                                      Colors.black.withOpacity(0.0),
+                                    ],
+                            ),
+                          ),
+                          child: Align(
+                            alignment: Alignment.bottomCenter,
+                            child: Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 150),
+                                width: _isOverTrash ? 52 : 40,
+                                height: _isOverTrash ? 52 : 40,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: _isOverTrash
+                                      ? Colors.red
+                                      : Colors.white.withOpacity(0.25),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.6),
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: Icon(
+                                  _isOverTrash
+                                      ? Icons.delete
+                                      : Icons.delete_outline,
+                                  color: Colors.white,
+                                  size: _isOverTrash ? 26 : 20,
+                                ),
                               ),
                             ),
                           ),
                         ),
-                        ..._textOverlays.asMap().entries.map((entry) {
-                          final index = entry.key;
-                          final overlay = entry.value;
-                          final isSelected =
-                              _selectedOverlayIndex == index;
-
-                          return Positioned(
-                            left: (overlay.position.dx *
-                                    screenSize.width)
-                                .clamp(0.0, screenSize.width - 10),
-                            top: (overlay.position.dy * imageHeight)
-                                .clamp(0.0, imageHeight - 10),
-                            child: GestureDetector(
-                              onTap: () => setState(
-                                  () => _selectedOverlayIndex = index),
-                              onPanUpdate: (d) {
-                                setState(() {
-                                  _textOverlays[index] =
-                                      overlay.copyWith(
-                                    position: Offset(
-                                      (overlay.position.dx +
-                                              d.delta.dx /
-                                                  screenSize.width)
-                                          .clamp(0.0, 0.9),
-                                      (overlay.position.dy +
-                                              d.delta.dy /
-                                                  imageHeight)
-                                          .clamp(0.0, 0.9),
-                                    ),
-                                  );
-                                });
-                              },
-                              child: Stack(
-                                clipBehavior: Clip.none,
-                                children: [
-                                  Text(overlay.text,
-                                      style: _overlayShadowStyle(overlay)),
-                                  Text(overlay.text,
-                                      style: _overlayStyle(overlay)),
-                                  if (isSelected)
-                                    Positioned(
-                                      top: -14,
-                                      right: -14,
-                                      child: GestureDetector(
-                                        onTap: () => setState(() {
-                                          _textOverlays.removeAt(index);
-                                          _selectedOverlayIndex = null;
-                                        }),
-                                        child: Container(
-                                          width: 24,
-                                          height: 24,
-                                          decoration: const BoxDecoration(
-                                              color: Colors.red,
-                                              shape: BoxShape.circle),
-                                          child: const Icon(
-                                              Icons.close,
-                                              color: Colors.white,
-                                              size: 14),
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ],
-                    ),
-                  ),
+                      ),
+                  ],
                 ),
               ),
 
-              // ── Tool bar ─────────────────────────────────────────────
-              // FIX 6: explicit height + padding ensures labels are never
-              // overlapped by the filter strip below.
+              // Tool bar
               Container(
                 height: _toolBarHeight,
                 color: const Color(0xFF111111),
@@ -548,7 +630,7 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                 ),
               ),
 
-              // ── Filter strip ─────────────────────────────────────────
+              // Filter strip
               Container(
                 height: _filterHeight,
                 color: Colors.black,
@@ -563,13 +645,13 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                       onTap: () =>
                           setState(() => _selectedFilterIndex = i),
                       child: Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 5),
+                        margin:
+                            const EdgeInsets.symmetric(horizontal: 5),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             AnimatedContainer(
-                              duration:
-                                  const Duration(milliseconds: 150),
+                              duration: const Duration(milliseconds: 150),
                               width: 60,
                               height: 60,
                               decoration: BoxDecoration(
@@ -625,16 +707,13 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                 color: Colors.black.withOpacity(0.55),
                 child: Column(
                   children: [
-                    // FIX 5: push controls down from the very top
                     SizedBox(height: topPadding + 12),
 
                     // Cancel | colours | bold | Done
                     Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 0),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
                       child: Row(
                         children: [
-                          // Cancel
                           GestureDetector(
                             onTap: _cancelText,
                             child: const Padding(
@@ -645,26 +724,21 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                                       color: Colors.white, fontSize: 15)),
                             ),
                           ),
-
-                          // Colour swatches
                           Expanded(
                             child: SingleChildScrollView(
                               scrollDirection: Axis.horizontal,
                               child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.center,
-                                children:
-                                    _textColors.map((c) {
-                                  final selected =
-                                      _currentTextColor == c;
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: _textColors.map((c) {
+                                  final selected = _currentTextColor == c;
                                   return GestureDetector(
                                     onTap: () => setState(
                                         () => _currentTextColor = c),
                                     child: AnimatedContainer(
                                       duration: const Duration(
                                           milliseconds: 150),
-                                      margin: const EdgeInsets
-                                          .symmetric(horizontal: 4),
+                                      margin: const EdgeInsets.symmetric(
+                                          horizontal: 4),
                                       width: selected ? 28 : 22,
                                       height: selected ? 28 : 22,
                                       decoration: BoxDecoration(
@@ -673,10 +747,8 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                                         border: Border.all(
                                           color: selected
                                               ? Colors.white
-                                              : Colors.white
-                                                  .withOpacity(0.3),
-                                          width:
-                                              selected ? 2.5 : 1.5,
+                                              : Colors.white.withOpacity(0.3),
+                                          width: selected ? 2.5 : 1.5,
                                         ),
                                       ),
                                     ),
@@ -685,8 +757,7 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                               ),
                             ),
                           ),
-
-                          // FIX 2: Bold toggle button
+                          // Bold toggle
                           GestureDetector(
                             onTap: () => setState(
                                 () => _currentIsBold = !_currentIsBold),
@@ -702,21 +773,17 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                                     : Colors.white.withOpacity(0.15),
                               ),
                               child: Center(
-                                child: Text(
-                                  'B',
-                                  style: TextStyle(
-                                    color: _currentIsBold
-                                        ? Colors.black
-                                        : Colors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                                ),
+                                child: Text('B',
+                                    style: TextStyle(
+                                      color: _currentIsBold
+                                          ? Colors.black
+                                          : Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w900,
+                                    )),
                               ),
                             ),
                           ),
-
-                          // Done
                           GestureDetector(
                             onTap: _confirmText,
                             child: const Padding(
@@ -735,22 +802,21 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
 
                     const SizedBox(height: 10),
 
-                    // FIX 4: Font selector row
+                    // Font selector
                     SizedBox(
                       height: 36,
                       child: ListView.builder(
                         scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12),
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 12),
                         itemCount: _fonts.length,
                         itemBuilder: (ctx, i) {
                           final isSelected = _currentFontIndex == i;
                           return GestureDetector(
-                            onTap: () => setState(
-                                () => _currentFontIndex = i),
+                            onTap: () =>
+                                setState(() => _currentFontIndex = i),
                             child: AnimatedContainer(
-                              duration:
-                                  const Duration(milliseconds: 150),
+                              duration: const Duration(milliseconds: 150),
                               margin: const EdgeInsets.symmetric(
                                   horizontal: 5),
                               padding: const EdgeInsets.symmetric(
@@ -759,8 +825,7 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                                 color: isSelected
                                     ? Colors.white
                                     : Colors.white.withOpacity(0.12),
-                                borderRadius:
-                                    BorderRadius.circular(16),
+                                borderRadius: BorderRadius.circular(16),
                               ),
                               child: Text(
                                 _fonts[i].label,
@@ -779,13 +844,12 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                       ),
                     ),
 
-                    // Centred text field + FIX 3: size slider on the right
+                    // Text field + size slider
                     Expanded(
                       child: GestureDetector(
                         onTap: () {},
                         child: Stack(
                           children: [
-                            // Text field centred in the available space
                             Center(
                               child: IntrinsicWidth(
                                 child: TextField(
@@ -797,9 +861,9 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                                   keyboardType: TextInputType.multiline,
                                   textInputAction: TextInputAction.done,
                                   onSubmitted: (_) => _confirmText(),
-                                  // FIX 1: no hintText — completely removed
                                   style: TextStyle(
-                                    fontFamily: _fonts[_currentFontIndex].family,
+                                    fontFamily:
+                                        _fonts[_currentFontIndex].family,
                                     color: _currentTextColor,
                                     fontSize: _currentFontSize,
                                     fontWeight: _currentIsBold
@@ -807,8 +871,8 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                                         : FontWeight.w400,
                                     shadows: [
                                       Shadow(
-                                        color: Colors.black
-                                            .withOpacity(0.6),
+                                        color:
+                                            Colors.black.withOpacity(0.6),
                                         offset: const Offset(1, 1),
                                         blurRadius: 4,
                                       ),
@@ -816,7 +880,6 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                                   ),
                                   decoration: const InputDecoration(
                                     border: InputBorder.none,
-                                    // FIX 1: hintText is empty/absent
                                     isDense: true,
                                     contentPadding: EdgeInsets.zero,
                                   ),
@@ -825,7 +888,7 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                               ),
                             ),
 
-                            // FIX 3: Vertical font-size slider — right side
+                            // Vertical size slider (right side)
                             Positioned(
                               right: 16,
                               top: 0,
@@ -855,7 +918,7 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
 }
 
 // =============================================================================
-// VERTICAL SIZE SLIDER  (TikTok-style)
+// VERTICAL SIZE SLIDER
 // =============================================================================
 
 class _VerticalSizeSlider extends StatelessWidget {
@@ -873,28 +936,23 @@ class _VerticalSizeSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Track height — use LayoutBuilder to get the available vertical space
     return LayoutBuilder(builder: (ctx, constraints) {
-      final trackH = constraints.maxHeight.isFinite
-          ? constraints.maxHeight
-          : 200.0;
-      // fraction: 0 = smallest (bottom), 1 = largest (top)
+      final trackH =
+          constraints.maxHeight.isFinite ? constraints.maxHeight : 200.0;
       final fraction = (value - min) / (max - min);
-      final handleY = trackH * (1 - fraction); // top offset of handle centre
+      final handleY = trackH * (1 - fraction);
 
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
         onVerticalDragUpdate: (d) {
           final newFraction =
-              ((1 - (handleY + d.delta.dy) / trackH)).clamp(0.0, 1.0);
-          final newSize = min + newFraction * (max - min);
-          onChanged(newSize);
+              (1 - (handleY + d.delta.dy) / trackH).clamp(0.0, 1.0);
+          onChanged(min + newFraction * (max - min));
         },
         onTapDown: (d) {
           final newFraction =
               (1 - d.localPosition.dy / trackH).clamp(0.0, 1.0);
-          final newSize = min + newFraction * (max - min);
-          onChanged(newSize);
+          onChanged(min + newFraction * (max - min));
         },
         child: SizedBox(
           width: 36,
@@ -902,7 +960,6 @@ class _VerticalSizeSlider extends StatelessWidget {
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              // Track line
               Positioned(
                 left: 17,
                 top: 0,
@@ -915,7 +972,6 @@ class _VerticalSizeSlider extends StatelessWidget {
                   ),
                 ),
               ),
-              // Filled portion (bottom to handle)
               Positioned(
                 left: 17,
                 top: handleY,
@@ -928,7 +984,6 @@ class _VerticalSizeSlider extends StatelessWidget {
                   ),
                 ),
               ),
-              // Handle circle
               Positioned(
                 left: 0,
                 top: handleY - 12,
