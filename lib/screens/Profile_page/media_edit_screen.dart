@@ -18,180 +18,52 @@ class _Filter {
 
 const List<_Filter> _filters = [
   _Filter(name: 'Normal', matrix: [
-    1,
-    0,
-    0,
-    0,
-    0,
-    0,
-    1,
-    0,
-    0,
-    0,
-    0,
-    0,
-    1,
-    0,
-    0,
-    0,
-    0,
-    0,
-    1,
-    0,
+    1, 0, 0, 0, 0,
+    0, 1, 0, 0, 0,
+    0, 0, 1, 0, 0,
+    0, 0, 0, 1, 0,
   ]),
   _Filter(name: 'Vivid', matrix: [
-    1.4,
-    -0.1,
-    -0.1,
-    0,
-    0,
-    -0.1,
-    1.3,
-    -0.1,
-    0,
-    0,
-    -0.1,
-    -0.1,
-    1.4,
-    0,
-    0,
-    0,
-    0,
-    0,
-    1,
-    0,
+    1.4, -0.1, -0.1, 0, 0,
+    -0.1, 1.3, -0.1, 0, 0,
+    -0.1, -0.1, 1.4, 0, 0,
+    0, 0, 0, 1, 0,
   ]),
   _Filter(name: 'Warm', matrix: [
-    1.2,
-    0.0,
-    0.0,
-    0,
-    15,
-    0.0,
-    1.0,
-    0.0,
-    0,
-    5,
-    0.0,
-    0.0,
-    0.8,
-    0,
-    -10,
-    0,
-    0,
-    0,
-    1,
-    0,
+    1.2, 0.0, 0.0, 0, 15,
+    0.0, 1.0, 0.0, 0, 5,
+    0.0, 0.0, 0.8, 0, -10,
+    0, 0, 0, 1, 0,
   ]),
   _Filter(name: 'Cool', matrix: [
-    0.8,
-    0.0,
-    0.0,
-    0,
-    -10,
-    0.0,
-    1.0,
-    0.0,
-    0,
-    5,
-    0.0,
-    0.0,
-    1.2,
-    0,
-    15,
-    0,
-    0,
-    0,
-    1,
-    0,
+    0.8, 0.0, 0.0, 0, -10,
+    0.0, 1.0, 0.0, 0, 5,
+    0.0, 0.0, 1.2, 0, 15,
+    0, 0, 0, 1, 0,
   ]),
   _Filter(name: 'Noir', matrix: [
-    0.33,
-    0.59,
-    0.11,
-    0,
-    0,
-    0.33,
-    0.59,
-    0.11,
-    0,
-    0,
-    0.33,
-    0.59,
-    0.11,
-    0,
-    0,
-    0,
-    0,
-    0,
-    1,
-    0,
+    0.33, 0.59, 0.11, 0, 0,
+    0.33, 0.59, 0.11, 0, 0,
+    0.33, 0.59, 0.11, 0, 0,
+    0, 0, 0, 1, 0,
   ]),
   _Filter(name: 'Fade', matrix: [
-    1.0,
-    0,
-    0,
-    0,
-    40,
-    0,
-    1.0,
-    0,
-    0,
-    40,
-    0,
-    0,
-    1.0,
-    0,
-    40,
-    0,
-    0,
-    0,
-    0.85,
-    0,
+    1.0, 0, 0, 0, 40,
+    0, 1.0, 0, 0, 40,
+    0, 0, 1.0, 0, 40,
+    0, 0, 0, 0.85, 0,
   ]),
   _Filter(name: 'Chrome', matrix: [
-    0.78,
-    0.15,
-    0.07,
-    0,
-    0,
-    0.07,
-    0.84,
-    0.09,
-    0,
-    0,
-    0.07,
-    0.07,
-    0.86,
-    0,
-    0,
-    0,
-    0,
-    0,
-    1,
-    0,
+    0.78, 0.15, 0.07, 0, 0,
+    0.07, 0.84, 0.09, 0, 0,
+    0.07, 0.07, 0.86, 0, 0,
+    0, 0, 0, 1, 0,
   ]),
   _Filter(name: 'Lush', matrix: [
-    0.9,
-    0.1,
-    0.0,
-    0,
-    10,
-    0.0,
-    1.1,
-    0.0,
-    0,
-    5,
-    0.0,
-    0.1,
-    0.9,
-    0,
-    10,
-    0,
-    0,
-    0,
-    1,
-    0,
+    0.9, 0.1, 0.0, 0, 10,
+    0.0, 1.1, 0.0, 0, 5,
+    0.0, 0.1, 0.9, 0, 10,
+    0, 0, 0, 1, 0,
   ]),
 ];
 
@@ -257,12 +129,15 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   int? _selectedOverlayIndex;
   bool _isRendering = false;
 
-  // Text input
   final TextEditingController _textController = TextEditingController();
   Color _textColor = Colors.white;
 
-  // Rotation (multiples of 90)
   int _rotationQuarters = 0;
+
+  // Fixed heights for the bottom panel so image always gets the remaining space
+  static const double _topBarHeight = 56.0;
+  static const double _toolBarHeight = 72.0;
+  static const double _filterStripHeight = 100.0;
 
   @override
   void dispose() {
@@ -274,11 +149,7 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   // ROTATION
   // ===========================================================================
 
-  void _rotate() {
-    setState(() {
-      _rotationQuarters = (_rotationQuarters + 1) % 4;
-    });
-  }
+  void _rotate() => setState(() => _rotationQuarters = (_rotationQuarters + 1) % 4);
 
   Uint8List _applyRotation(Uint8List bytes) {
     if (_rotationQuarters == 0) return bytes;
@@ -296,6 +167,7 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   // ===========================================================================
 
   void _addTextOverlay() {
+    _textController.clear();
     showDialog(
       context: context,
       barrierColor: Colors.black87,
@@ -304,8 +176,10 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
         return StatefulBuilder(
           builder: (ctx, setDialogState) => AlertDialog(
             backgroundColor: const Color(0xFF1C1C1E),
-            title: const Text('Add Text',
-                style: TextStyle(color: Colors.white, fontSize: 16)),
+            title: const Text(
+              'Add Text',
+              style: TextStyle(color: Colors.white, fontSize: 16),
+            ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -315,21 +189,18 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
                     hintText: 'Type something...',
-                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)),
+                    hintStyle:
+                        TextStyle(color: Colors.white.withOpacity(0.4)),
                     border: const OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24),
-                    ),
+                        borderSide: BorderSide(color: Colors.white24)),
                     focusedBorder: const OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white54),
-                    ),
+                        borderSide: BorderSide(color: Colors.white54)),
                     enabledBorder: const OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24),
-                    ),
+                        borderSide: BorderSide(color: Colors.white24)),
                   ),
                   maxLines: 3,
                 ),
                 const SizedBox(height: 16),
-                // Color picker row
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
@@ -345,17 +216,20 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                     ].map((c) {
                       final selected = pickedColor == c;
                       return GestureDetector(
-                        onTap: () => setDialogState(() => pickedColor = c),
+                        onTap: () =>
+                            setDialogState(() => pickedColor = c),
                         child: Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 4),
+                          margin:
+                              const EdgeInsets.symmetric(horizontal: 4),
                           width: 28,
                           height: 28,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: c,
                             border: Border.all(
-                              color:
-                                  selected ? Colors.white : Colors.transparent,
+                              color: selected
+                                  ? Colors.white
+                                  : Colors.transparent,
                               width: 2.5,
                             ),
                           ),
@@ -373,7 +247,8 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                   Navigator.pop(ctx);
                 },
                 child: Text('Cancel',
-                    style: TextStyle(color: Colors.white.withOpacity(0.5))),
+                    style:
+                        TextStyle(color: Colors.white.withOpacity(0.5))),
               ),
               TextButton(
                 onPressed: () {
@@ -383,7 +258,7 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                       _textColor = pickedColor;
                       _textOverlays.add(_TextOverlay(
                         text: text,
-                        position: const Offset(0.1, 0.4),
+                        position: const Offset(0.1, 0.35),
                         color: pickedColor,
                       ));
                     });
@@ -393,7 +268,8 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                 },
                 child: const Text('Add',
                     style: TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w700)),
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700)),
               ),
             ],
           ),
@@ -403,25 +279,26 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   }
 
   // ===========================================================================
-  // RENDER FINAL IMAGE (flatten filter + text → bytes)
+  // RENDER & NEXT
   // ===========================================================================
 
   Future<Uint8List> _renderFinalImage() async {
-    setState(() => _isRendering = true);
-    try {
-      // Deselect any overlay so handles don't show in render
-      setState(() => _selectedOverlayIndex = null);
-      await Future.delayed(const Duration(milliseconds: 100));
+    setState(() {
+      _isRendering = true;
+      _selectedOverlayIndex = null;
+    });
+    await Future.delayed(const Duration(milliseconds: 120));
 
+    try {
       final boundary = _previewKey.currentContext!.findRenderObject()
           as RenderRepaintBoundary;
       final uiImage = await boundary.toImage(
         pixelRatio: MediaQuery.of(context).devicePixelRatio,
       );
-      final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
+      final byteData =
+          await uiImage.toByteData(format: ui.ImageByteFormat.png);
       final pngBytes = byteData!.buffer.asUint8List();
 
-      // Convert to JPEG for upload
       final decoded = img.decodePng(pngBytes);
       if (decoded != null) {
         return Uint8List.fromList(img.encodeJpg(decoded, quality: 92));
@@ -435,9 +312,7 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   Future<void> _onNext() async {
     try {
       final bytes = await _renderFinalImage();
-      // Apply rotation AFTER filter/text rendering
       final rotated = _applyRotation(bytes);
-
       if (mounted) {
         Navigator.push(
           context,
@@ -464,20 +339,35 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
+    final screenSize = MediaQuery.of(context).size;
+    final topPadding = MediaQuery.of(context).padding.top;
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+
+    // Image preview gets whatever space is left after the fixed panels
+    final imageHeight = screenSize.height -
+        topPadding -
+        _topBarHeight -
+        _toolBarHeight -
+        _filterStripHeight -
+        bottomPadding -
+        8; // small gap
 
     return Scaffold(
       backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // ── Top bar ─────────────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      body: Column(
+        children: [
+          // ── Safe area top spacer ─────────────────────────────────────
+          SizedBox(height: topPadding),
+
+          // ── Top bar ──────────────────────────────────────────────────
+          SizedBox(
+            height: _topBarHeight,
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Back
                   GestureDetector(
                     onTap: () => Navigator.pop(context),
                     child: Container(
@@ -486,7 +376,6 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                           color: Colors.white, size: 20),
                     ),
                   ),
-
                   const Text(
                     'Edit',
                     style: TextStyle(
@@ -495,8 +384,6 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-
-                  // Next button
                   GestureDetector(
                     onTap: _isRendering ? null : _onNext,
                     child: Container(
@@ -511,9 +398,7 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                               width: 18,
                               height: 18,
                               child: CircularProgressIndicator(
-                                color: Colors.black,
-                                strokeWidth: 2,
-                              ),
+                                  color: Colors.black, strokeWidth: 2),
                             )
                           : const Text(
                               'Next',
@@ -528,232 +413,247 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                 ],
               ),
             ),
+          ),
 
-            // ── Image preview with overlays ──────────────────────────────
-            Expanded(
-              child: GestureDetector(
-                onTap: () => setState(() => _selectedOverlayIndex = null),
-                child: RepaintBoundary(
-                  key: _previewKey,
-                  child: Stack(
-                    children: [
-                      // Filtered image
-                      Positioned.fill(
-                        child: ColorFiltered(
-                          colorFilter: ColorFilter.matrix(
-                              _filters[_selectedFilterIndex].matrix),
-                          child: Transform.rotate(
-                            angle: _rotationQuarters * 3.14159265 / 2,
-                            child: Image.memory(
-                              widget.imageBytes,
-                              fit: BoxFit.contain,
-                              width: double.infinity,
-                              height: double.infinity,
-                            ),
+          // ── Image preview ─────────────────────────────────────────────
+          SizedBox(
+            height: imageHeight,
+            child: GestureDetector(
+              onTap: () =>
+                  setState(() => _selectedOverlayIndex = null),
+              child: RepaintBoundary(
+                key: _previewKey,
+                child: Stack(
+                  children: [
+                    // Filtered + rotated image
+                    Positioned.fill(
+                      child: ColorFiltered(
+                        colorFilter: ColorFilter.matrix(
+                            _filters[_selectedFilterIndex].matrix),
+                        child: Transform.rotate(
+                          angle: _rotationQuarters * 3.14159265 / 2,
+                          child: Image.memory(
+                            widget.imageBytes,
+                            fit: BoxFit.contain,
+                            width: double.infinity,
+                            height: double.infinity,
                           ),
                         ),
                       ),
+                    ),
 
-                      // Text overlays
-                      ..._textOverlays.asMap().entries.map((entry) {
-                        final index = entry.key;
-                        final overlay = entry.value;
-                        final isSelected = _selectedOverlayIndex == index;
+                    // Draggable text overlays
+                    ..._textOverlays.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final overlay = entry.value;
+                      final isSelected =
+                          _selectedOverlayIndex == index;
 
-                        return Positioned(
-                          left: overlay.position.dx * size.width,
-                          top: overlay.position.dy * (size.height * 0.65),
-                          child: GestureDetector(
-                            onTap: () =>
-                                setState(() => _selectedOverlayIndex = index),
-                            onPanUpdate: (details) {
-                              setState(() {
-                                _textOverlays[index] = overlay.copyWith(
-                                  position: Offset(
-                                    (overlay.position.dx +
-                                            details.delta.dx / size.width)
-                                        .clamp(0.0, 0.85),
-                                    (overlay.position.dy +
-                                            details.delta.dy /
-                                                (size.height * 0.65))
-                                        .clamp(0.0, 0.90),
-                                  ),
-                                );
-                              });
-                            },
-                            child: Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                // Shadow for readability
-                                Text(
-                                  overlay.text,
-                                  style: TextStyle(
-                                    fontSize: overlay.fontSize,
-                                    fontWeight: overlay.isBold
-                                        ? FontWeight.w800
-                                        : FontWeight.w400,
-                                    color: Colors.black.withOpacity(0.4),
-                                    shadows: const [
-                                      Shadow(
-                                        offset: Offset(1, 1),
-                                        blurRadius: 3,
-                                        color: Colors.black45,
-                                      )
-                                    ],
-                                  ),
+                      return Positioned(
+                        left: overlay.position.dx * screenSize.width,
+                        top: overlay.position.dy * imageHeight,
+                        child: GestureDetector(
+                          onTap: () => setState(
+                              () => _selectedOverlayIndex = index),
+                          onPanUpdate: (details) {
+                            setState(() {
+                              _textOverlays[index] =
+                                  overlay.copyWith(
+                                position: Offset(
+                                  (overlay.position.dx +
+                                          details.delta.dx /
+                                              screenSize.width)
+                                      .clamp(0.0, 0.85),
+                                  (overlay.position.dy +
+                                          details.delta.dy /
+                                              imageHeight)
+                                      .clamp(0.0, 0.88),
                                 ),
-                                Text(
-                                  overlay.text,
-                                  style: TextStyle(
-                                    fontSize: overlay.fontSize,
-                                    fontWeight: overlay.isBold
-                                        ? FontWeight.w800
-                                        : FontWeight.w400,
-                                    color: overlay.color,
-                                    shadows: const [
-                                      Shadow(
-                                        offset: Offset(1, 1),
-                                        blurRadius: 4,
-                                        color: Colors.black54,
-                                      )
-                                    ],
-                                  ),
+                              );
+                            });
+                          },
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              // Shadow pass
+                              Text(
+                                overlay.text,
+                                style: TextStyle(
+                                  fontSize: overlay.fontSize,
+                                  fontWeight: overlay.isBold
+                                      ? FontWeight.w800
+                                      : FontWeight.w400,
+                                  color:
+                                      Colors.black.withOpacity(0.35),
+                                  shadows: const [
+                                    Shadow(
+                                      offset: Offset(1, 1),
+                                      blurRadius: 3,
+                                      color: Colors.black45,
+                                    ),
+                                  ],
                                 ),
-
-                                // Delete button when selected
-                                if (isSelected)
-                                  Positioned(
-                                    top: -12,
-                                    right: -12,
-                                    child: GestureDetector(
-                                      onTap: () => setState(() {
-                                        _textOverlays.removeAt(index);
-                                        _selectedOverlayIndex = null;
-                                      }),
-                                      child: Container(
-                                        width: 22,
-                                        height: 22,
-                                        decoration: const BoxDecoration(
-                                          color: Colors.red,
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: const Icon(Icons.close,
-                                            color: Colors.white, size: 14),
+                              ),
+                              // Colour pass
+                              Text(
+                                overlay.text,
+                                style: TextStyle(
+                                  fontSize: overlay.fontSize,
+                                  fontWeight: overlay.isBold
+                                      ? FontWeight.w800
+                                      : FontWeight.w400,
+                                  color: overlay.color,
+                                  shadows: const [
+                                    Shadow(
+                                      offset: Offset(1, 1),
+                                      blurRadius: 4,
+                                      color: Colors.black54,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              // Delete handle
+                              if (isSelected)
+                                Positioned(
+                                  top: -12,
+                                  right: -12,
+                                  child: GestureDetector(
+                                    onTap: () => setState(() {
+                                      _textOverlays.removeAt(index);
+                                      _selectedOverlayIndex = null;
+                                    }),
+                                    child: Container(
+                                      width: 22,
+                                      height: 22,
+                                      decoration: const BoxDecoration(
+                                        color: Colors.red,
+                                        shape: BoxShape.circle,
                                       ),
+                                      child: const Icon(Icons.close,
+                                          color: Colors.white,
+                                          size: 14),
                                     ),
                                   ),
-                              ],
-                            ),
+                                ),
+                            ],
                           ),
-                        );
-                      }).toList(),
-                    ],
-                  ),
+                        ),
+                      );
+                    }).toList(),
+                  ],
                 ),
               ),
             ),
+          ),
 
-            // ── Edit tool buttons ────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _EditToolButton(
-                    icon: Icons.text_fields_rounded,
-                    label: 'Text',
-                    onTap: _addTextOverlay,
-                  ),
-                  const SizedBox(width: 28),
-                  _EditToolButton(
-                    icon: Icons.rotate_90_degrees_cw_rounded,
-                    label: 'Rotate',
-                    onTap: _rotate,
-                  ),
-                ],
-              ),
+          // ── Tool buttons (Text + Rotate) ──────────────────────────────
+          Container(
+            height: _toolBarHeight,
+            color: const Color(0xFF111111),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _ToolButton(
+                  icon: Icons.text_fields_rounded,
+                  label: 'Text',
+                  onTap: _addTextOverlay,
+                ),
+                const SizedBox(width: 40),
+                _ToolButton(
+                  icon: Icons.rotate_90_degrees_cw_rounded,
+                  label: 'Rotate',
+                  onTap: _rotate,
+                ),
+              ],
             ),
+          ),
 
-            // ── Filter selector ──────────────────────────────────────────
-            SizedBox(
-              height: 96,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                itemCount: _filters.length,
-                itemBuilder: (ctx, i) {
-                  final isSelected = _selectedFilterIndex == i;
-                  return GestureDetector(
-                    onTap: () => setState(() => _selectedFilterIndex = i),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      margin: const EdgeInsets.symmetric(horizontal: 5),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 60,
-                            height: 60,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: isSelected
-                                    ? Colors.white
-                                    : Colors.transparent,
-                                width: 2.5,
-                              ),
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: ColorFiltered(
-                                colorFilter:
-                                    ColorFilter.matrix(_filters[i].matrix),
-                                child: Image.memory(
-                                  widget.imageBytes,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _filters[i].name,
-                            style: TextStyle(
+          // ── Filter strip ──────────────────────────────────────────────
+          Container(
+            height: _filterStripHeight,
+            color: Colors.black,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              itemCount: _filters.length,
+              itemBuilder: (ctx, i) {
+                final isSelected = _selectedFilterIndex == i;
+                return GestureDetector(
+                  onTap: () =>
+                      setState(() => _selectedFilterIndex = i),
+                  child: Container(
+                    margin:
+                        const EdgeInsets.symmetric(horizontal: 5),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          width: 60,
+                          height: 60,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
                               color: isSelected
                                   ? Colors.white
-                                  : Colors.white.withOpacity(0.5),
-                              fontSize: 10,
-                              fontWeight: isSelected
-                                  ? FontWeight.w600
-                                  : FontWeight.normal,
+                                  : Colors.transparent,
+                              width: 2.5,
                             ),
                           ),
-                        ],
-                      ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: ColorFiltered(
+                              colorFilter: ColorFilter.matrix(
+                                  _filters[i].matrix),
+                              child: Image.memory(
+                                widget.imageBytes,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _filters[i].name,
+                          style: TextStyle(
+                            color: isSelected
+                                ? Colors.white
+                                : Colors.white.withOpacity(0.45),
+                            fontSize: 10,
+                            fontWeight: isSelected
+                                ? FontWeight.w600
+                                : FontWeight.normal,
+                          ),
+                        ),
+                      ],
                     ),
-                  );
-                },
-              ),
+                  ),
+                );
+              },
             ),
+          ),
 
-            const SizedBox(height: 8),
-          ],
-        ),
+          // ── Bottom safe area ──────────────────────────────────────────
+          SizedBox(height: bottomPadding),
+        ],
       ),
     );
   }
 }
 
 // =============================================================================
-// EDIT TOOL BUTTON
+// TOOL BUTTON
 // =============================================================================
 
-class _EditToolButton extends StatelessWidget {
+class _ToolButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
 
-  const _EditToolButton({
+  const _ToolButton({
     required this.icon,
     required this.label,
     required this.onTap,
@@ -770,7 +670,7 @@ class _EditToolButton extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.12),
+              color: Colors.white.withOpacity(0.13),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: Colors.white, size: 22),
@@ -779,7 +679,7 @@ class _EditToolButton extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.white.withOpacity(0.75),
               fontSize: 11,
             ),
           ),
