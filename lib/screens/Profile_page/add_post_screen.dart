@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:image/image.dart' as img;
 import 'package:Ratedly/providers/user_provider.dart';
 import 'package:Ratedly/resources/supabase_posts_methods.dart';
 import 'package:Ratedly/utils/colors.dart';
@@ -163,7 +162,8 @@ class _AddPostScreenState extends State<AddPostScreen>
         backgroundColor: mobileBackgroundColor,
         title: Text(
           'Ratedly Guidelines',
-          style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold),
+          style:
+              TextStyle(color: primaryColor, fontWeight: FontWeight.bold),
         ),
         content: Text.rich(
           TextSpan(children: [
@@ -173,7 +173,8 @@ class _AddPostScreenState extends State<AddPostScreen>
             ),
             TextSpan(
               text: 'permanently banned',
-              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                  color: Colors.red, fontWeight: FontWeight.bold),
             ),
             TextSpan(text: '.', style: TextStyle(color: primaryColor)),
           ]),
@@ -183,8 +184,8 @@ class _AddPostScreenState extends State<AddPostScreen>
             onPressed: () => Navigator.of(ctx).pop(true),
             child: Text(
               'I Understand',
-              style:
-                  TextStyle(color: primaryColor, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                  color: primaryColor, fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -295,7 +296,8 @@ class _AddPostScreenState extends State<AddPostScreen>
           );
         }
 
-        if (compressedImage != null && compressedImage.length > _maxFileSize) {
+        if (compressedImage != null &&
+            compressedImage.length > _maxFileSize) {
           compressedImage = await _compressUntilUnderLimit(compressedImage);
         }
 
@@ -434,22 +436,7 @@ class _AddPostScreenState extends State<AddPostScreen>
     return compressedImage;
   }
 
-  void _rotateImage() {
-    if (_file == null || _isVideo) return;
-    try {
-      final image = img.decodeImage(_file!);
-      if (image == null) return;
-      final rotated = img.copyRotate(image, angle: 90);
-      setState(() =>
-          _file = Uint8List.fromList(img.encodeJpg(rotated, quality: 80)));
-    } catch (e, stack) {
-      _logError(operation: '_rotateImage', error: e, stack: stack);
-      if (context.mounted) {
-        showSnackBar(
-            context, 'Please try again or contact us at ratedly9@gmail.com');
-      }
-    }
-  }
+
 
   // ===========================================================================
   // POST UPLOAD
@@ -599,8 +586,8 @@ class _AddPostScreenState extends State<AddPostScreen>
                   hintText: "Write a caption...",
                   hintStyle: TextStyle(color: primaryColor.withOpacity(0.6)),
                   border: InputBorder.none,
-                  contentPadding:
-                      const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                  contentPadding: const EdgeInsets.symmetric(
+                      vertical: 12, horizontal: 16),
                 ),
                 style: TextStyle(color: primaryColor),
                 maxLines: 3,
@@ -767,37 +754,7 @@ class _AddPostScreenState extends State<AddPostScreen>
                       ),
                       child: Image.memory(_file!, fit: BoxFit.cover),
                     ),
-                  if (!_isVideo && _file != null)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: blueColor,
-                          foregroundColor: primaryColor,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 24, vertical: 12),
-                        ),
-                        onPressed: () => showDialog<void>(
-                          context: context,
-                          builder: (context) => SimpleDialog(
-                            title: Text('Edit Image',
-                                style: TextStyle(color: primaryColor)),
-                            backgroundColor: mobileBackgroundColor,
-                            children: [
-                              SimpleDialogOption(
-                                onPressed: () {
-                                  Navigator.pop(context);
-                                  _rotateImage();
-                                },
-                                child: Text('Rotate 90°',
-                                    style: TextStyle(color: primaryColor)),
-                              ),
-                            ],
-                          ),
-                        ),
-                        child: const Text('Edit Photo'),
-                      ),
-                    ),
+
                   Padding(
                     padding: const EdgeInsets.all(12.0),
                     child: _buildCaptionInput(user),
@@ -883,8 +840,7 @@ class _PermissionSheet extends StatelessWidget {
               textAlign: TextAlign.center),
           const SizedBox(height: 28),
           if (isPermanent && onOpenSettings != null)
-            _Btn(
-                label: 'Open Settings', isPrimary: true, onTap: onOpenSettings!)
+            _Btn(label: 'Open Settings', isPrimary: true, onTap: onOpenSettings!)
           else
             _Btn(
                 label: 'Allow Access',
