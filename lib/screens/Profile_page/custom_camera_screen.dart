@@ -171,8 +171,20 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
   }
 
   // ===========================================================================
-  // CAPTURE
+  // SHUTTER — single entry point for the shutter button tap
+  //
+  // If a recording is already in progress, tap = stop video.
+  // If no recording, tap = take photo.
+  // This prevents the "tap to stop" being misread as "take photo".
   // ===========================================================================
+
+  Future<void> _onShutterTap() async {
+    if (_isRecordingVideo) {
+      await _stopVideoRecording();
+    } else {
+      await _capturePhoto();
+    }
+  }
 
   Future<void> _capturePhoto() async {
     if (_controller == null || !_isInitialized || _isCapturing) return;
@@ -182,9 +194,8 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
       final XFile photo = await _controller!.takePicture();
       Uint8List bytes = await photo.readAsBytes();
 
-      // The camera package saves front camera photos as a mirror image.
-      // Flip horizontally so the result looks natural — same as Instagram
-      // and Snapchat.
+      // Flip front camera horizontally so the result is not mirrored,
+      // matching how Instagram and Snapchat handle front camera photos.
       if (_isFrontCamera) {
         final decoded = img.decodeJpg(bytes);
         if (decoded != null) {
@@ -314,10 +325,7 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
   }
 
   // ===========================================================================
-  // PREVIEW WIDGET
-  // The camera plugin reports its preview size in landscape (width > height).
-  // In portrait we swap the dimensions so FittedBox.cover fills the screen
-  // without any vertical stretching.
+  // PREVIEW — correct aspect ratio (no vertical stretching)
   // ===========================================================================
 
   Widget _buildPreview() {
@@ -327,14 +335,12 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
     }
 
     final previewSize = _controller!.value.previewSize;
-    if (previewSize == null) {
-      return CameraPreview(_controller!);
-    }
+    if (previewSize == null) return CameraPreview(_controller!);
 
     // previewSize is always landscape (long side first on iOS/Android).
-    // In portrait orientation we want: width = short side, height = long side.
-    final double previewW = previewSize.height; // portrait width
-    final double previewH = previewSize.width;  // portrait height
+    // Swap for portrait: width = short side, height = long side.
+    final double previewW = previewSize.height;
+    final double previewH = previewSize.width;
 
     return ClipRect(
       child: FittedBox(
@@ -358,7 +364,7 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // ── Camera preview — fills screen, correct aspect ratio ──────────
+          // ── Camera preview ───────────────────────────────────────────────
           Positioned.fill(child: _buildPreview()),
 
           // ── Top bar ──────────────────────────────────────────────────────
@@ -465,10 +471,13 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
                     ),
 
                     // Shutter button
+                    // onTap  → _onShutterTap (stops video if recording, else photo)
+                    // onLongPressStart → starts video recording
+                    // onLongPressEnd is intentionally removed — user now taps
+                    // to stop recording instead of releasing the long press.
                     GestureDetector(
-                      onTap: _capturePhoto,
+                      onTap: _onShutterTap,
                       onLongPressStart: (_) => _startVideoRecording(),
-                      onLongPressEnd: (_) => _stopVideoRecording(),
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 150),
                         width: _isRecordingVideo ? 64 : 76,
@@ -512,23 +521,22 @@ class _CustomCameraScreenState extends State<CustomCameraScreen>
             ),
           ),
 
-          // ── Hint: hold for video ─────────────────────────────────────────
-          if (!_isRecordingVideo)
-            Positioned(
-              bottom: MediaQuery.of(context).padding.bottom + 120,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Text(
-                  'Hold for video',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.5),
-                    fontSize: 12,
-                    letterSpacing: 0.3,
-                  ),
+          // ── Hint ─────────────────────────────────────────────────────────
+          Positioned(
+            bottom: MediaQuery.of(context).padding.bottom + 120,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Text(
+                _isRecordingVideo ? 'Tap to stop' : 'Hold for video',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.5),
+                  fontSize: 12,
+                  letterSpacing: 0.3,
                 ),
               ),
             ),
+          ),
         ],
       ),
     );
