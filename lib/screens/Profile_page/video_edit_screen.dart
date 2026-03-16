@@ -194,11 +194,15 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   void _onPanelPageChanged(int page) {
     setState(() => _panelPage = page);
     if (page == 0) {
-      // Returning to Trim — pause the preview player so both don't clash.
+      // Returning to Trim page.
+      // Re-call loadVideo to re-register the Texture widget with the Flutter
+      // engine. The PageView rebuilds the VideoViewer on every page change,
+      // giving it a new Texture ID. Without this the VideoViewer shows blank.
+      _trimmer.loadVideo(videoFile: widget.videoFile);
       _videoController?.pause();
       if (mounted) setState(() => _isPlaying = false);
     } else {
-      // Entering Edit — start the preview player so edits look live.
+      // Entering Edit page — start the preview player so edits look live.
       _videoController?.play();
       if (mounted) {
         setState(() => _isPlaying = _videoController?.value.isPlaying ?? false);
