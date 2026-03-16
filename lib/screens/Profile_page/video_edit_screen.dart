@@ -564,54 +564,54 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
             height: videoH,
             child: Stack(children: [
 
-              // ── VideoViewer (Trimmer) ─────────────────────────────────────
-              // Positioned.fill MUST be a direct child of Stack — not nested
-              // inside Offstage — otherwise the widget renders at 0×0.
-              // Offstage wraps the whole Positioned so it stays in the tree
-              // (keeps Trimmer surface binding alive) but is invisible/inert
-              // when off-stage.
+              // ── VideoViewer + Preview player ──────────────────────────────
+              // IndexedStack keeps BOTH children fully in the render tree at
+              // all times — including their platform-view surfaces. This is
+              // critical for VideoViewer (video_trimmer) which owns a native
+              // texture: Offstage / Visibility drop platform views from the
+              // native layer causing the grey-screen-on-return bug.
+              // IndexedStack simply paints only the active child; the inactive
+              // child stays rendered but is covered and receives no hit events.
               Positioned.fill(
-                child: Offstage(
-                  offstage: _panelPage != 0,
-                  child: Container(
-                    color: Colors.black,
-                    child: VideoViewer(trimmer: _trimmer),
-                  ),
-                ),
-              ),
+                child: IndexedStack(
+                  index: _panelPage == 0 ? 0 : 1,
+                  children: [
+                    // Index 0 — Trim page: Trimmer's VideoViewer
+                    Container(
+                      color: Colors.black,
+                      child: VideoViewer(trimmer: _trimmer),
+                    ),
 
-              // ── Preview player ────────────────────────────────────────────
-              Positioned.fill(
-                child: Offstage(
-                  offstage: _panelPage == 0,
-                  child: GestureDetector(
-                    onTap: isDrawActive ? null : () {
-                      setState(() => _selectedOverlayIndex = null);
-                      _togglePlayPause();
-                    },
-                    onPanStart:  isDrawActive ? _onDrawStart  : null,
-                    onPanUpdate: isDrawActive ? _onDrawUpdate : null,
-                    onPanEnd:    isDrawActive ? _onDrawEnd    : null,
-                    child: ClipRect(
-                      child: ColorFiltered(
-                        colorFilter: ColorFilter.matrix(_currentMatrix),
-                        child: Transform.rotate(
-                          angle: _rotationQuarters * 3.14159265 / 2,
-                          child: _isVideoInitialized && _videoController != null
-                              ? FittedBox(
-                                  fit: BoxFit.cover,
-                                  child: SizedBox(
-                                    width:  _videoController!.value.size.width,
-                                    height: _videoController!.value.size.height,
-                                    child:  VideoPlayer(_videoController!),
-                                  ),
-                                )
-                              : const Center(
-                                  child: CircularProgressIndicator(color: Colors.white)),
+                    // Index 1 — Edit page: filtered + rotated preview player
+                    GestureDetector(
+                      onTap: isDrawActive ? null : () {
+                        setState(() => _selectedOverlayIndex = null);
+                        _togglePlayPause();
+                      },
+                      onPanStart:  isDrawActive ? _onDrawStart  : null,
+                      onPanUpdate: isDrawActive ? _onDrawUpdate : null,
+                      onPanEnd:    isDrawActive ? _onDrawEnd    : null,
+                      child: ClipRect(
+                        child: ColorFiltered(
+                          colorFilter: ColorFilter.matrix(_currentMatrix),
+                          child: Transform.rotate(
+                            angle: _rotationQuarters * 3.14159265 / 2,
+                            child: _isVideoInitialized && _videoController != null
+                                ? FittedBox(
+                                    fit: BoxFit.cover,
+                                    child: SizedBox(
+                                      width:  _videoController!.value.size.width,
+                                      height: _videoController!.value.size.height,
+                                      child:  VideoPlayer(_videoController!),
+                                    ),
+                                  )
+                                : const Center(
+                                    child: CircularProgressIndicator(color: Colors.white)),
+                          ),
                         ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
               ),
 
