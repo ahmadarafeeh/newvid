@@ -22,26 +22,26 @@ class VideoEditScreen extends StatefulWidget {
 class _VideoEditScreenState extends State<VideoEditScreen> {
   VideoPlayerController? _videoController;
   bool _isVideoInitialized = false;
-  bool _isPlaying = false;
+  bool _isPlaying          = false;
 
   // ── Editing state ─────────────────────────────────────────────────────────
-  int _selectedFilterIndex = 0;
-  EditAdjustments _adj = const EditAdjustments();
-  _ActiveTab _activeTab = _ActiveTab.filters;
+  int _selectedFilterIndex  = 0;
+  EditAdjustments _adj      = const EditAdjustments();
+  _ActiveTab _activeTab     = _ActiveTab.filters;
 
   // ── Text state ────────────────────────────────────────────────────────────
-  bool _isTyping = false;
+  bool _isTyping                    = false;
   final List<TextOverlay> _overlays = [];
   int? _selectedOverlayIndex;
   final TextEditingController _textCtrl = TextEditingController();
-  final FocusNode _textFocus = FocusNode();
-  Color _tColor = Colors.white;
-  double _tSize = 32.0;
-  bool _tBold = true;
-  int _tFont = 0;
+  final FocusNode _textFocus            = FocusNode();
+  Color  _tColor = Colors.white;
+  double _tSize  = 32.0;
+  bool   _tBold  = true;
+  int    _tFont  = 0;
 
   // ── Drag-to-trash ─────────────────────────────────────────────────────────
-  bool _isDragging = false;
+  bool _isDragging  = false;
   int? _dragIndex;
   bool _isOverTrash = false;
 
@@ -66,6 +66,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
     );
     await c.initialize();
     await c.setLooping(true);
+    await c.setVolume(0.0);
     await c.play();
     if (mounted) {
       setState(() {
@@ -78,11 +79,8 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
 
   void _togglePlayPause() {
     if (_videoController == null || !_isVideoInitialized) return;
-    if (_isPlaying) {
-      _videoController!.pause();
-    } else {
-      _videoController!.play();
-    }
+    if (_isPlaying) { _videoController!.pause(); }
+    else            { _videoController!.play();  }
     setState(() => _isPlaying = !_isPlaying);
   }
 
@@ -101,10 +99,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
     _textCtrl.clear();
     setState(() {
       _isTyping = true;
-      _tColor = Colors.white;
-      _tSize = 32.0;
-      _tBold = true;
-      _tFont = 0;
+      _tColor = Colors.white; _tSize = 32.0; _tBold = true; _tFont = 0;
     });
     Future.delayed(const Duration(milliseconds: 80), () {
       if (mounted) _textFocus.requestFocus();
@@ -115,13 +110,9 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
     final text = _textCtrl.text.trim();
     if (text.isNotEmpty) {
       setState(() => _overlays.add(TextOverlay(
-            text: text,
-            position: const Offset(0.5, 0.45),
-            color: _tColor,
-            fontSize: _tSize,
-            isBold: _tBold,
-            fontIndex: _tFont,
-          )));
+        text: text, position: const Offset(0.5, 0.45),
+        color: _tColor, fontSize: _tSize, isBold: _tBold, fontIndex: _tFont,
+      )));
     }
     _textCtrl.clear();
     _textFocus.unfocus();
@@ -138,14 +129,13 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   // DRAG-TO-TRASH
   // ===========================================================================
 
-  bool _overTrash(Offset pos, double h) => pos.dy * h >= h - kTrashZoneH;
+  bool _overTrash(Offset pos, double h) =>
+      pos.dy * h >= h - kTrashZoneH;
 
   void _onDragStart(int i) => setState(() {
-        _isDragging = true;
-        _dragIndex = i;
-        _selectedOverlayIndex = i;
-        _isOverTrash = false;
-      });
+    _isDragging = true; _dragIndex = i;
+    _selectedOverlayIndex = i; _isOverTrash = false;
+  });
 
   void _onDragUpdate(int i, DragUpdateDetails d, double w, double h) {
     final o = _overlays[i];
@@ -162,13 +152,8 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   void _onDragEnd(int i, double h) {
     final del = _overTrash(_overlays[i].position, h);
     setState(() {
-      _isDragging = false;
-      _dragIndex = null;
-      _isOverTrash = false;
-      if (del) {
-        _overlays.removeAt(i);
-        _selectedOverlayIndex = null;
-      }
+      _isDragging = false; _dragIndex = null; _isOverTrash = false;
+      if (del) { _overlays.removeAt(i); _selectedOverlayIndex = null; }
     });
   }
 
@@ -177,14 +162,16 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   // ===========================================================================
 
   void _onNext() {
-    Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => AddPostScreen(
-            initialVideoFile: widget.videoFile,
-            onPostUploaded: widget.onPostUploaded,
-          ),
-        ));
+    // Pause the preview so its audio doesn't bleed into the trim screen
+    _videoController?.pause();
+    setState(() => _isPlaying = false);
+
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => AddPostScreen(
+        initialVideoFile: widget.videoFile,
+        onPostUploaded: widget.onPostUploaded,
+      ),
+    ));
   }
 
   // ===========================================================================
@@ -193,16 +180,16 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
 
   static const double _topBar = 56.0;
   static const double _tabBar = 44.0;
-  static const double _panel = 100.0;
+  static const double _panel  = 100.0;
 
   @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
-    final topPad = MediaQuery.of(context).padding.top;
-    final botPad = MediaQuery.of(context).padding.bottom;
+    final topPad     = MediaQuery.of(context).padding.top;
+    final botPad     = MediaQuery.of(context).padding.bottom;
 
-    final videoH =
-        screenSize.height - topPad - _topBar - _tabBar - _panel - botPad - 8;
+    final videoH = screenSize.height -
+        topPad - _topBar - _tabBar - _panel - botPad - 8;
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
@@ -217,36 +204,28 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
               SizedBox(
                 height: _topBar,
                 child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       GestureDetector(
-                        onTap: () => Navigator.pop(context),
-                        child: const Padding(
-                            padding: EdgeInsets.all(8),
-                            child: Icon(Icons.arrow_back_ios_new,
-                                color: Colors.white, size: 20)),
+                        onTap: () {
+                          _videoController?.pause();
+                          Navigator.pop(context);
+                        },
+                        child: const Padding(padding: EdgeInsets.all(8),
+                          child: Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20)),
                       ),
-                      const Text('Edit Video',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 17,
-                              fontWeight: FontWeight.w600)),
+                      const Text('Edit Video', style: TextStyle(
+                        color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
                       GestureDetector(
                         onTap: _onNext,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 18, vertical: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                           decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(20)),
-                          child: const Text('Next',
-                              style: TextStyle(
-                                  color: Colors.black,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700)),
+                            color: Colors.white, borderRadius: BorderRadius.circular(20)),
+                          child: const Text('Next', style: TextStyle(
+                            color: Colors.black, fontSize: 14, fontWeight: FontWeight.w700)),
                         ),
                       ),
                     ],
@@ -273,36 +252,30 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                                   child: FittedBox(
                                     fit: BoxFit.cover,
                                     child: SizedBox(
-                                      width: _videoController!.value.size.width,
-                                      height:
-                                          _videoController!.value.size.height,
-                                      child: VideoPlayer(_videoController!),
+                                      width:  _videoController!.value.size.width,
+                                      height: _videoController!.value.size.height,
+                                      child:  VideoPlayer(_videoController!),
                                     ),
                                   ),
                                 )
                               : const Center(
-                                  child: CircularProgressIndicator(
-                                      color: Colors.white)),
+                                  child: CircularProgressIndicator(color: Colors.white)),
                         ),
                       ),
                     ),
 
                     // Play/pause icon
                     if (!_isPlaying)
-                      const Center(
-                          child: Icon(Icons.play_circle_outline,
-                              color: Colors.white54, size: 64)),
+                      const Center(child: Icon(Icons.play_circle_outline,
+                          color: Colors.white54, size: 64)),
 
                     // Text overlays
                     ..._buildOverlays(screenSize.width, videoH),
 
                     // Trash zone
                     if (_isDragging)
-                      Positioned(
-                          bottom: 0,
-                          left: 0,
-                          right: 0,
-                          child: TrashZone(isOverTrash: _isOverTrash)),
+                      Positioned(bottom: 0, left: 0, right: 0,
+                        child: TrashZone(isOverTrash: _isOverTrash)),
                   ],
                 ),
               ),
@@ -332,11 +305,11 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                 isBold: _tBold,
                 fontIndex: _tFont,
                 onColorChanged: (c) => setState(() => _tColor = c),
-                onSizeChanged: (v) => setState(() => _tSize = v),
-                onBoldToggle: () => setState(() => _tBold = !_tBold),
-                onFontChanged: (i) => setState(() => _tFont = i),
+                onSizeChanged:  (v) => setState(() => _tSize  = v),
+                onBoldToggle:   ()  => setState(() => _tBold  = !_tBold),
+                onFontChanged:  (i) => setState(() => _tFont  = i),
                 onConfirm: _confirmText,
-                onCancel: _cancelText,
+                onCancel:  _cancelText,
                 topPadding: topPad,
               ),
             ),
@@ -357,10 +330,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
           return Expanded(
             child: GestureDetector(
               onTap: () {
-                if (tab == _ActiveTab.text) {
-                  _enterTextMode();
-                  return;
-                }
+                if (tab == _ActiveTab.text) { _enterTextMode(); return; }
                 setState(() => _activeTab = tab);
               },
               child: Container(
@@ -369,28 +339,20 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(_tabIcon(tab),
-                        color: isActive
-                            ? Colors.white
-                            : Colors.white.withOpacity(0.45),
-                        size: 18),
+                      color: isActive ? Colors.white : Colors.white.withOpacity(0.45),
+                      size: 18),
                     const SizedBox(height: 2),
-                    Text(_tabLabel(tab),
-                        style: TextStyle(
-                          color: isActive
-                              ? Colors.white
-                              : Colors.white.withOpacity(0.45),
-                          fontSize: 9,
-                          fontWeight:
-                              isActive ? FontWeight.w700 : FontWeight.normal,
-                        )),
+                    Text(_tabLabel(tab), style: TextStyle(
+                      color: isActive ? Colors.white : Colors.white.withOpacity(0.45),
+                      fontSize: 9,
+                      fontWeight: isActive ? FontWeight.w700 : FontWeight.normal,
+                    )),
                     if (isActive)
                       Container(
                         margin: const EdgeInsets.only(top: 2),
-                        height: 2,
-                        width: 16,
+                        height: 2, width: 16,
                         decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(1)),
+                          color: Colors.white, borderRadius: BorderRadius.circular(1)),
                       ),
                   ],
                 ),
@@ -423,16 +385,16 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   List<Widget> _buildOverlays(double w, double h) {
     return _overlays.asMap().entries.map((entry) {
       final index = entry.key;
-      final o = entry.value;
+      final o     = entry.value;
       final draggingThis = _dragIndex == index;
       return Positioned(
         left: (o.position.dx * w).clamp(0.0, w - 10),
-        top: (o.position.dy * h).clamp(0.0, h - 10),
+        top:  (o.position.dy * h).clamp(0.0, h - 10),
         child: GestureDetector(
-          onTap: () => setState(() => _selectedOverlayIndex = index),
-          onPanStart: (_) => _onDragStart(index),
+          onTap:       () => setState(() => _selectedOverlayIndex = index),
+          onPanStart:  (_) => _onDragStart(index),
           onPanUpdate: (d) => _onDragUpdate(index, d, w, h),
-          onPanEnd: (_) => _onDragEnd(index, h),
+          onPanEnd:    (_) => _onDragEnd(index, h),
           child: AnimatedOpacity(
             opacity: (draggingThis && _isOverTrash) ? 0.4 : 1.0,
             duration: const Duration(milliseconds: 100),
@@ -448,23 +410,17 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
 
   IconData _tabIcon(_ActiveTab t) {
     switch (t) {
-      case _ActiveTab.filters:
-        return Icons.auto_fix_high_rounded;
-      case _ActiveTab.adjust:
-        return Icons.tune_rounded;
-      case _ActiveTab.text:
-        return Icons.text_fields_rounded;
+      case _ActiveTab.filters: return Icons.auto_fix_high_rounded;
+      case _ActiveTab.adjust:  return Icons.tune_rounded;
+      case _ActiveTab.text:    return Icons.text_fields_rounded;
     }
   }
 
   String _tabLabel(_ActiveTab t) {
     switch (t) {
-      case _ActiveTab.filters:
-        return 'Filters';
-      case _ActiveTab.adjust:
-        return 'Adjust';
-      case _ActiveTab.text:
-        return 'Text';
+      case _ActiveTab.filters: return 'Filters';
+      case _ActiveTab.adjust:  return 'Adjust';
+      case _ActiveTab.text:    return 'Text';
     }
   }
 }
