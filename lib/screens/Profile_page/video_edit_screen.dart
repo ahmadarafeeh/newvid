@@ -104,8 +104,40 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   @override
   void initState() {
     super.initState();
+    // Fire a synchronous-as-possible log so we know the screen opened.
+    // This uses addPostFrameCallback so context is available.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _logBoot());
     _initPreviewPlayer();
     _trimmer.loadVideo(videoFile: widget.videoFile);
+  }
+
+  /// Logs basic device + file info the moment the screen is first drawn.
+  /// This fires even if _initPreviewPlayer throws, so we always get a row.
+  Future<void> _logBoot() async {
+    try {
+      final sz = MediaQuery.of(context).size;
+      final tp = MediaQuery.of(context).padding.top;
+      final bp = MediaQuery.of(context).padding.bottom;
+      final computedVideoH =
+          sz.height - tp - _topBarH - _indicatorH - _panelH - bp;
+      final fileExists = widget.videoFile.existsSync();
+      final fileSize   = fileExists ? widget.videoFile.lengthSync() : 0;
+      await Supabase.instance.client.from('posts_errors').insert({
+        'operation_type':  'video_edit/boot',
+        'additional_data': {
+          'screenW':         sz.width,
+          'screenH':         sz.height,
+          'topPad':          tp,
+          'botPad':          bp,
+          'computedVideoH':  computedVideoH,
+          'videoHNegative':  computedVideoH <= 0,
+          'filePath':        widget.videoFile.path,
+          'fileExists':      fileExists,
+          'fileSizeBytes':   fileSize,
+          'panelH':          _panelH,
+        },
+      });
+    } catch (_) {}
   }
 
   @override
@@ -119,20 +151,39 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   }
 
   Future<void> _initPreviewPlayer() async {
-    final c = VideoPlayerController.file(
-      widget.videoFile,
-      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-    );
-    await c.initialize();
-    await c.setLooping(true);
-    await c.setVolume(_volume);
-    // Don't auto-play — trim page is shown first and owns playback.
-    if (mounted) {
-      setState(() {
-        _videoController    = c;
-        _isVideoInitialized = true;
-        _isPlaying          = false;
+    await _log(operation: 'video_edit/player_init_start', data: {
+      'filePath':   widget.videoFile.path,
+      'fileExists': widget.videoFile.existsSync(),
+    });
+    try {
+      final c = VideoPlayerController.file(
+        widget.videoFile,
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+      );
+      await c.initialize();
+      await c.setLooping(true);
+      await c.setVolume(_volume);
+      await _log(operation: 'video_edit/player_init_success', data: {
+        'width':       c.value.size.width,
+        'height':      c.value.size.height,
+        'duration_ms': c.value.duration.inMilliseconds,
+        'aspectRatio': c.value.aspectRatio,
       });
+      // Don't auto-play — trim page is shown first and owns playback.
+      if (mounted) {
+        setState(() {
+          _videoController    = c;
+          _isVideoInitialized = true;
+          _isPlaying          = false;
+        });
+      }
+    } catch (e, st) {
+      await _log(
+        operation:    'video_edit/player_init_error',
+        errorMessage: e.toString(),
+        stackTrace:   st.toString(),
+        data: { 'filePath': widget.videoFile.path },
+      );
     }
   }
 
@@ -465,12 +516,35 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
 
   @override
   Widget build(BuildContext context) {
+    try {
+      return _buildBody(context);
+    } catch (e, st) {
+      // Log synchronous build errors — these are the hardest to catch otherwise.
+      unawaited(_log(
+        operation:    'video_edit/build_exception',
+        errorMessage: e.toString(),
+        stackTrace:   st.toString(),
+      ));
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: Text('Something went wrong.\n${e.toString()}',
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+              textAlign: TextAlign.center),
+        ),
+      );
+    }
+  }
+
+  Widget _buildBody(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
     final topPad     = MediaQuery.of(context).padding.top;
     final botPad     = MediaQuery.of(context).padding.bottom;
 
-    final videoH = screenSize.height
-        - topPad - _topBarH - _indicatorH - _panelH - botPad;
+    // Clamp to a safe minimum so SizedBox never receives a negative height.
+    final videoH = (screenSize.height
+        - topPad - _topBarH - _indicatorH - _panelH - botPad)
+        .clamp(120.0, double.infinity);
 
     final isDrawActive = _panelPage == 1 && _activeTool == _Tool.draw;
     final isCropActive = _panelPage == 1 && _activeTool == _Tool.crop;
@@ -490,11 +564,15 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
             height: videoH,
             child: Stack(children: [
 
-              // VideoViewer — always in tree via Offstage so the Trimmer never
-              // loses its surface binding (prevents blank-on-return bug).
-              Offstage(
-                offstage: _panelPage != 0,
-                child: Positioned.fill(
+              // ── VideoViewer (Trimmer) ─────────────────────────────────────
+              // Positioned.fill MUST be a direct child of Stack — not nested
+              // inside Offstage — otherwise the widget renders at 0×0.
+              // Offstage wraps the whole Positioned so it stays in the tree
+              // (keeps Trimmer surface binding alive) but is invisible/inert
+              // when off-stage.
+              Positioned.fill(
+                child: Offstage(
+                  offstage: _panelPage != 0,
                   child: Container(
                     color: Colors.black,
                     child: VideoViewer(trimmer: _trimmer),
@@ -502,10 +580,10 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                 ),
               ),
 
-              // Preview player — also Offstage so it stays warm when on trim page.
-              Offstage(
-                offstage: _panelPage == 0,
-                child: Positioned.fill(
+              // ── Preview player ────────────────────────────────────────────
+              Positioned.fill(
+                child: Offstage(
+                  offstage: _panelPage == 0,
                   child: GestureDetector(
                     onTap: isDrawActive ? null : () {
                       setState(() => _selectedOverlayIndex = null);
