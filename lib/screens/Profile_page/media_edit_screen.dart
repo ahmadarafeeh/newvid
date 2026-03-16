@@ -7,6 +7,8 @@ import 'package:image/image.dart' as img;
 import 'package:Ratedly/screens/Profile_page/add_post_screen.dart';
 import 'package:Ratedly/screens/Profile_page/edit_shared.dart';
 
+enum _Tab { filters, adjust, crop, blur, draw, text, rotate }
+
 class MediaEditScreen extends StatefulWidget {
   final Uint8List imageBytes;
   final VoidCallback? onPostUploaded;
@@ -24,17 +26,29 @@ class MediaEditScreen extends StatefulWidget {
 class _MediaEditScreenState extends State<MediaEditScreen> {
   final GlobalKey _previewKey = GlobalKey();
 
-  // ── Editing state ─────────────────────────────────────────────────────────
-  int _selectedFilterIndex = 0;
+  // ── Filter + Adjust ───────────────────────────────────────────────────────
+  int _filterIndex = 0;
   EditAdjustments _adj = const EditAdjustments();
-  int _rotationQuarters = 0;
-  _ActiveTab _activeTab = _ActiveTab.filters;
-  bool _isRendering = false;
 
-  // ── Text state ────────────────────────────────────────────────────────────
-  bool _isTyping = false;
+  // ── Crop ──────────────────────────────────────────────────────────────────
+  CropAspect _cropAspect = CropAspect.free;
+
+  // ── Blur ──────────────────────────────────────────────────────────────────
+  BlurType _blurType = BlurType.none;
+  double _blurIntensity = 8.0;
+
+  // ── Draw ──────────────────────────────────────────────────────────────────
+  final List<DrawStroke> _strokes = [];
+  DrawStroke? _currentStroke;
+  DrawTool _drawTool = DrawTool.brush;
+  Color _drawColor = Colors.white;
+  double _drawSize = 8.0;
+  bool _isDrawing = false;
+
+  // ── Text ──────────────────────────────────────────────────────────────────
   final List<TextOverlay> _overlays = [];
   int? _selectedOverlayIndex;
+  bool _isTyping = false;
   final TextEditingController _textCtrl = TextEditingController();
   final FocusNode _textFocus = FocusNode();
   Color _tColor = Colors.white;
@@ -47,6 +61,17 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   int? _dragIndex;
   bool _isOverTrash = false;
 
+  // ── Rotation ──────────────────────────────────────────────────────────────
+  int _rotationQuarters = 0;
+
+  // ── UI ────────────────────────────────────────────────────────────────────
+  _Tab _activeTab = _Tab.filters;
+  bool _isRendering = false;
+
+  static const double _topBarH = 56.0;
+  static const double _tabBarH = 48.0;
+  static const double _panelH = 108.0;
+
   @override
   void dispose() {
     _textCtrl.dispose();
@@ -55,11 +80,11 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   }
 
   // ===========================================================================
-  // COMBINED MATRIX
+  // MATRIX
   // ===========================================================================
 
-  List<double> get _currentMatrix =>
-      _adj.combinedMatrix(kFilters[_selectedFilterIndex].matrix);
+  List<double> get _matrix =>
+      _adj.combinedMatrix(kFilters[_filterIndex].matrix);
 
   // ===========================================================================
   // ROTATION
@@ -68,15 +93,45 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   void _rotate() =>
       setState(() => _rotationQuarters = (_rotationQuarters + 1) % 4);
 
-  Uint8List _applyRotation(Uint8List bytes) {
-    if (_rotationQuarters == 0) return bytes;
-    final decoded = img.decodeJpg(bytes);
+  Uint8List _applyRotationAndCrop(Uint8List bytes) {
+    var decoded = img.decodeJpg(bytes);
     if (decoded == null) return bytes;
-    var rotated = decoded;
+
+    // Rotation
     for (int i = 0; i < _rotationQuarters; i++) {
-      rotated = img.copyRotate(rotated, angle: 90);
+      decoded = img.copyRotate(decoded!, angle: 90);
     }
-    return Uint8List.fromList(img.encodeJpg(rotated, quality: 92));
+
+    // Crop
+    final ratio = _cropAspect.ratio;
+    if (ratio != null && decoded != null) {
+      final iw = decoded.width.toDouble();
+      final ih = decoded.height.toDouble();
+      double cropW, cropH;
+      if (ratio >= 1) {
+        cropW = iw;
+        cropH = iw / ratio;
+        if (cropH > ih) {
+          cropH = ih;
+          cropW = ih * ratio;
+        }
+      } else {
+        cropH = ih;
+        cropW = ih * ratio;
+        if (cropW > iw) {
+          cropW = iw;
+          cropH = iw / ratio;
+        }
+      }
+      final x = ((iw - cropW) / 2).round();
+      final y = ((ih - cropH) / 2).round();
+      decoded = img.copyCrop(decoded!,
+          x: x, y: y, width: cropW.round(), height: cropH.round());
+    }
+
+    return decoded != null
+        ? Uint8List.fromList(img.encodeJpg(decoded, quality: 92))
+        : bytes;
   }
 
   // ===========================================================================
@@ -88,7 +143,7 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
     setState(() {
       _isTyping = true;
       _tColor = Colors.white;
-      _tSize = 32.0;
+      _tSize = 32;
       _tBold = true;
       _tFont = 0;
     });
@@ -159,6 +214,45 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   }
 
   // ===========================================================================
+  // DRAW
+  // ===========================================================================
+
+  void _onDrawStart(DragStartDetails d) {
+    if (_activeTab != _Tab.draw) return;
+    setState(() {
+      _isDrawing = true;
+      _currentStroke = DrawStroke(
+        points: [d.localPosition],
+        color: _drawColor,
+        strokeWidth: _drawSize,
+        tool: _drawTool,
+      );
+    });
+  }
+
+  void _onDrawUpdate(DragUpdateDetails d) {
+    if (!_isDrawing || _currentStroke == null) return;
+    setState(() {
+      _currentStroke = DrawStroke(
+        points: [..._currentStroke!.points, d.localPosition],
+        color: _currentStroke!.color,
+        strokeWidth: _currentStroke!.strokeWidth,
+        tool: _currentStroke!.tool,
+      );
+    });
+  }
+
+  void _onDrawEnd(DragEndDetails _) {
+    if (_currentStroke != null) {
+      setState(() {
+        _strokes.add(_currentStroke!);
+        _currentStroke = null;
+        _isDrawing = false;
+      });
+    }
+  }
+
+  // ===========================================================================
   // RENDER & NEXT
   // ===========================================================================
 
@@ -166,6 +260,7 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
     setState(() {
       _isRendering = true;
       _selectedOverlayIndex = null;
+      _isDrawing = false;
     });
     await Future.delayed(const Duration(milliseconds: 120));
     try {
@@ -176,10 +271,9 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
       final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
       final pngBytes = byteData!.buffer.asUint8List();
       final decoded = img.decodePng(pngBytes);
-      if (decoded != null) {
-        return Uint8List.fromList(img.encodeJpg(decoded, quality: 92));
-      }
-      return pngBytes;
+      return decoded != null
+          ? Uint8List.fromList(img.encodeJpg(decoded, quality: 92))
+          : pngBytes;
     } finally {
       if (mounted) setState(() => _isRendering = false);
     }
@@ -187,14 +281,15 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
 
   Future<void> _onNext() async {
     try {
-      final bytes = await _renderFinalImage();
-      final rotated = _applyRotation(bytes);
+      final rendered = await _renderFinalImage();
+      final processed = _applyRotationAndCrop(rendered);
       if (mounted) {
         Navigator.push(
             context,
             MaterialPageRoute(
               builder: (_) => AddPostScreen(
-                  initialFile: rotated, onPostUploaded: widget.onPostUploaded),
+                  initialFile: processed,
+                  onPostUploaded: widget.onPostUploaded),
             ));
       }
     } catch (_) {
@@ -208,10 +303,6 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
   // BUILD
   // ===========================================================================
 
-  static const double _topBar = 56.0;
-  static const double _tabBar = 44.0;
-  static const double _panel = 100.0;
-
   @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
@@ -219,41 +310,37 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
     final botPad = MediaQuery.of(context).padding.bottom;
 
     final imageH =
-        screenSize.height - topPad - _topBar - _tabBar - _panel - botPad - 8;
+        screenSize.height - topPad - _topBarH - _tabBarH - _panelH - botPad - 8;
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
       backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          Column(
-            children: [
-              SizedBox(height: topPad),
+      body: Stack(children: [
+        Column(children: [
+          SizedBox(height: topPad),
 
-              // ── Top bar ────────────────────────────────────────────────
-              SizedBox(
-                height: _topBar,
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      GestureDetector(
-                        onTap: () => Navigator.pop(context),
-                        child: const Padding(
-                            padding: EdgeInsets.all(8),
-                            child: Icon(Icons.arrow_back_ios_new,
-                                color: Colors.white, size: 20)),
-                      ),
-                      const Text('Edit',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 17,
-                              fontWeight: FontWeight.w600)),
-                      GestureDetector(
-                        onTap: _isRendering ? null : _onNext,
-                        child: Container(
+          // ── Top bar ────────────────────────────────────────────────────
+          SizedBox(
+            height: _topBarH,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: const Padding(
+                          padding: EdgeInsets.all(8),
+                          child: Icon(Icons.arrow_back_ios_new,
+                              color: Colors.white, size: 20))),
+                  const Text('Edit',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600)),
+                  GestureDetector(
+                      onTap: _isRendering ? null : _onNext,
+                      child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 18, vertical: 8),
                           decoration: BoxDecoration(
@@ -269,224 +356,321 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
                                   style: TextStyle(
                                       color: Colors.black,
                                       fontSize: 14,
-                                      fontWeight: FontWeight.w700)),
+                                      fontWeight: FontWeight.w700)))),
+                ],
+              ),
+            ),
+          ),
+
+          // ── Image area ────────────────────────────────────────────────
+          SizedBox(
+            height: imageH,
+            child: Stack(children: [
+              // Draw canvas (only interactive when Draw tab active)
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: _activeTab != _Tab.draw
+                      ? () => setState(() => _selectedOverlayIndex = null)
+                      : null,
+                  onPanStart: _activeTab == _Tab.draw ? _onDrawStart : null,
+                  onPanUpdate: _activeTab == _Tab.draw ? _onDrawUpdate : null,
+                  onPanEnd: _activeTab == _Tab.draw ? _onDrawEnd : null,
+                  child: RepaintBoundary(
+                    key: _previewKey,
+                    child: Stack(children: [
+                      // Filtered image
+                      Positioned.fill(
+                        child: ColorFiltered(
+                          colorFilter: ColorFilter.matrix(_matrix),
+                          child: Transform.rotate(
+                              angle: _rotationQuarters * 3.14159265 / 2,
+                              child: Image.memory(widget.imageBytes,
+                                  fit: BoxFit.contain,
+                                  width: double.infinity,
+                                  height: double.infinity)),
                         ),
                       ),
-                    ],
+
+                      // Blur overlay (baked into RepaintBoundary)
+                      if (_blurType != BlurType.none)
+                        Positioned.fill(
+                            child: BlurOverlay(
+                          imageBytes: widget.imageBytes,
+                          blurType: _blurType,
+                          blurIntensity: _blurIntensity,
+                        )),
+
+                      // Crop guide (visual only — actual crop applied post-render)
+                      if (_activeTab == _Tab.crop)
+                        Positioned.fill(
+                            child: CropGuideOverlay(aspect: _cropAspect)),
+
+                      // Drawing layer
+                      Positioned.fill(
+                        child: CustomPaint(
+                          painter: DrawingPainter(
+                            strokes: _strokes,
+                            currentStroke: _currentStroke,
+                          ),
+                        ),
+                      ),
+
+                      // Text overlays
+                      ..._overlays.asMap().entries.map((entry) {
+                        final index = entry.key;
+                        final o = entry.value;
+                        final draggingThis = _dragIndex == index;
+                        return Positioned(
+                          left: (o.position.dx * screenSize.width)
+                              .clamp(0, screenSize.width - 10),
+                          top: (o.position.dy * imageH).clamp(0, imageH - 10),
+                          child: GestureDetector(
+                            onTap: _activeTab != _Tab.draw
+                                ? () => setState(
+                                    () => _selectedOverlayIndex = index)
+                                : null,
+                            onPanStart: _activeTab != _Tab.draw
+                                ? (_) => _onDragStart(index)
+                                : null,
+                            onPanUpdate: _activeTab != _Tab.draw
+                                ? (d) => _onDragUpdate(
+                                    index, d, screenSize.width, imageH)
+                                : null,
+                            onPanEnd: _activeTab != _Tab.draw
+                                ? (_) => _onDragEnd(index, imageH)
+                                : null,
+                            child: AnimatedOpacity(
+                              opacity:
+                                  (draggingThis && _isOverTrash) ? 0.4 : 1.0,
+                              duration: const Duration(milliseconds: 100),
+                              child: Stack(clipBehavior: Clip.none, children: [
+                                Text(o.text, style: overlayShadowStyle(o)),
+                                Text(o.text, style: overlayTextStyle(o)),
+                              ]),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ]),
                   ),
                 ),
               ),
 
-              // ── Image + overlays + trash ───────────────────────────────
-              SizedBox(
-                height: imageH,
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: GestureDetector(
-                        onTap: () =>
-                            setState(() => _selectedOverlayIndex = null),
-                        child: RepaintBoundary(
-                          key: _previewKey,
-                          child: Stack(
-                            children: [
-                              Positioned.fill(
-                                child: ColorFiltered(
-                                  colorFilter:
-                                      ColorFilter.matrix(_currentMatrix),
-                                  child: Transform.rotate(
-                                    angle: _rotationQuarters * 3.14159265 / 2,
-                                    child: Image.memory(widget.imageBytes,
-                                        fit: BoxFit.contain,
-                                        width: double.infinity,
-                                        height: double.infinity),
-                                  ),
-                                ),
-                              ),
-                              ..._buildOverlays(screenSize.width, imageH),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (_isDragging)
-                      Positioned(
-                          bottom: 0,
-                          left: 0,
-                          right: 0,
-                          child: TrashZone(isOverTrash: _isOverTrash)),
-                  ],
-                ),
-              ),
+              // Draw cursor indicator
+              if (_activeTab == _Tab.draw)
+                Positioned(
+                    bottom: 12,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                        child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 5),
+                      decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.5),
+                          borderRadius: BorderRadius.circular(16)),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Container(
+                            width: _drawSize.clamp(6, 24),
+                            height: _drawSize.clamp(6, 24),
+                            decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _drawColor,
+                                border: Border.all(
+                                    color: Colors.white.withOpacity(0.5),
+                                    width: 1))),
+                        const SizedBox(width: 8),
+                        Text(_drawTool.label,
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.8),
+                                fontSize: 12)),
+                      ]),
+                    ))),
 
-              // ── Tab bar ────────────────────────────────────────────────
-              _buildTabBar(),
-
-              // ── Active panel ───────────────────────────────────────────
-              Container(
-                height: _panel,
-                color: Colors.black,
-                child: _buildPanel(),
-              ),
-
-              SizedBox(height: botPad),
-            ],
+              // Trash zone
+              if (_isDragging)
+                Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: TrashZone(isOverTrash: _isOverTrash)),
+            ]),
           ),
 
-          // ── Text entry overlay ─────────────────────────────────────────
-          if (_isTyping)
-            Positioned.fill(
+          // ── Tab bar ───────────────────────────────────────────────────
+          _buildTabBar(),
+
+          // ── Panel ─────────────────────────────────────────────────────
+          Container(height: _panelH, color: Colors.black, child: _buildPanel()),
+
+          SizedBox(height: botPad),
+        ]),
+
+        // ── Text entry overlay ────────────────────────────────────────────
+        if (_isTyping)
+          Positioned.fill(
               child: TextEntryOverlay(
-                controller: _textCtrl,
-                focusNode: _textFocus,
-                textColor: _tColor,
-                fontSize: _tSize,
-                isBold: _tBold,
-                fontIndex: _tFont,
-                onColorChanged: (c) => setState(() => _tColor = c),
-                onSizeChanged: (v) => setState(() => _tSize = v),
-                onBoldToggle: () => setState(() => _tBold = !_tBold),
-                onFontChanged: (i) => setState(() => _tFont = i),
-                onConfirm: _confirmText,
-                onCancel: _cancelText,
-                topPadding: topPad,
-              ),
-            ),
-        ],
-      ),
+            controller: _textCtrl,
+            focusNode: _textFocus,
+            textColor: _tColor,
+            fontSize: _tSize,
+            isBold: _tBold,
+            fontIndex: _tFont,
+            onColorChanged: (c) => setState(() => _tColor = c),
+            onSizeChanged: (v) => setState(() => _tSize = v),
+            onBoldToggle: () => setState(() => _tBold = !_tBold),
+            onFontChanged: (i) => setState(() => _tFont = i),
+            onConfirm: _confirmText,
+            onCancel: _cancelText,
+            topPadding: topPad,
+          )),
+      ]),
     );
   }
 
-  // ── Tab bar ──────────────────────────────────────────────────────────────
+  // ===========================================================================
+  // TAB BAR
+  // ===========================================================================
 
-  Widget _buildTabBar() {
-    return Container(
-      height: _tabBar,
-      color: const Color(0xFF111111),
-      child: Row(
-        children: _ActiveTab.values.map((tab) {
-          final isActive = _activeTab == tab;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () {
-                if (tab == _ActiveTab.text) {
-                  _enterTextMode();
-                  return;
-                }
-                if (tab == _ActiveTab.rotate) {
-                  _rotate();
-                  return;
-                }
-                setState(() => _activeTab = tab);
-              },
-              child: Container(
-                color: Colors.transparent,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(_tabIcon(tab),
-                        color: isActive
-                            ? Colors.white
-                            : Colors.white.withOpacity(0.45),
-                        size: 18),
-                    const SizedBox(height: 2),
-                    Text(_tabLabel(tab),
-                        style: TextStyle(
+  Widget _buildTabBar() => Container(
+        height: _tabBarH,
+        color: const Color(0xFF111111),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: _Tab.values.map((tab) {
+              final isActive = _activeTab == tab;
+              return GestureDetector(
+                onTap: () {
+                  if (tab == _Tab.text) {
+                    _enterTextMode();
+                    return;
+                  }
+                  if (tab == _Tab.rotate) {
+                    _rotate();
+                    return;
+                  }
+                  setState(() {
+                    _activeTab = tab;
+                    _isDrawing = false;
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  color: Colors.transparent,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(_tabIcon(tab),
                           color: isActive
                               ? Colors.white
-                              : Colors.white.withOpacity(0.45),
-                          fontSize: 9,
-                          fontWeight:
-                              isActive ? FontWeight.w700 : FontWeight.normal,
-                        )),
-                    if (isActive)
-                      Container(
-                        margin: const EdgeInsets.only(top: 2),
-                        height: 2,
-                        width: 16,
-                        decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(1)),
-                      ),
-                  ],
+                              : Colors.white.withOpacity(0.4),
+                          size: 18),
+                      const SizedBox(height: 2),
+                      Text(_tabLabel(tab),
+                          style: TextStyle(
+                              color: isActive
+                                  ? Colors.white
+                                  : Colors.white.withOpacity(0.4),
+                              fontSize: 9,
+                              fontWeight: isActive
+                                  ? FontWeight.w700
+                                  : FontWeight.normal)),
+                      if (isActive)
+                        Container(
+                            margin: const EdgeInsets.only(top: 2),
+                            height: 2,
+                            width: 14,
+                            decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(1))),
+                    ],
+                  ),
                 ),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
+              );
+            }).toList(),
+          ),
+        ),
+      );
 
   Widget _buildPanel() {
     switch (_activeTab) {
-      case _ActiveTab.filters:
+      case _Tab.filters:
         return FilterStrip(
-          selectedIndex: _selectedFilterIndex,
+          selectedIndex: _filterIndex,
           previewImage: widget.imageBytes,
-          onSelect: (i) => setState(() => _selectedFilterIndex = i),
+          onSelect: (i) => setState(() => _filterIndex = i),
         );
-      case _ActiveTab.adjust:
+      case _Tab.adjust:
         return AdjustPanel(
           adjustments: _adj,
           onChanged: (a) => setState(() => _adj = a),
+        );
+      case _Tab.crop:
+        return CropPanel(
+          selected: _cropAspect,
+          onSelect: (a) => setState(() => _cropAspect = a),
+        );
+      case _Tab.blur:
+        return BlurPanel(
+          selected: _blurType,
+          intensity: _blurIntensity,
+          onSelectType: (t) => setState(() => _blurType = t),
+          onIntensityChanged: (v) => setState(() => _blurIntensity = v),
+        );
+      case _Tab.draw:
+        return DrawPanel(
+          tool: _drawTool,
+          color: _drawColor,
+          strokeWidth: _drawSize,
+          onUndo: () => setState(() {
+            if (_strokes.isNotEmpty) _strokes.removeLast();
+          }),
+          onClear: () => setState(() => _strokes.clear()),
+          onToolChanged: (t) => setState(() => _drawTool = t),
+          onColorChanged: (c) => setState(() => _drawColor = c),
+          onSizeChanged: (v) => setState(() => _drawSize = v),
         );
       default:
         return const SizedBox.shrink();
     }
   }
 
-  List<Widget> _buildOverlays(double w, double h) {
-    return _overlays.asMap().entries.map((entry) {
-      final index = entry.key;
-      final o = entry.value;
-      final draggingThis = _dragIndex == index;
-      return Positioned(
-        left: (o.position.dx * w).clamp(0.0, w - 10),
-        top: (o.position.dy * h).clamp(0.0, h - 10),
-        child: GestureDetector(
-          onTap: () => setState(() => _selectedOverlayIndex = index),
-          onPanStart: (_) => _onDragStart(index),
-          onPanUpdate: (d) => _onDragUpdate(index, d, w, h),
-          onPanEnd: (_) => _onDragEnd(index, h),
-          child: AnimatedOpacity(
-            opacity: (draggingThis && _isOverTrash) ? 0.4 : 1.0,
-            duration: const Duration(milliseconds: 100),
-            child: Stack(clipBehavior: Clip.none, children: [
-              Text(o.text, style: overlayShadowStyle(o)),
-              Text(o.text, style: overlayTextStyle(o)),
-            ]),
-          ),
-        ),
-      );
-    }).toList();
-  }
-
-  IconData _tabIcon(_ActiveTab t) {
+  IconData _tabIcon(_Tab t) {
     switch (t) {
-      case _ActiveTab.filters:
+      case _Tab.filters:
         return Icons.auto_fix_high_rounded;
-      case _ActiveTab.adjust:
+      case _Tab.adjust:
         return Icons.tune_rounded;
-      case _ActiveTab.text:
+      case _Tab.crop:
+        return Icons.crop_rounded;
+      case _Tab.blur:
+        return Icons.blur_on_rounded;
+      case _Tab.draw:
+        return Icons.brush_rounded;
+      case _Tab.text:
         return Icons.text_fields_rounded;
-      case _ActiveTab.rotate:
+      case _Tab.rotate:
         return Icons.rotate_90_degrees_cw_rounded;
     }
   }
 
-  String _tabLabel(_ActiveTab t) {
+  String _tabLabel(_Tab t) {
     switch (t) {
-      case _ActiveTab.filters:
+      case _Tab.filters:
         return 'Filters';
-      case _ActiveTab.adjust:
+      case _Tab.adjust:
         return 'Adjust';
-      case _ActiveTab.text:
+      case _Tab.crop:
+        return 'Crop';
+      case _Tab.blur:
+        return 'Blur';
+      case _Tab.draw:
+        return 'Draw';
+      case _Tab.text:
         return 'Text';
-      case _ActiveTab.rotate:
+      case _Tab.rotate:
         return 'Rotate';
     }
   }
 }
-
-enum _ActiveTab { filters, adjust, text, rotate }
