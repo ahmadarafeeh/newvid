@@ -8,8 +8,8 @@ import 'package:video_trimmer/video_trimmer.dart';
 import 'package:Ratedly/screens/Profile_page/add_post_screen.dart';
 import 'package:Ratedly/screens/Profile_page/edit_shared.dart';
 
-/// Creative tools available on the Edit panel (page 1).
-enum _Tool { filters, adjust, crop, draw, text, rotate }
+// Trim is the first tool so it is selected by default on open.
+enum _Tool { trim, filters, adjust, crop, draw, text, rotate }
 
 class VideoEditScreen extends StatefulWidget {
   final File videoFile;
@@ -29,29 +29,24 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   // ── Preview player ─────────────────────────────────────────────────────────
   VideoPlayerController? _videoController;
   bool _isVideoInitialized = false;
-  bool _isPlaying = false;
+  bool _isPlaying          = false;
 
   // ── Trimmer ────────────────────────────────────────────────────────────────
-  final Trimmer _trimmer = Trimmer();
-  double _startValue   = 0.0;
-  double _endValue     = 0.0;
-  bool   _isTrimPlaying = false;
-  bool   _isSavingTrim  = false;
-  bool   _trimDirty     = false;
-  bool   _trimApplied   = false;
+  final Trimmer _trimmer       = Trimmer();
+  double _startValue           = 0.0;
+  double _endValue             = 0.0;
+  bool   _isTrimPlaying        = false;
+  bool   _isSavingTrim         = false;
+  bool   _trimDirty            = false;
+  bool   _trimApplied          = false;
 
-  // ── Panel paging ───────────────────────────────────────────────────────────
-  // Page 0 = Trim & Audio  (default, swipe UP to go to page 1)
-  // Page 1 = Creative Tools (swipe DOWN to return to page 0)
-  final PageController _panelController = PageController();
-  int _panelPage = 0;
+  // ── Active tool ────────────────────────────────────────────────────────────
+  // Defaults to trim so the user lands on the trimmer view.
+  _Tool _activeTool = _Tool.trim;
 
   // ── Audio ──────────────────────────────────────────────────────────────────
-  double _volume = 1.0;   // 0.0 – 1.0; persisted so mute can be undone
+  double _volume  = 1.0;
   bool   _isMuted = false;
-
-  // ── Creative tool selection ────────────────────────────────────────────────
-  _Tool? _activeTool;
 
   // ── Filter / Adjust ────────────────────────────────────────────────────────
   int             _selectedFilterIndex = 0;
@@ -90,9 +85,8 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   bool _isOverTrash = false;
 
   // ── Layout ─────────────────────────────────────────────────────────────────
-  static const double _topBarH    = 56.0;
-  static const double _indicatorH = 26.0;
-  static const double _panelH     = 212.0;
+  static const double _topBarH  = 56.0;
+  static const double _panelH   = 212.0;
 
   // ===========================================================================
   // LIFECYCLE
@@ -101,55 +95,44 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   @override
   void initState() {
     super.initState();
-    // Fire a synchronous-as-possible log so we know the screen opened.
-    // This uses addPostFrameCallback so context is available.
     WidgetsBinding.instance.addPostFrameCallback((_) => _logBoot());
     _initPreviewPlayer();
     _trimmer.loadVideo(videoFile: widget.videoFile);
-  }
-
-  /// Logs basic device + file info the moment the screen is first drawn.
-  /// This fires even if _initPreviewPlayer throws, so we always get a row.
-  Future<void> _logBoot() async {
-    try {
-      final sz = MediaQuery.of(context).size;
-      final tp = MediaQuery.of(context).padding.top;
-      final bp = MediaQuery.of(context).padding.bottom;
-      final computedVideoH =
-          sz.height - tp - _topBarH - _indicatorH - _panelH - bp;
-      final fileExists = widget.videoFile.existsSync();
-      final fileSize   = fileExists ? widget.videoFile.lengthSync() : 0;
-      await Supabase.instance.client.from('posts_errors').insert({
-        'operation_type':  'video_edit/boot',
-        'additional_data': {
-          'screenW':         sz.width,
-          'screenH':         sz.height,
-          'topPad':          tp,
-          'botPad':          bp,
-          'computedVideoH':  computedVideoH,
-          'videoHNegative':  computedVideoH <= 0,
-          'filePath':        widget.videoFile.path,
-          'fileExists':      fileExists,
-          'fileSizeBytes':   fileSize,
-          'panelH':          _panelH,
-        },
-      });
-    } catch (_) {}
   }
 
   @override
   void dispose() {
     _videoController?.dispose();
     _trimmer.dispose();
-    _panelController.dispose();
     _textCtrl.dispose();
     _textFocus.dispose();
     super.dispose();
   }
 
+  Future<void> _logBoot() async {
+    try {
+      final sz = MediaQuery.of(context).size;
+      final tp = MediaQuery.of(context).padding.top;
+      final bp = MediaQuery.of(context).padding.bottom;
+      final videoH = sz.height - tp - _topBarH - _panelH - bp;
+      final fileExists = widget.videoFile.existsSync();
+      await Supabase.instance.client.from('posts_errors').insert({
+        'operation_type':  'video_edit/boot',
+        'additional_data': {
+          'screenW': sz.width, 'screenH': sz.height,
+          'topPad': tp, 'botPad': bp,
+          'computedVideoH': videoH, 'videoHNegative': videoH <= 0,
+          'filePath': widget.videoFile.path,
+          'fileExists': fileExists,
+          'fileSizeBytes': fileExists ? widget.videoFile.lengthSync() : 0,
+        },
+      });
+    } catch (_) {}
+  }
+
   Future<void> _initPreviewPlayer() async {
     await _log(operation: 'video_edit/player_init_start', data: {
-      'filePath':   widget.videoFile.path,
+      'filePath': widget.videoFile.path,
       'fileExists': widget.videoFile.existsSync(),
     });
     try {
@@ -161,12 +144,10 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
       await c.setLooping(true);
       await c.setVolume(_volume);
       await _log(operation: 'video_edit/player_init_success', data: {
-        'width':       c.value.size.width,
-        'height':      c.value.size.height,
+        'width': c.value.size.width, 'height': c.value.size.height,
         'duration_ms': c.value.duration.inMilliseconds,
         'aspectRatio': c.value.aspectRatio,
       });
-      // Don't auto-play — trim page is shown first and owns playback.
       if (mounted) {
         setState(() {
           _videoController    = c;
@@ -176,56 +157,42 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
       }
     } catch (e, st) {
       await _log(
-        operation:    'video_edit/player_init_error',
-        errorMessage: e.toString(),
-        stackTrace:   st.toString(),
+        operation: 'video_edit/player_init_error',
+        errorMessage: e.toString(), stackTrace: st.toString(),
         data: { 'filePath': widget.videoFile.path },
       );
     }
   }
 
   // ===========================================================================
-  // TRIM CONFIRM / RESET
+  // TOOL SELECTION
   // ===========================================================================
 
-  void _confirmTrim() {
-    setState(() {
-      _trimApplied = _trimDirty;
-      _isTrimPlaying = false;
-    });
-    // Return to the edit page so the user can continue with other tools.
-    _goToPage(0);
-  }
+  void _onToolTap(_Tool tool) {
+    if (tool == _Tool.text) { _enterTextMode(); return; }
+    if (tool == _Tool.rotate) {
+      setState(() => _rotationQuarters = (_rotationQuarters + 1) % 4);
+      return;
+    }
 
-  void _resetTrim() {
-    setState(() {
-      _startValue   = 0.0;
-      _endValue     = 0.0;
-      _trimDirty    = false;
-      _trimApplied  = false;
-      _isTrimPlaying = false;
-    });
-    // Reload the full video so the TrimViewer scrubber resets visually.
-    _trimmer.loadVideo(videoFile: widget.videoFile);
-  }
+    final wasTrim = _activeTool == _Tool.trim;
+    final goingTrim = tool == _Tool.trim;
 
-  // ===========================================================================
-  // PANEL PAGE SWITCHING
-  // ===========================================================================
-
-  void _onPanelPageChanged(int page) {
-    setState(() => _panelPage = page);
-    if (page == 1) {
-      // Entering Trim — pause the preview player so both don't clash.
+    // Pause preview when entering Trim; resume when leaving.
+    if (goingTrim && !wasTrim) {
       _videoController?.pause();
       if (mounted) setState(() => _isPlaying = false);
-    } else {
-      // Entering Edit — start the preview player so edits look live.
-      _videoController?.play();
-      if (mounted) {
-        setState(() => _isPlaying = _videoController?.value.isPlaying ?? false);
-      }
     }
+    if (!goingTrim && wasTrim) {
+      _videoController?.play();
+      if (mounted) setState(() => _isPlaying = _videoController?.value.isPlaying ?? false);
+    }
+
+    // Toggle off if already active (except trim — always show trim panel).
+    setState(() {
+      _activeTool = (tool == _activeTool && tool != _Tool.trim) ? _Tool.trim : tool;
+      _isDrawing  = false;
+    });
   }
 
   // ===========================================================================
@@ -258,7 +225,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   }
 
   // ===========================================================================
-  // SILENCE & STOP  (before leaving screen)
+  // SILENCE & STOP
   // ===========================================================================
 
   Future<void> _silenceAndStop() async {
@@ -270,46 +237,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   }
 
   // ===========================================================================
-  // CREATIVE TOOLS
-  // ===========================================================================
-
-  void _onToolTap(_Tool tool) {
-    if (tool == _Tool.text) {
-      _enterTextMode();
-      return;
-    }
-    if (tool == _Tool.rotate) {
-      setState(() => _rotationQuarters = (_rotationQuarters + 1) % 4);
-      return; // action only — no persistent selection
-    }
-    setState(() {
-      _activeTool = (_activeTool == tool) ? null : tool;
-      _isDrawing  = false;
-    });
-  }
-
-  // ===========================================================================
-  // CROP CONFIRM / RESET
-  // ===========================================================================
-
-  void _confirmCrop() {
-    final isFull = _cropRect == const Rect.fromLTRB(0, 0, 1, 1);
-    setState(() {
-      _cropApplied = !isFull;
-      _activeTool  = _Tool.filters; // return to filters after confirming
-    });
-  }
-
-  void _resetCrop() {
-    setState(() {
-      _cropRect    = const Rect.fromLTRB(0, 0, 1, 1);
-      _cropAspect  = CropAspect.free;
-      _cropApplied = false;
-    });
-  }
-
-  // ===========================================================================
-  // CROP SNAPPING
+  // CROP
   // ===========================================================================
 
   void _snapCropToAspect(CropAspect aspect) {
@@ -324,13 +252,29 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
     if (videoRatio >= ratio) {
       final normW = ratio / videoRatio;
       left = (1.0 - normW) / 2; right = 1.0 - left;
-      top  = 0.0;               bottom = 1.0;
+      top  = 0.0; bottom = 1.0;
     } else {
       final normH = videoRatio / ratio;
       top    = (1.0 - normH) / 2; bottom = 1.0 - top;
-      left   = 0.0;               right  = 1.0;
+      left   = 0.0; right  = 1.0;
     }
     setState(() => _cropRect = Rect.fromLTRB(left, top, right, bottom));
+  }
+
+  void _confirmCrop() {
+    final isFull = _cropRect == const Rect.fromLTRB(0, 0, 1, 1);
+    setState(() {
+      _cropApplied = !isFull;
+      _activeTool  = _Tool.trim;
+    });
+  }
+
+  void _resetCrop() {
+    setState(() {
+      _cropRect    = const Rect.fromLTRB(0, 0, 1, 1);
+      _cropAspect  = CropAspect.free;
+      _cropApplied = false;
+    });
   }
 
   // ===========================================================================
@@ -449,7 +393,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   }
 
   // ===========================================================================
-  // NEXT  (Completer-based trim save + full logging)
+  // NEXT
   // ===========================================================================
 
   Future<void> _onNext() async {
@@ -458,14 +402,12 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
 
     if (_trimDirty) {
       setState(() => _isSavingTrim = true);
-
       File?   trimmedFile;
       String? trimError;
       String? trimStack;
 
       await _log(operation: 'trim/start', data: {
-        'startValue':        _startValue,
-        'endValue':          _endValue,
+        'startValue': _startValue, 'endValue': _endValue,
         'originalPath':      widget.videoFile.path,
         'originalExists':    widget.videoFile.existsSync(),
         'originalSizeBytes': widget.videoFile.existsSync()
@@ -473,14 +415,9 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
       });
 
       try {
-        // Use a Completer so we truly await the onSave callback.
-        // Some versions of video_trimmer fire onSave after the future resolves,
-        // causing the old inline-closure approach to navigate before the path
-        // was set — producing a null/missing file on the next screen.
         final completer = Completer<String?>();
         await _trimmer.saveTrimmedVideo(
-          startValue: _startValue,
-          endValue:   _endValue,
+          startValue: _startValue, endValue: _endValue,
           onSave: (String? path) {
             if (!completer.isCompleted) completer.complete(path);
           },
@@ -489,23 +426,23 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
             .timeout(const Duration(seconds: 30), onTimeout: () => null);
 
         if (savedPath != null) {
-          trimmedFile      = File(savedPath);
-          final exists     = trimmedFile.existsSync();
-          final sizeBytes  = exists ? trimmedFile.lengthSync() : 0;
+          trimmedFile = File(savedPath);
+          final exists    = trimmedFile.existsSync();
+          final sizeBytes = exists ? trimmedFile.lengthSync() : 0;
           await _log(operation: 'trim/save_callback', data: {
             'savedPath': savedPath, 'fileExists': exists, 'sizeBytes': sizeBytes,
           });
           if (!exists || sizeBytes == 0) {
             await _log(
-              operation:    'trim/bad_output_file',
+              operation: 'trim/bad_output_file',
               errorMessage: exists ? 'File is 0 bytes' : 'File does not exist',
               data: { 'savedPath': savedPath, 'exists': exists, 'sizeBytes': sizeBytes },
             );
-            trimmedFile = null; // fall back to original
+            trimmedFile = null;
           }
         } else {
           await _log(
-            operation:    'trim/null_path',
+            operation: 'trim/null_path',
             errorMessage: 'onSave returned null or timed out',
             data: { 'startValue': _startValue, 'endValue': _endValue },
           );
@@ -561,19 +498,15 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
     try {
       return _buildBody(context);
     } catch (e, st) {
-      // Log synchronous build errors — these are the hardest to catch otherwise.
       unawaited(_log(
-        operation:    'video_edit/build_exception',
-        errorMessage: e.toString(),
-        stackTrace:   st.toString(),
+        operation: 'video_edit/build_exception',
+        errorMessage: e.toString(), stackTrace: st.toString(),
       ));
       return Scaffold(
         backgroundColor: Colors.black,
-        body: Center(
-          child: Text('Something went wrong.\n${e.toString()}',
-              style: const TextStyle(color: Colors.white, fontSize: 12),
-              textAlign: TextAlign.center),
-        ),
+        body: Center(child: Text('Something went wrong.\n${e.toString()}',
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+            textAlign: TextAlign.center)),
       );
     }
   }
@@ -583,13 +516,12 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
     final topPad     = MediaQuery.of(context).padding.top;
     final botPad     = MediaQuery.of(context).padding.bottom;
 
-    // Clamp to a safe minimum so SizedBox never receives a negative height.
-    final videoH = (screenSize.height
-        - topPad - _topBarH - _indicatorH - _panelH - botPad)
+    final videoH = (screenSize.height - topPad - _topBarH - _panelH - botPad)
         .clamp(120.0, double.infinity);
 
-    final isDrawActive = _panelPage == 1 && _activeTool == _Tool.draw;
-    final isCropActive = _panelPage == 1 && _activeTool == _Tool.crop;
+    final isTrim       = _activeTool == _Tool.trim;
+    final isDrawActive = _activeTool == _Tool.draw;
+    final isCropActive = _activeTool == _Tool.crop;
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
@@ -606,25 +538,20 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
             height: videoH,
             child: Stack(children: [
 
-              // ── VideoViewer + Preview player ──────────────────────────────
-              // IndexedStack keeps BOTH children fully in the render tree at
-              // all times — including their platform-view surfaces. This is
-              // critical for VideoViewer (video_trimmer) which owns a native
-              // texture: Offstage / Visibility drop platform views from the
-              // native layer causing the grey-screen-on-return bug.
-              // IndexedStack simply paints only the active child; the inactive
-              // child stays rendered but is covered and receives no hit events.
+              // IndexedStack keeps both players in the render tree at all times
+              // so the Trimmer's native texture never loses its surface binding.
+              // Index 0 = VideoViewer (Trim tool), Index 1 = preview player.
               Positioned.fill(
                 child: IndexedStack(
-                  index: _panelPage == 1 ? 0 : 1,
+                  index: isTrim ? 0 : 1,
                   children: [
-                    // Index 0 — Trim page: Trimmer's VideoViewer
+                    // 0 — Trimmer's VideoViewer
                     Container(
                       color: Colors.black,
                       child: VideoViewer(trimmer: _trimmer),
                     ),
 
-                    // Index 1 — Edit page: filtered + rotated preview player
+                    // 1 — Filtered + rotated preview player
                     GestureDetector(
                       onTap: isDrawActive ? null : () {
                         setState(() => _selectedOverlayIndex = null);
@@ -657,8 +584,8 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                 ),
               ),
 
-              // Draw strokes
-              if (_panelPage == 1)
+              // Draw strokes (only on preview)
+              if (!isTrim)
                 Positioned.fill(
                   child: IgnorePointer(
                     ignoring: !isDrawActive,
@@ -668,8 +595,8 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                   ),
                 ),
 
-              // Text overlays
-              if (_panelPage == 1)
+              // Text overlays (only on preview)
+              if (!isTrim)
                 ..._buildTextOverlays(screenSize.width, videoH),
 
               // Crop overlay
@@ -683,88 +610,50 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                   ),
                 ),
 
-              // ── Crop action bar ───────────────────────────────────────
+              // Crop Done / Reset bar
               if (isCropActive)
                 Positioned(
                   bottom: 16, left: 24, right: 24,
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      GestureDetector(
-                        onTap: _resetCrop,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.55),
-                            borderRadius: BorderRadius.circular(22),
-                            border: Border.all(
-                                color: Colors.white.withOpacity(0.28), width: 1),
-                          ),
-                          child: const Text('Reset',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500)),
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: _confirmCrop,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 24, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(22),
-                          ),
-                          child: const Text('Done',
-                              style: TextStyle(
-                                  color: Colors.black,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700)),
-                        ),
-                      ),
+                      _cropBarBtn(label: 'Reset', primary: false, onTap: _resetCrop),
+                      _cropBarBtn(label: 'Done',  primary: true,  onTap: _confirmCrop),
                     ],
                   ),
                 ),
 
-              // Play/pause icon
-              if (_panelPage == 1 && !isDrawActive && !_isPlaying)
-                const Center(
-                  child: Icon(Icons.play_circle_outline, color: Colors.white54, size: 64),
-                ),
+              // Play/pause icon (preview only, not draw)
+              if (!isTrim && !isDrawActive && !_isPlaying)
+                const Center(child: Icon(Icons.play_circle_outline, color: Colors.white54, size: 64)),
 
               // Draw cursor hint
               if (isDrawActive)
                 Positioned(
                   bottom: 12, left: 0, right: 0,
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.5),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Container(
-                          width:  _drawSize.clamp(6, 24),
-                          height: _drawSize.clamp(6, 24),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle, color: _drawColor,
-                            border: Border.all(color: Colors.white.withOpacity(0.5), width: 1),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(_drawTool.label,
-                            style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12)),
-                      ]),
+                  child: Center(child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(16),
                     ),
-                  ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Container(
+                        width:  _drawSize.clamp(6, 24),
+                        height: _drawSize.clamp(6, 24),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle, color: _drawColor,
+                          border: Border.all(color: Colors.white.withOpacity(0.5), width: 1),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(_drawTool.label,
+                          style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12)),
+                    ]),
+                  )),
                 ),
 
-              // ── Right-side floating quick-action buttons ─────────────────
-              // Always visible over the video regardless of panel page,
-              // matching TikTok / Instagram Reels UX.
+              // Right-side floating buttons (Text + Sound)
               Positioned(
                 right: 10, top: 0, bottom: 0,
                 child: Column(
@@ -777,9 +666,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                     ),
                     const SizedBox(height: 20),
                     _buildFloatBtn(
-                      icon:  _isMuted
-                          ? Icons.volume_off_rounded
-                          : Icons.volume_up_rounded,
+                      icon:  _isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
                       label: _isMuted ? 'Unmute' : 'Sound',
                       onTap: _toggleMute,
                     ),
@@ -793,73 +680,14 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                   bottom: 0, left: 0, right: 0,
                   child: TrashZone(isOverTrash: _isOverTrash),
                 ),
-
-              // ── Trim action bar ───────────────────────────────────────────
-              // Floats at the bottom of the video while the trim page is open.
-              if (_panelPage == 1)
-                Positioned(
-                  bottom: 16, left: 24, right: 24,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      GestureDetector(
-                        onTap: _resetTrim,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.55),
-                            borderRadius: BorderRadius.circular(22),
-                            border: Border.all(
-                                color: Colors.white.withOpacity(0.28), width: 1),
-                          ),
-                          child: const Text('Reset',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500)),
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: _confirmTrim,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 24, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(22),
-                          ),
-                          child: const Text('Done',
-                              style: TextStyle(
-                                  color: Colors.black,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700)),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
             ]),
           ),
 
-          // ── Page indicator ───────────────────────────────────────────────
-          _buildPageIndicator(),
-
-          // ── Bottom panel ─────────────────────────────────────────────────
-          // Page 0 = Creative Tools (default — swipe down to reach Trim)
-          // Page 1 = Trim & Audio   (swipe down to open, swipe up to return)
-          SizedBox(
+          // ── Single panel ─────────────────────────────────────────────────
+          Container(
             height: _panelH,
-            child: PageView(
-              controller:      _panelController,
-              scrollDirection: Axis.vertical,
-              physics:         const NeverScrollableScrollPhysics(),
-              onPageChanged:   _onPanelPageChanged,
-              children: [
-                _buildCreativeToolsPage(),
-                _buildTrimAudioPage(),
-              ],
-            ),
+            color: Colors.black,
+            child: _buildPanel(),
           ),
 
           SizedBox(height: botPad),
@@ -910,15 +738,10 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
             onTap: _isSavingTrim ? null : _onNext,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-              ),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
               child: _isSavingTrim
-                  ? const SizedBox(
-                      width: 18, height: 18,
-                      child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2),
-                    )
+                  ? const SizedBox(width: 18, height: 18,
+                      child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
                   : const Text('Next',
                       style: TextStyle(color: Colors.black, fontSize: 14, fontWeight: FontWeight.w700)),
             ),
@@ -928,259 +751,31 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
     ),
   );
 
-  void _goToPage(int page) {
-    _panelController.animateToPage(
-      page,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
-  }
-
   // ===========================================================================
-  // PAGE INDICATOR
+  // SINGLE PANEL
   // ===========================================================================
 
-  Widget _buildPageIndicator() {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onVerticalDragEnd: (d) {
-        if (d.primaryVelocity == null) return;
-        // Swipe down (positive velocity) → go to trim page (1)
-        if (d.primaryVelocity! >  200 && _panelPage == 0) _goToPage(1);
-        // Swipe up   (negative velocity) → go to edit page (0)
-        if (d.primaryVelocity! < -200 && _panelPage == 1) _goToPage(0);
-      },
-      child: Container(
-        height: _indicatorH,
-        color: const Color(0xFF080808),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // "↑ Edit" — tappable hint on the trim page
-            GestureDetector(
-              onTap: _panelPage == 1 ? () => _goToPage(0) : null,
-              child: AnimatedOpacity(
-                opacity: _panelPage == 1 ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 200),
-                child: Row(children: [
-                  Icon(Icons.keyboard_arrow_up_rounded,
-                      color: Colors.white.withOpacity(0.4), size: 13),
-                  Text('Edit',
-                      style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10)),
-                  const SizedBox(width: 10),
-                ]),
-              ),
-            ),
-            // Animated pill dots — tappable
-            GestureDetector(onTap: () => _goToPage(0), child: _pageDot(0)),
-            const SizedBox(width: 5),
-            // Dot 1 = Trim page — show badge when trim has been applied
-            Stack(clipBehavior: Clip.none, children: [
-              GestureDetector(onTap: () => _goToPage(1), child: _pageDot(1)),
-              if (_trimApplied && _panelPage != 1)
-                Positioned(
-                  top: -5, right: -5,
-                  child: Container(
-                    width: 6, height: 6,
-                    decoration: const BoxDecoration(
-                        shape: BoxShape.circle, color: Colors.white),
-                  ),
-                ),
-            ]),
-            // "Trim ↓" — tappable hint on the edit page
-            GestureDetector(
-              onTap: _panelPage == 0 ? () => _goToPage(1) : null,
-              child: AnimatedOpacity(
-                opacity: _panelPage == 0 ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 200),
-                child: Row(children: [
-                  const SizedBox(width: 10),
-                  Text('Trim',
-                      style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10)),
-                  Icon(Icons.keyboard_arrow_down_rounded,
-                      color: Colors.white.withOpacity(0.4), size: 13),
-                ]),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget _buildPanel() {
+    return Column(children: [
+      // ── Tool icon row ─────────────────────────────────────────────────────
+      SizedBox(
+        height: 86,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          children: _Tool.values.map((tool) {
+            final isActive = _activeTool == tool;
+            // Show dot badge for trim (applied) and crop (applied)
+            final showBadge =
+                (tool == _Tool.trim   && _trimApplied  && !isActive) ||
+                (tool == _Tool.crop   && _cropApplied  && !isActive);
 
-  Widget _pageDot(int page) => AnimatedContainer(
-    duration: const Duration(milliseconds: 220),
-    curve: Curves.easeOut,
-    width:  _panelPage == page ? 18 : 5,
-    height: 4,
-    decoration: BoxDecoration(
-      color: _panelPage == page ? Colors.white : Colors.white.withOpacity(0.28),
-      borderRadius: BorderRadius.circular(2),
-    ),
-  );
-
-  // ===========================================================================
-  // TRIM & AUDIO PAGE  (panel page 0)
-  // ===========================================================================
-
-  Widget _buildTrimAudioPage() {
-    return Container(
-      color: Colors.black,
-      child: Column(children: [
-        // Trim scrubber
-        Padding(
-          padding: const EdgeInsets.only(top: 10),
-          child: TrimViewer(
-            trimmer:        _trimmer,
-            viewerHeight:   60,
-            viewerWidth:    MediaQuery.of(context).size.width,
-            maxVideoLength: const Duration(seconds: 60),
-            onChangeStart: (v) { _startValue = v; _trimDirty = true; },
-            onChangeEnd:   (v) { _endValue   = v; _trimDirty = true; },
-            onChangePlaybackState: (p) {
-              if (mounted) setState(() => _isTrimPlaying = p);
-            },
-          ),
-        ),
-
-        // Trim play/pause
-        SizedBox(
-          height: 40,
-          child: Center(
-            child: GestureDetector(
-              onTap: () async {
-                try {
-                  final p = await _trimmer.videoPlaybackControl(
-                    startValue: _startValue, endValue: _endValue,
-                  );
-                  if (mounted) setState(() => _isTrimPlaying = p);
-                } catch (_) {}
-              },
+            return GestureDetector(
+              onTap: () => _onToolTap(tool),
               child: Container(
-                width: 32, height: 32,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white.withOpacity(0.1),
-                  border: Border.all(color: Colors.white.withOpacity(0.28), width: 1),
-                ),
-                child: Icon(
-                  _isTrimPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  color: Colors.white, size: 16,
-                ),
-              ),
-            ),
-          ),
-        ),
-
-        // Divider
-        Divider(color: Colors.white.withOpacity(0.07), height: 1),
-
-        // ── Audio controls ──────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-          child: Row(children: [
-            // Mute toggle button
-            GestureDetector(
-              onTap: _toggleMute,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                width: 36, height: 36,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _isMuted
-                      ? Colors.white.withOpacity(0.14)
-                      : Colors.transparent,
-                  border: Border.all(
-                    color: Colors.white.withOpacity(_isMuted ? 0.5 : 0.22),
-                    width: 1,
-                  ),
-                ),
-                child: Icon(
-                  _isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                  color: Colors.white.withOpacity(0.9),
-                  size: 17,
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-
-            // Volume slider
-            Expanded(
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight:  2.5,
-                  thumbShape:   const RoundSliderThumbShape(enabledThumbRadius: 6),
-                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                  activeTrackColor:   _isMuted
-                      ? Colors.white.withOpacity(0.2) : Colors.white,
-                  inactiveTrackColor: Colors.white.withOpacity(0.16),
-                  thumbColor:  _isMuted ? Colors.white.withOpacity(0.35) : Colors.white,
-                  overlayColor: Colors.white.withOpacity(0.12),
-                  disabledActiveTrackColor: Colors.white.withOpacity(0.2),
-                  disabledThumbColor:       Colors.white.withOpacity(0.35),
-                ),
-                child: Slider(
-                  value:     _volume,
-                  min:       0.0,
-                  max:       1.0,
-                  onChanged: _isMuted ? null : _setVolume,
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-
-            // Volume % label
-            SizedBox(
-              width: 40,
-              child: Text(
-                _isMuted ? 'Muted' : '${(_volume * 100).round()}%',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(_isMuted ? 0.3 : 0.55),
-                  fontSize: 11,
-                ),
-                textAlign: TextAlign.right,
-              ),
-            ),
-          ]),
-        ),
-
-        // "Original Audio" label
-        Padding(
-          padding: const EdgeInsets.only(left: 60, top: 5),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'Original Audio',
-              style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 10),
-            ),
-          ),
-        ),
-      ]),
-    );
-  }
-
-  // ===========================================================================
-  // CREATIVE TOOLS PAGE  (panel page 1)
-  // ===========================================================================
-
-  Widget _buildCreativeToolsPage() {
-    return Container(
-      color: Colors.black,
-      child: Column(children: [
-        // Tools icon row
-        SizedBox(
-          height: 86,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            children: _Tool.values.map((tool) {
-              final isActive = _activeTool == tool;
-              return GestureDetector(
-                onTap: () => _onToolTap(tool),
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 7),
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Stack(clipBehavior: Clip.none, children: [
+                margin: const EdgeInsets.symmetric(horizontal: 7),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Stack(clipBehavior: Clip.none, children: [
                     AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
                       width: 50, height: 50,
@@ -1196,62 +791,55 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                           width: isActive ? 1.5 : 1.0,
                         ),
                       ),
-                      child: Icon(
-                        _toolIcon(tool),
-                        color: isActive
-                            ? Colors.white
-                            : Colors.white.withOpacity(0.6),
-                        size: 22,
-                      ),
+                      child: Icon(_toolIcon(tool),
+                          color: isActive
+                              ? Colors.white
+                              : Colors.white.withOpacity(0.6),
+                          size: 22),
                     ),
-                    // Dot badge when crop has been applied
-                    if (tool == _Tool.crop && _cropApplied && !isActive)
+                    if (showBadge)
                       Positioned(
                         top: 2, right: 2,
                         child: Container(
                           width: 8, height: 8,
                           decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.white,
-                            border: Border.all(
-                                color: Colors.black.withOpacity(0.4), width: 1),
+                            shape: BoxShape.circle, color: Colors.white,
+                            border: Border.all(color: Colors.black.withOpacity(0.4), width: 1),
                           ),
                         ),
                       ),
-                    ]), // closes Stack
-                    const SizedBox(height: 5),
-                    Text(
-                      _toolLabel(tool),
+                  ]),
+                  const SizedBox(height: 5),
+                  Text(_toolLabel(tool),
                       style: TextStyle(
-                        color: isActive
-                            ? Colors.white
-                            : Colors.white.withOpacity(0.48),
+                        color: isActive ? Colors.white : Colors.white.withOpacity(0.48),
                         fontSize: 10,
                         fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-                      ),
-                    ),
-                  ]),
-                ),
-              );
-            }).toList(),
-          ),
+                      )),
+                ]),
+              ),
+            );
+          }).toList(),
         ),
+      ),
 
-        // Divider
-        Divider(color: Colors.white.withOpacity(0.07), height: 1),
+      // Divider
+      Divider(color: Colors.white.withOpacity(0.07), height: 1),
 
-        // Detail panel for selected tool
-        Expanded(child: _buildToolDetail()),
-      ]),
-    );
+      // ── Detail area for selected tool ─────────────────────────────────────
+      Expanded(child: _buildToolDetail()),
+    ]);
   }
 
   Widget _buildToolDetail() {
     switch (_activeTool) {
+      // ── Trim + Audio ──────────────────────────────────────────────────────
+      case _Tool.trim:
+        return _buildTrimDetail();
+
       case _Tool.filters:
         return FilterStrip(
-          selectedIndex: _selectedFilterIndex,
-          previewImage:  null,
+          selectedIndex: _selectedFilterIndex, previewImage: null,
           onSelect: (i) => setState(() => _selectedFilterIndex = i),
         );
       case _Tool.adjust:
@@ -1261,14 +849,11 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
         );
       case _Tool.crop:
         return SnapCropPanel(
-          selected:       _cropAspect,
-          onSnapToAspect: _snapCropToAspect,
+          selected: _cropAspect, onSnapToAspect: _snapCropToAspect,
         );
       case _Tool.draw:
         return DrawPanel(
-          tool:           _drawTool,
-          color:          _drawColor,
-          strokeWidth:    _drawSize,
+          tool: _drawTool, color: _drawColor, strokeWidth: _drawSize,
           onUndo:         () => setState(() { if (_strokes.isNotEmpty) _strokes.removeLast(); }),
           onClear:        () => setState(() => _strokes.clear()),
           onToolChanged:  (t) => setState(() => _drawTool  = t),
@@ -1277,12 +862,130 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
         );
       default:
         return Center(
-          child: Text(
-            'Select a tool above',
-            style: TextStyle(color: Colors.white.withOpacity(0.22), fontSize: 13),
-          ),
+          child: Text('Select a tool above',
+              style: TextStyle(color: Colors.white.withOpacity(0.22), fontSize: 13)),
         );
     }
+  }
+
+  // ── Trim + Audio detail ───────────────────────────────────────────────────
+
+  Widget _buildTrimDetail() {
+    return SingleChildScrollView(
+      child: Column(children: [
+        // Scrubber
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: TrimViewer(
+            trimmer:        _trimmer,
+            viewerHeight:   54,
+            viewerWidth:    MediaQuery.of(context).size.width,
+            maxVideoLength: const Duration(seconds: 60),
+            onChangeStart: (v) { _startValue = v; _trimDirty = true; },
+            onChangeEnd:   (v) { _endValue   = v; _trimDirty = true; },
+            onChangePlaybackState: (p) {
+              if (mounted) setState(() => _isTrimPlaying = p);
+            },
+          ),
+        ),
+
+        // Play/pause for trim preview
+        SizedBox(
+          height: 38,
+          child: Center(
+            child: GestureDetector(
+              onTap: () async {
+                try {
+                  final p = await _trimmer.videoPlaybackControl(
+                    startValue: _startValue, endValue: _endValue,
+                  );
+                  if (mounted) setState(() => _isTrimPlaying = p);
+                } catch (_) {}
+              },
+              child: Container(
+                width: 30, height: 30,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.1),
+                  border: Border.all(color: Colors.white.withOpacity(0.28), width: 1),
+                ),
+                child: Icon(
+                  _isTrimPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                  color: Colors.white, size: 15,
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        Divider(color: Colors.white.withOpacity(0.07), height: 1),
+
+        // Audio controls
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+          child: Row(children: [
+            GestureDetector(
+              onTap: _toggleMute,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _isMuted ? Colors.white.withOpacity(0.14) : Colors.transparent,
+                  border: Border.all(
+                    color: Colors.white.withOpacity(_isMuted ? 0.5 : 0.22), width: 1,
+                  ),
+                ),
+                child: Icon(
+                  _isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                  color: Colors.white.withOpacity(0.9), size: 17,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight:  2.5,
+                  thumbShape:   const RoundSliderThumbShape(enabledThumbRadius: 6),
+                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                  activeTrackColor:         _isMuted ? Colors.white.withOpacity(0.2) : Colors.white,
+                  inactiveTrackColor:       Colors.white.withOpacity(0.16),
+                  thumbColor:               _isMuted ? Colors.white.withOpacity(0.35) : Colors.white,
+                  overlayColor:             Colors.white.withOpacity(0.12),
+                  disabledActiveTrackColor: Colors.white.withOpacity(0.2),
+                  disabledThumbColor:       Colors.white.withOpacity(0.35),
+                ),
+                child: Slider(
+                  value: _volume, min: 0.0, max: 1.0,
+                  onChanged: _isMuted ? null : _setVolume,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            SizedBox(
+              width: 40,
+              child: Text(
+                _isMuted ? 'Muted' : '${(_volume * 100).round()}%',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(_isMuted ? 0.3 : 0.55),
+                  fontSize: 11,
+                ),
+                textAlign: TextAlign.right,
+              ),
+            ),
+          ]),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 60, top: 4, bottom: 4),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Original Audio',
+                style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 10)),
+          ),
+        ),
+      ]),
+    );
   }
 
   // ===========================================================================
@@ -1317,12 +1020,32 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   }
 
   // ===========================================================================
-  // FLOATING BUTTON HELPER
+  // HELPERS
   // ===========================================================================
 
+  Widget _cropBarBtn({required String label, required bool primary, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: primary ? 24 : 20, vertical: 10),
+        decoration: BoxDecoration(
+          color: primary ? Colors.white : Colors.black.withOpacity(0.55),
+          borderRadius: BorderRadius.circular(22),
+          border: primary ? null : Border.all(color: Colors.white.withOpacity(0.28), width: 1),
+        ),
+        child: Text(label,
+            style: TextStyle(
+              color: primary ? Colors.black : Colors.white,
+              fontSize: 14,
+              fontWeight: primary ? FontWeight.w700 : FontWeight.w500,
+            )),
+      ),
+    );
+  }
+
   Widget _buildFloatBtn({
-    required IconData    icon,
-    required String      label,
+    required IconData     icon,
+    required String       label,
     required VoidCallback onTap,
   }) {
     return GestureDetector(
@@ -1338,25 +1061,19 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
           child: Icon(icon, color: Colors.white, size: 20),
         ),
         const SizedBox(height: 3),
-        Text(
-          label,
-          style: TextStyle(
-            color:      Colors.white.withOpacity(0.85),
-            fontSize:   10,
-            fontWeight: FontWeight.w500,
-            shadows: [Shadow(color: Colors.black.withOpacity(0.6), blurRadius: 4)],
-          ),
-        ),
+        Text(label, style: TextStyle(
+          color:      Colors.white.withOpacity(0.85),
+          fontSize:   10,
+          fontWeight: FontWeight.w500,
+          shadows: [Shadow(color: Colors.black.withOpacity(0.6), blurRadius: 4)],
+        )),
       ]),
     );
   }
 
-  // ===========================================================================
-  // TOOL ICONS & LABELS
-  // ===========================================================================
-
   IconData _toolIcon(_Tool t) {
     switch (t) {
+      case _Tool.trim:    return Icons.content_cut_rounded;
       case _Tool.filters: return Icons.auto_fix_high_rounded;
       case _Tool.adjust:  return Icons.tune_rounded;
       case _Tool.crop:    return Icons.crop_rounded;
@@ -1368,6 +1085,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
 
   String _toolLabel(_Tool t) {
     switch (t) {
+      case _Tool.trim:    return 'Trim';
       case _Tool.filters: return 'Filters';
       case _Tool.adjust:  return 'Adjust';
       case _Tool.crop:    return 'Crop';
