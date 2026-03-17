@@ -722,14 +722,17 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
           // ── Page indicator ───────────────────────────────────────────────
           _buildPageIndicator(),
 
-          // ── Bottom panel (vertical PageView) ─────────────────────────────
-          // Page 0 = Trim & Audio  (shown by default)
-          // Page 1 = Creative Tools  (swipe up to reveal)
+          // ── Bottom panel ─────────────────────────────────────────────────
+          // NeverScrollableScrollPhysics prevents the PageView from competing
+          // in Flutter's gesture arena with the TrimViewer's horizontal pan
+          // recognizers. Pages are switched programmatically via swipe on the
+          // indicator strip or by tapping the hint labels.
           SizedBox(
             height: _panelH,
             child: PageView(
               controller:      _panelController,
               scrollDirection: Axis.vertical,
+              physics:         const NeverScrollableScrollPhysics(),
               onPageChanged:   _onPanelPageChanged,
               children: [
                 _buildTrimAudioPage(),
@@ -804,46 +807,74 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
     ),
   );
 
+  void _goToPage(int page) {
+    _panelController.animateToPage(
+      page,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+    // _onPanelPageChanged fires via onPageChanged — no need to call it here.
+  }
+
   // ===========================================================================
   // PAGE INDICATOR
   // ===========================================================================
 
   Widget _buildPageIndicator() {
-    return Container(
-      height: _indicatorH,
-      color: const Color(0xFF080808),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // "↓ Trim" hint — visible only when on tools page
-          AnimatedOpacity(
-            opacity: _panelPage == 1 ? 1.0 : 0.0,
-            duration: const Duration(milliseconds: 200),
-            child: Row(children: [
-              Icon(Icons.keyboard_arrow_down_rounded,
-                  color: Colors.white.withOpacity(0.4), size: 13),
-              Text('Trim',
-                  style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10)),
-              const SizedBox(width: 10),
-            ]),
-          ),
-          // Animated pill dots
-          _pageDot(0),
-          const SizedBox(width: 5),
-          _pageDot(1),
-          // "Edit ↑" hint — visible only when on trim page
-          AnimatedOpacity(
-            opacity: _panelPage == 0 ? 1.0 : 0.0,
-            duration: const Duration(milliseconds: 200),
-            child: Row(children: [
-              const SizedBox(width: 10),
-              Text('Edit',
-                  style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10)),
-              Icon(Icons.keyboard_arrow_up_rounded,
-                  color: Colors.white.withOpacity(0.4), size: 13),
-            ]),
-          ),
-        ],
+    // The indicator strip is the only swipe target for switching pages.
+    // Keeping swipe detection here — away from TrimViewer — eliminates the
+    // gesture-arena conflict that was making the trim handles unresponsive.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragEnd: (d) {
+        // Swipe up   → go to edit page (1)
+        // Swipe down → go to trim page (0)
+        if (d.primaryVelocity == null) return;
+        if (d.primaryVelocity! < -200 && _panelPage == 0) _goToPage(1);
+        if (d.primaryVelocity! >  200 && _panelPage == 1) _goToPage(0);
+      },
+      child: Container(
+        height: _indicatorH,
+        color: const Color(0xFF080808),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // "↓ Trim" — tappable hint on the edit page
+            GestureDetector(
+              onTap: _panelPage == 1 ? () => _goToPage(0) : null,
+              child: AnimatedOpacity(
+                opacity: _panelPage == 1 ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: Row(children: [
+                  Icon(Icons.keyboard_arrow_down_rounded,
+                      color: Colors.white.withOpacity(0.4), size: 13),
+                  Text('Trim',
+                      style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10)),
+                  const SizedBox(width: 10),
+                ]),
+              ),
+            ),
+            // Animated pill dots — tappable
+            GestureDetector(onTap: () => _goToPage(0), child: _pageDot(0)),
+            const SizedBox(width: 5),
+            GestureDetector(onTap: () => _goToPage(1), child: _pageDot(1)),
+            // "Edit ↑" — tappable hint on the trim page
+            GestureDetector(
+              onTap: _panelPage == 0 ? () => _goToPage(1) : null,
+              child: AnimatedOpacity(
+                opacity: _panelPage == 0 ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: Row(children: [
+                  const SizedBox(width: 10),
+                  Text('Edit',
+                      style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10)),
+                  Icon(Icons.keyboard_arrow_up_rounded,
+                      color: Colors.white.withOpacity(0.4), size: 13),
+                ]),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
