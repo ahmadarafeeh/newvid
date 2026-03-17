@@ -31,12 +31,19 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   bool _isVideoInitialized = false;
   bool _isPlaying          = false;
 
+  // ── Active video file ──────────────────────────────────────────────────────
+  // Starts as the original file. Replaced with the trimmed file when the user
+  // presses Save in the Trim panel — so all other tools and the final post use
+  // the trimmed version, not the original.
+  late File _activeVideoFile;
+
   // ── Trimmer ────────────────────────────────────────────────────────────────
   final Trimmer _trimmer       = Trimmer();
   double _startValue           = 0.0;
   double _endValue             = 0.0;
   bool   _isTrimPlaying        = false;
-  bool   _isSavingTrim         = false;
+  bool   _isSavingTrim         = false;   // Next button spinner
+  bool   _isSavingTrimInline   = false;   // Save button spinner inside trim panel
   bool   _trimDirty            = false;
   bool   _trimApplied          = false;
 
@@ -95,6 +102,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   @override
   void initState() {
     super.initState();
+    _activeVideoFile = widget.videoFile;
     WidgetsBinding.instance.addPostFrameCallback((_) => _logBoot());
     _initPreviewPlayer();
     _trimmer.loadVideo(videoFile: widget.videoFile);
@@ -234,6 +242,95 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
       await _videoController!.pause();
     }
     if (mounted) setState(() => _isPlaying = false);
+  }
+
+  // ===========================================================================
+  // SAVE TRIM
+  // Re-encodes the trimmed segment, swaps _activeVideoFile, and re-initialises
+  // the preview player so every other tool immediately sees the shorter clip.
+  // ===========================================================================
+
+  Future<void> _saveTrim() async {
+    if (!_trimDirty) return; // nothing changed, nothing to do
+    if (mounted) setState(() => _isSavingTrimInline = true);
+
+    await _log(operation: 'trim/save_start', data: {
+      'startValue': _startValue, 'endValue': _endValue,
+      'activeFilePath': _activeVideoFile.path,
+    });
+
+    File? trimmedFile;
+    try {
+      final completer = Completer<String?>();
+      await _trimmer.saveTrimmedVideo(
+        startValue: _startValue,
+        endValue:   _endValue,
+        onSave: (String? path) {
+          if (!completer.isCompleted) completer.complete(path);
+        },
+      );
+      final savedPath = await completer.future
+          .timeout(const Duration(seconds: 30), onTimeout: () => null);
+
+      if (savedPath != null) {
+        final f       = File(savedPath);
+        final exists  = f.existsSync();
+        final bytes   = exists ? f.lengthSync() : 0;
+        await _log(operation: 'trim/saved_inline', data: {
+          'savedPath': savedPath, 'exists': exists, 'sizeBytes': bytes,
+        });
+        if (exists && bytes > 0) trimmedFile = f;
+      }
+    } catch (e, st) {
+      await _log(
+        operation: 'trim/save_inline_error',
+        errorMessage: e.toString(), stackTrace: st.toString(),
+      );
+    }
+
+    if (!mounted) return;
+
+    if (trimmedFile != null) {
+      // Swap the active file reference.
+      setState(() => _activeVideoFile = trimmedFile!);
+
+      // Dispose old controller and spin up a new one pointing to trimmed file.
+      final old = _videoController;
+      setState(() { _isVideoInitialized = false; _isPlaying = false; });
+      old?.dispose();
+
+      try {
+        final c = VideoPlayerController.file(
+          trimmedFile,
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        );
+        await c.initialize();
+        await c.setLooping(true);
+        await c.setVolume(_isMuted ? 0.0 : _volume);
+        if (mounted) {
+          setState(() {
+            _videoController    = c;
+            _isVideoInitialized = true;
+            _isPlaying          = false;
+            // Reset trim state — the trimmed file is now the baseline.
+            _trimDirty   = false;
+            _trimApplied = true;
+            _startValue  = 0.0;
+            _endValue    = 0.0;
+          });
+          // Reload the trimmer on the new (shorter) file so the scrubber
+          // reflects the trimmed duration.
+          _trimmer.loadVideo(videoFile: trimmedFile);
+        }
+      } catch (e, st) {
+        await _log(
+          operation: 'trim/reinit_error',
+          errorMessage: e.toString(), stackTrace: st.toString(),
+        );
+      }
+    }
+
+    if (mounted) setState(() => _isSavingTrimInline = false);
   }
 
   // ===========================================================================
@@ -397,93 +494,29 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   // ===========================================================================
 
   Future<void> _onNext() async {
+    // If the user moved trim handles but never pressed Save, encode now as a
+    // fallback so they never accidentally post the full original.
+    if (_trimDirty) {
+      await _saveTrim();
+      if (!mounted) return;
+    }
+
     await _silenceAndStop();
     if (!mounted) return;
 
-    if (_trimDirty) {
-      setState(() => _isSavingTrim = true);
-      File?   trimmedFile;
-      String? trimError;
-      String? trimStack;
+    await _log(operation: 'trim/navigate', data: {
+      'activeFilePath':   _activeVideoFile.path,
+      'activeFileExists': _activeVideoFile.existsSync(),
+      'activeFileSizeBytes': _activeVideoFile.existsSync()
+          ? _activeVideoFile.lengthSync() : null,
+      'trimApplied': _trimApplied,
+    });
 
-      await _log(operation: 'trim/start', data: {
-        'startValue': _startValue, 'endValue': _endValue,
-        'originalPath':      widget.videoFile.path,
-        'originalExists':    widget.videoFile.existsSync(),
-        'originalSizeBytes': widget.videoFile.existsSync()
-            ? widget.videoFile.lengthSync() : null,
-      });
-
-      try {
-        final completer = Completer<String?>();
-        await _trimmer.saveTrimmedVideo(
-          startValue: _startValue, endValue: _endValue,
-          onSave: (String? path) {
-            if (!completer.isCompleted) completer.complete(path);
-          },
-        );
-        final savedPath = await completer.future
-            .timeout(const Duration(seconds: 30), onTimeout: () => null);
-
-        if (savedPath != null) {
-          trimmedFile = File(savedPath);
-          final exists    = trimmedFile.existsSync();
-          final sizeBytes = exists ? trimmedFile.lengthSync() : 0;
-          await _log(operation: 'trim/save_callback', data: {
-            'savedPath': savedPath, 'fileExists': exists, 'sizeBytes': sizeBytes,
-          });
-          if (!exists || sizeBytes == 0) {
-            await _log(
-              operation: 'trim/bad_output_file',
-              errorMessage: exists ? 'File is 0 bytes' : 'File does not exist',
-              data: { 'savedPath': savedPath, 'exists': exists, 'sizeBytes': sizeBytes },
-            );
-            trimmedFile = null;
-          }
-        } else {
-          await _log(
-            operation: 'trim/null_path',
-            errorMessage: 'onSave returned null or timed out',
-            data: { 'startValue': _startValue, 'endValue': _endValue },
-          );
-        }
-      } catch (e, st) {
-        trimError = e.toString(); trimStack = st.toString();
-        await _log(
-          operation: 'trim/exception', errorMessage: trimError,
-          stackTrace: trimStack,
-          data: { 'startValue': _startValue, 'endValue': _endValue },
-        );
-      }
-
-      final fileToPass = trimmedFile ?? widget.videoFile;
-      await _log(operation: 'trim/navigate', data: {
-        'usingTrimmedFile': trimmedFile != null,
-        'finalPath':        fileToPass.path,
-        'finalExists':      fileToPass.existsSync(),
-        'finalSizeBytes':   fileToPass.existsSync() ? fileToPass.lengthSync() : null,
-        'trimError':        trimError,
-      });
-
-      if (mounted) setState(() => _isSavingTrim = false);
-      if (!mounted) return;
-
-      Navigator.push(context, MaterialPageRoute(builder: (_) => AddPostScreen(
-        initialVideoFile: fileToPass,
-        onPostUploaded:   widget.onPostUploaded,
-      )));
-    } else {
-      await _log(operation: 'trim/skip_no_dirty', data: {
-        'originalPath':      widget.videoFile.path,
-        'originalExists':    widget.videoFile.existsSync(),
-        'originalSizeBytes': widget.videoFile.existsSync()
-            ? widget.videoFile.lengthSync() : null,
-      });
-      Navigator.push(context, MaterialPageRoute(builder: (_) => AddPostScreen(
-        initialVideoFile: widget.videoFile,
-        onPostUploaded:   widget.onPostUploaded,
-      )));
-    }
+    if (!mounted) return;
+    Navigator.push(context, MaterialPageRoute(builder: (_) => AddPostScreen(
+      initialVideoFile: _activeVideoFile,
+      onPostUploaded:   widget.onPostUploaded,
+    )));
   }
 
   List<double> get _currentMatrix =>
@@ -889,32 +922,66 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
           ),
         ),
 
-        // Play/pause for trim preview
-        SizedBox(
-          height: 38,
-          child: Center(
-            child: GestureDetector(
-              onTap: () async {
-                try {
-                  final p = await _trimmer.videoPlaybackControl(
-                    startValue: _startValue, endValue: _endValue,
-                  );
-                  if (mounted) setState(() => _isTrimPlaying = p);
-                } catch (_) {}
-              },
-              child: Container(
-                width: 30, height: 30,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white.withOpacity(0.1),
-                  border: Border.all(color: Colors.white.withOpacity(0.28), width: 1),
-                ),
-                child: Icon(
-                  _isTrimPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  color: Colors.white, size: 15,
+        // Play/pause + Save row
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Play/pause
+              GestureDetector(
+                onTap: () async {
+                  try {
+                    final p = await _trimmer.videoPlaybackControl(
+                      startValue: _startValue, endValue: _endValue,
+                    );
+                    if (mounted) setState(() => _isTrimPlaying = p);
+                  } catch (_) {}
+                },
+                child: Container(
+                  width: 30, height: 30,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withOpacity(0.1),
+                    border: Border.all(color: Colors.white.withOpacity(0.28), width: 1),
+                  ),
+                  child: Icon(
+                    _isTrimPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                    color: Colors.white, size: 15,
+                  ),
                 ),
               ),
-            ),
+
+              // Save trim button
+              GestureDetector(
+                onTap: (_trimDirty && !_isSavingTrimInline) ? _saveTrim : null,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _trimDirty
+                        ? Colors.white
+                        : Colors.white.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: _isSavingTrimInline
+                      ? const SizedBox(
+                          width: 14, height: 14,
+                          child: CircularProgressIndicator(
+                              color: Colors.black, strokeWidth: 2))
+                      : Text(
+                          'Save',
+                          style: TextStyle(
+                            color: _trimDirty
+                                ? Colors.black
+                                : Colors.white.withOpacity(0.3),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                ),
+              ),
+            ],
           ),
         ),
 
