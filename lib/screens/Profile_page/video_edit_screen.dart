@@ -345,7 +345,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
       return;
     }
     final videoRatio = (_videoController?.value.aspectRatio) ?? 1.0;
-    double left, top, right, bottom;
+    double left = 0.0, top = 0.0, right = 1.0, bottom = 1.0;
     if (videoRatio >= ratio) {
       final normW = ratio / videoRatio;
       left = (1.0 - normW) / 2; right = 1.0 - left;
@@ -1094,7 +1094,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: primary ? 24 : 20, vertical: 10),
+        padding: EdgeInsets.symmetric(horizontal: primary ? 24.0 : 20.0, vertical: 10),
         decoration: BoxDecoration(
           color: primary ? Colors.white : Colors.black.withOpacity(0.55),
           borderRadius: BorderRadius.circular(22),
