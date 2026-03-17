@@ -221,7 +221,11 @@ class _MediaEditScreenState extends State<MediaEditScreen> {
     });
   }
 
+  // ===========================================================================
+  // TEXT
+  // ===========================================================================
 
+  void _enterTextMode() {
     _textCtrl.clear();
     setState(() {
       _isTyping = true;
