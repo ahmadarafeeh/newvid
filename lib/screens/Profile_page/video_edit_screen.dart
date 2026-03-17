@@ -9,7 +9,7 @@ import 'package:Ratedly/screens/Profile_page/add_post_screen.dart';
 import 'package:Ratedly/screens/Profile_page/edit_shared.dart';
 
 // Trim is the first tool so it is selected by default on open.
-enum _Tool { trim, filters, adjust, crop, draw, text, rotate }
+enum _Tool { trim, filters, adjust, crop, draw, text, sound, rotate }
 
 class VideoEditScreen extends StatefulWidget {
   final File videoFile;
@@ -177,13 +177,14 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   // ===========================================================================
 
   void _onToolTap(_Tool tool) {
-    if (tool == _Tool.text) { _enterTextMode(); return; }
+    if (tool == _Tool.text)  { _enterTextMode(); return; }
+    if (tool == _Tool.sound) { _toggleMute();    return; }
     if (tool == _Tool.rotate) {
       setState(() => _rotationQuarters = (_rotationQuarters + 1) % 4);
       return;
     }
 
-    final wasTrim = _activeTool == _Tool.trim;
+    final wasTrim   = _activeTool == _Tool.trim;
     final goingTrim = tool == _Tool.trim;
 
     // Pause preview when entering Trim; resume when leaving.
@@ -317,10 +318,15 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
             _trimApplied = true;
             _startValue  = 0.0;
             _endValue    = 0.0;
+            // Trim tab is now hidden — move to filters so the panel isn't blank.
+            _activeTool  = _Tool.filters;
           });
           // Reload the trimmer on the new (shorter) file so the scrubber
           // reflects the trimmed duration.
           _trimmer.loadVideo(videoFile: trimmedFile);
+          // Start playback so the trimmed clip is immediately visible in preview.
+          c.play();
+          if (mounted) setState(() => _isPlaying = true);
         }
       } catch (e, st) {
         await _log(
@@ -686,27 +692,6 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                   )),
                 ),
 
-              // Right-side floating buttons (Text + Sound)
-              Positioned(
-                right: 10, top: 0, bottom: 0,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _buildFloatBtn(
-                      icon:  Icons.text_fields_rounded,
-                      label: 'Text',
-                      onTap: _enterTextMode,
-                    ),
-                    const SizedBox(height: 20),
-                    _buildFloatBtn(
-                      icon:  _isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                      label: _isMuted ? 'Unmute' : 'Sound',
-                      onTap: _toggleMute,
-                    ),
-                  ],
-                ),
-              ),
-
               // Trash zone
               if (_isDragging)
                 Positioned(
@@ -796,12 +781,15 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
         child: ListView(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          children: _Tool.values.map((tool) {
-            final isActive = _activeTool == tool;
+          children: _Tool.values.where((t) => !(t == _Tool.trim && _trimApplied)).map((tool) {
+            // Sound highlights when audio is ON (not muted), not based on selection.
+            final isActive = tool == _Tool.sound
+                ? !_isMuted
+                : _activeTool == tool;
             // Show dot badge for trim (applied) and crop (applied)
             final showBadge =
-                (tool == _Tool.trim   && _trimApplied  && !isActive) ||
-                (tool == _Tool.crop   && _cropApplied  && !isActive);
+                (tool == _Tool.trim  && _trimApplied && !isActive) ||
+                (tool == _Tool.crop  && _cropApplied && !isActive);
 
             return GestureDetector(
               onTap: () => _onToolTap(tool),
@@ -906,13 +894,13 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   Widget _buildTrimDetail() {
     return SingleChildScrollView(
       child: Column(children: [
-        // Scrubber
+        // Scrubber — inset 20px each side so it doesn't span edge-to-edge
         Padding(
-          padding: const EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.only(top: 8, left: 20, right: 20),
           child: TrimViewer(
             trimmer:        _trimmer,
             viewerHeight:   54,
-            viewerWidth:    MediaQuery.of(context).size.width,
+            viewerWidth:    MediaQuery.of(context).size.width - 40,
             maxVideoLength: const Duration(seconds: 60),
             onChangeStart: (v) { _startValue = v; _trimDirty = true; },
             onChangeEnd:   (v) { _endValue   = v; _trimDirty = true; },
@@ -1110,34 +1098,6 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
     );
   }
 
-  Widget _buildFloatBtn({
-    required IconData     icon,
-    required String       label,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Container(
-          width: 40, height: 40,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color:  Colors.black.withOpacity(0.42),
-            border: Border.all(color: Colors.white.withOpacity(0.22), width: 1),
-          ),
-          child: Icon(icon, color: Colors.white, size: 20),
-        ),
-        const SizedBox(height: 3),
-        Text(label, style: TextStyle(
-          color:      Colors.white.withOpacity(0.85),
-          fontSize:   10,
-          fontWeight: FontWeight.w500,
-          shadows: [Shadow(color: Colors.black.withOpacity(0.6), blurRadius: 4)],
-        )),
-      ]),
-    );
-  }
-
   IconData _toolIcon(_Tool t) {
     switch (t) {
       case _Tool.trim:    return Icons.content_cut_rounded;
@@ -1146,6 +1106,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
       case _Tool.crop:    return Icons.crop_rounded;
       case _Tool.draw:    return Icons.brush_rounded;
       case _Tool.text:    return Icons.text_fields_rounded;
+      case _Tool.sound:   return _isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded;
       case _Tool.rotate:  return Icons.rotate_90_degrees_cw_rounded;
     }
   }
@@ -1158,6 +1119,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
       case _Tool.crop:    return 'Crop';
       case _Tool.draw:    return 'Draw';
       case _Tool.text:    return 'Text';
+      case _Tool.sound:   return _isMuted ? 'Unmute' : 'Sound';
       case _Tool.rotate:  return 'Rotate';
     }
   }
