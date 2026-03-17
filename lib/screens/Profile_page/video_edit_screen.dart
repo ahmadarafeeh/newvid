@@ -1,7 +1,6 @@
 // lib/screens/Profile_page/video_edit_screen.dart
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
@@ -10,7 +9,7 @@ import 'package:Ratedly/screens/Profile_page/add_post_screen.dart';
 import 'package:Ratedly/screens/Profile_page/edit_shared.dart';
 
 /// Creative tools available on the Edit panel (page 1).
-enum _Tool { filters, adjust, crop, blur, draw, text, rotate }
+enum _Tool { filters, adjust, crop, draw, text, rotate }
 
 class VideoEditScreen extends StatefulWidget {
   final File videoFile;
@@ -39,6 +38,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   bool   _isTrimPlaying = false;
   bool   _isSavingTrim  = false;
   bool   _trimDirty     = false;
+  bool   _trimApplied   = false;
 
   // ── Panel paging ───────────────────────────────────────────────────────────
   // Page 0 = Trim & Audio  (default, swipe UP to go to page 1)
@@ -58,12 +58,9 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   EditAdjustments _adj = const EditAdjustments();
 
   // ── Crop ───────────────────────────────────────────────────────────────────
-  Rect       _cropRect   = const Rect.fromLTRB(0, 0, 1, 1);
-  CropAspect _cropAspect = CropAspect.free;
-
-  // ── Blur ───────────────────────────────────────────────────────────────────
-  BlurType _blurType      = BlurType.none;
-  double   _blurIntensity = 8.0;
+  Rect       _cropRect    = const Rect.fromLTRB(0, 0, 1, 1);
+  CropAspect _cropAspect  = CropAspect.free;
+  bool       _cropApplied = false;
 
   // ── Draw ───────────────────────────────────────────────────────────────────
   final List<DrawStroke> _strokes = [];
@@ -188,21 +185,42 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   }
 
   // ===========================================================================
+  // TRIM CONFIRM / RESET
+  // ===========================================================================
+
+  void _confirmTrim() {
+    setState(() {
+      _trimApplied = _trimDirty;
+      _isTrimPlaying = false;
+    });
+    // Return to the edit page so the user can continue with other tools.
+    _goToPage(0);
+  }
+
+  void _resetTrim() {
+    setState(() {
+      _startValue   = 0.0;
+      _endValue     = 0.0;
+      _trimDirty    = false;
+      _trimApplied  = false;
+      _isTrimPlaying = false;
+    });
+    // Reload the full video so the TrimViewer scrubber resets visually.
+    _trimmer.loadVideo(videoFile: widget.videoFile);
+  }
+
+  // ===========================================================================
   // PANEL PAGE SWITCHING
   // ===========================================================================
 
   void _onPanelPageChanged(int page) {
     setState(() => _panelPage = page);
-    if (page == 0) {
-      // Returning to Trim page.
-      // Re-call loadVideo to re-register the Texture widget with the Flutter
-      // engine. The PageView rebuilds the VideoViewer on every page change,
-      // giving it a new Texture ID. Without this the VideoViewer shows blank.
-      _trimmer.loadVideo(videoFile: widget.videoFile);
+    if (page == 1) {
+      // Entering Trim — pause the preview player so both don't clash.
       _videoController?.pause();
       if (mounted) setState(() => _isPlaying = false);
     } else {
-      // Entering Edit page — start the preview player so edits look live.
+      // Entering Edit — start the preview player so edits look live.
       _videoController?.play();
       if (mounted) {
         setState(() => _isPlaying = _videoController?.value.isPlaying ?? false);
@@ -267,6 +285,26 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
     setState(() {
       _activeTool = (_activeTool == tool) ? null : tool;
       _isDrawing  = false;
+    });
+  }
+
+  // ===========================================================================
+  // CROP CONFIRM / RESET
+  // ===========================================================================
+
+  void _confirmCrop() {
+    final isFull = _cropRect == const Rect.fromLTRB(0, 0, 1, 1);
+    setState(() {
+      _cropApplied = !isFull;
+      _activeTool  = _Tool.filters; // return to filters after confirming
+    });
+  }
+
+  void _resetCrop() {
+    setState(() {
+      _cropRect    = const Rect.fromLTRB(0, 0, 1, 1);
+      _cropAspect  = CropAspect.free;
+      _cropApplied = false;
     });
   }
 
@@ -578,7 +616,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
               // child stays rendered but is covered and receives no hit events.
               Positioned.fill(
                 child: IndexedStack(
-                  index: _panelPage == 0 ? 0 : 1,
+                  index: _panelPage == 1 ? 0 : 1,
                   children: [
                     // Index 0 — Trim page: Trimmer's VideoViewer
                     Container(
@@ -619,12 +657,6 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                 ),
               ),
 
-              // Blur overlay
-              if (_panelPage == 1 && _blurType != BlurType.none)
-                Positioned.fill(
-                  child: _VideoBlurOverlay(blurType: _blurType, intensity: _blurIntensity),
-                ),
-
               // Draw strokes
               if (_panelPage == 1)
                 Positioned.fill(
@@ -648,6 +680,51 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                     onChanged: (r) => setState(() {
                       _cropRect = r; _cropAspect = CropAspect.free;
                     }),
+                  ),
+                ),
+
+              // ── Crop action bar ───────────────────────────────────────
+              if (isCropActive)
+                Positioned(
+                  bottom: 16, left: 24, right: 24,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      GestureDetector(
+                        onTap: _resetCrop,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.55),
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.28), width: 1),
+                          ),
+                          child: const Text('Reset',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500)),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: _confirmCrop,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 24, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(22),
+                          ),
+                          child: const Text('Done',
+                              style: TextStyle(
+                                  color: Colors.black,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700)),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
 
@@ -716,6 +793,52 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                   bottom: 0, left: 0, right: 0,
                   child: TrashZone(isOverTrash: _isOverTrash),
                 ),
+
+              // ── Trim action bar ───────────────────────────────────────────
+              // Floats at the bottom of the video while the trim page is open.
+              if (_panelPage == 1)
+                Positioned(
+                  bottom: 16, left: 24, right: 24,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      GestureDetector(
+                        onTap: _resetTrim,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.55),
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.28), width: 1),
+                          ),
+                          child: const Text('Reset',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500)),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: _confirmTrim,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 24, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(22),
+                          ),
+                          child: const Text('Done',
+                              style: TextStyle(
+                                  color: Colors.black,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
             ]),
           ),
 
@@ -723,10 +846,8 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
           _buildPageIndicator(),
 
           // ── Bottom panel ─────────────────────────────────────────────────
-          // NeverScrollableScrollPhysics prevents the PageView from competing
-          // in Flutter's gesture arena with the TrimViewer's horizontal pan
-          // recognizers. Pages are switched programmatically via swipe on the
-          // indicator strip or by tapping the hint labels.
+          // Page 0 = Creative Tools (default — swipe down to reach Trim)
+          // Page 1 = Trim & Audio   (swipe down to open, swipe up to return)
           SizedBox(
             height: _panelH,
             child: PageView(
@@ -735,8 +856,8 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
               physics:         const NeverScrollableScrollPhysics(),
               onPageChanged:   _onPanelPageChanged,
               children: [
-                _buildTrimAudioPage(),
                 _buildCreativeToolsPage(),
+                _buildTrimAudioPage(),
               ],
             ),
           ),
@@ -813,7 +934,6 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
     );
-    // _onPanelPageChanged fires via onPageChanged — no need to call it here.
   }
 
   // ===========================================================================
@@ -821,17 +941,14 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   // ===========================================================================
 
   Widget _buildPageIndicator() {
-    // The indicator strip is the only swipe target for switching pages.
-    // Keeping swipe detection here — away from TrimViewer — eliminates the
-    // gesture-arena conflict that was making the trim handles unresponsive.
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onVerticalDragEnd: (d) {
-        // Swipe up   → go to edit page (1)
-        // Swipe down → go to trim page (0)
         if (d.primaryVelocity == null) return;
-        if (d.primaryVelocity! < -200 && _panelPage == 0) _goToPage(1);
-        if (d.primaryVelocity! >  200 && _panelPage == 1) _goToPage(0);
+        // Swipe down (positive velocity) → go to trim page (1)
+        if (d.primaryVelocity! >  200 && _panelPage == 0) _goToPage(1);
+        // Swipe up   (negative velocity) → go to edit page (0)
+        if (d.primaryVelocity! < -200 && _panelPage == 1) _goToPage(0);
       },
       child: Container(
         height: _indicatorH,
@@ -839,16 +956,16 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // "↓ Trim" — tappable hint on the edit page
+            // "↑ Edit" — tappable hint on the trim page
             GestureDetector(
               onTap: _panelPage == 1 ? () => _goToPage(0) : null,
               child: AnimatedOpacity(
                 opacity: _panelPage == 1 ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 200),
                 child: Row(children: [
-                  Icon(Icons.keyboard_arrow_down_rounded,
+                  Icon(Icons.keyboard_arrow_up_rounded,
                       color: Colors.white.withOpacity(0.4), size: 13),
-                  Text('Trim',
+                  Text('Edit',
                       style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10)),
                   const SizedBox(width: 10),
                 ]),
@@ -857,8 +974,20 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
             // Animated pill dots — tappable
             GestureDetector(onTap: () => _goToPage(0), child: _pageDot(0)),
             const SizedBox(width: 5),
-            GestureDetector(onTap: () => _goToPage(1), child: _pageDot(1)),
-            // "Edit ↑" — tappable hint on the trim page
+            // Dot 1 = Trim page — show badge when trim has been applied
+            Stack(clipBehavior: Clip.none, children: [
+              GestureDetector(onTap: () => _goToPage(1), child: _pageDot(1)),
+              if (_trimApplied && _panelPage != 1)
+                Positioned(
+                  top: -5, right: -5,
+                  child: Container(
+                    width: 6, height: 6,
+                    decoration: const BoxDecoration(
+                        shape: BoxShape.circle, color: Colors.white),
+                  ),
+                ),
+            ]),
+            // "Trim ↓" — tappable hint on the edit page
             GestureDetector(
               onTap: _panelPage == 0 ? () => _goToPage(1) : null,
               child: AnimatedOpacity(
@@ -866,9 +995,9 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                 duration: const Duration(milliseconds: 200),
                 child: Row(children: [
                   const SizedBox(width: 10),
-                  Text('Edit',
+                  Text('Trim',
                       style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10)),
-                  Icon(Icons.keyboard_arrow_up_rounded,
+                  Icon(Icons.keyboard_arrow_down_rounded,
                       color: Colors.white.withOpacity(0.4), size: 13),
                 ]),
               ),
@@ -1051,6 +1180,7 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 7),
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Stack(clipBehavior: Clip.none, children: [
                     AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
                       width: 50, height: 50,
@@ -1074,6 +1204,21 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                         size: 22,
                       ),
                     ),
+                    // Dot badge when crop has been applied
+                    if (tool == _Tool.crop && _cropApplied && !isActive)
+                      Positioned(
+                        top: 2, right: 2,
+                        child: Container(
+                          width: 8, height: 8,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white,
+                            border: Border.all(
+                                color: Colors.black.withOpacity(0.4), width: 1),
+                          ),
+                        ),
+                      ),
+                    ]), // closes Stack
                     const SizedBox(height: 5),
                     Text(
                       _toolLabel(tool),
@@ -1118,13 +1263,6 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
         return SnapCropPanel(
           selected:       _cropAspect,
           onSnapToAspect: _snapCropToAspect,
-        );
-      case _Tool.blur:
-        return BlurPanel(
-          selected:           _blurType,
-          intensity:          _blurIntensity,
-          onSelectType:       (t) => setState(() => _blurType      = t),
-          onIntensityChanged: (v) => setState(() => _blurIntensity = v),
         );
       case _Tool.draw:
         return DrawPanel(
@@ -1222,7 +1360,6 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
       case _Tool.filters: return Icons.auto_fix_high_rounded;
       case _Tool.adjust:  return Icons.tune_rounded;
       case _Tool.crop:    return Icons.crop_rounded;
-      case _Tool.blur:    return Icons.blur_on_rounded;
       case _Tool.draw:    return Icons.brush_rounded;
       case _Tool.text:    return Icons.text_fields_rounded;
       case _Tool.rotate:  return Icons.rotate_90_degrees_cw_rounded;
@@ -1234,91 +1371,9 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
       case _Tool.filters: return 'Filters';
       case _Tool.adjust:  return 'Adjust';
       case _Tool.crop:    return 'Crop';
-      case _Tool.blur:    return 'Blur';
       case _Tool.draw:    return 'Draw';
       case _Tool.text:    return 'Text';
       case _Tool.rotate:  return 'Rotate';
     }
   }
-}
-
-// =============================================================================
-// VIDEO BLUR OVERLAY
-// Uses BackdropFilter so it composites live over the VideoPlayer frames.
-// =============================================================================
-
-class _VideoBlurOverlay extends StatelessWidget {
-  final BlurType blurType;
-  final double   intensity;
-  const _VideoBlurOverlay({required this.blurType, required this.intensity});
-
-  @override
-  Widget build(BuildContext context) {
-    if (blurType == BlurType.none) return const SizedBox.shrink();
-    final filter = ui.ImageFilter.blur(sigmaX: intensity, sigmaY: intensity);
-
-    switch (blurType) {
-      case BlurType.portrait:
-      case BlurType.background:
-        return LayoutBuilder(builder: (_, c) {
-          final w = c.maxWidth; final h = c.maxHeight;
-          return Stack(fit: StackFit.expand, children: [
-            BackdropFilter(filter: filter,
-                child: const ColoredBox(color: Colors.transparent)),
-            ClipPath(
-              clipper: _OvalHoleClipper(w * 0.5, h * 0.75),
-              child: const ColoredBox(color: Colors.transparent),
-            ),
-          ]);
-        });
-
-      case BlurType.tiltShift:
-        return LayoutBuilder(builder: (_, c) {
-          final h = c.maxHeight;
-          return Stack(fit: StackFit.expand, children: [
-            Positioned(top: 0,    left: 0, right: 0, height: h * 0.3,
-                child: BackdropFilter(filter: filter,
-                    child: const ColoredBox(color: Colors.transparent))),
-            Positioned(bottom: 0, left: 0, right: 0, height: h * 0.3,
-                child: BackdropFilter(filter: filter,
-                    child: const ColoredBox(color: Colors.transparent))),
-          ]);
-        });
-
-      case BlurType.radial:
-        return LayoutBuilder(builder: (_, c) {
-          final w = c.maxWidth; final h = c.maxHeight;
-          return Stack(fit: StackFit.expand, children: [
-            BackdropFilter(filter: filter,
-                child: const ColoredBox(color: Colors.transparent)),
-            ClipPath(
-              clipper: _CircleHoleClipper(w / 2, h / 2, (w < h ? w : h) * 0.3),
-              child: const ColoredBox(color: Colors.transparent),
-            ),
-          ]);
-        });
-
-      default:
-        return const SizedBox.shrink();
-    }
-  }
-}
-
-class _OvalHoleClipper extends CustomClipper<Path> {
-  final double rx, ry;
-  const _OvalHoleClipper(this.rx, this.ry);
-  @override
-  Path getClip(Size s) => Path()
-    ..addOval(Rect.fromCenter(
-        center: Offset(s.width / 2, s.height / 2), width: rx, height: ry));
-  @override bool shouldReclip(_) => false;
-}
-
-class _CircleHoleClipper extends CustomClipper<Path> {
-  final double cx, cy, r;
-  const _CircleHoleClipper(this.cx, this.cy, this.r);
-  @override
-  Path getClip(Size s) =>
-      Path()..addOval(Rect.fromCircle(center: Offset(cx, cy), radius: r));
-  @override bool shouldReclip(_) => false;
 }
