@@ -176,7 +176,18 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
   // TOOL SELECTION
   // ===========================================================================
 
-  void _onToolTap(_Tool tool) {
+  /// Reloads the trimmer on the current active file so the VideoViewer
+  /// re-acquires its platform texture after having been hidden.
+  /// The previously stored [_startValue] / [_endValue] are NOT touched —
+  /// they remain valid for [saveTrimmedVideo] even though the TrimViewer
+  /// handle visuals reset to full-range.
+  void _reloadTrimmer() {
+    _trimmer.loadVideo(videoFile: _activeVideoFile);
+    // Reset trim-playing state since the trimmer re-initialises paused.
+    if (mounted) setState(() => _isTrimPlaying = false);
+  }
+
+  Future<void> _onToolTap(_Tool tool) async {
     if (tool == _Tool.text)  { _enterTextMode(); return; }
     if (tool == _Tool.sound) { _toggleMute();    return; }
     if (tool == _Tool.rotate) {
@@ -187,13 +198,35 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
     final wasTrim   = _activeTool == _Tool.trim;
     final goingTrim = tool == _Tool.trim;
 
-    // Pause preview when entering Trim; resume when leaving.
     if (goingTrim && !wasTrim) {
-      _videoController?.pause();
+      // ── Returning to Trim ──────────────────────────────────────────────
+      // 1. Stop the preview player so its texture doesn't compete with the
+      //    trimmer's internal VideoPlayerController.
+      await _videoController?.pause();
       if (mounted) setState(() => _isPlaying = false);
+
+      // 2. Reload the trimmer so VideoViewer re-acquires its platform
+      //    texture — this is what fixes the blank-screen bug.
+      _reloadTrimmer();
     }
+
     if (!goingTrim && wasTrim) {
-      _videoController?.play();
+      // ── Leaving Trim ───────────────────────────────────────────────────
+      // 1. Pause the trimmer's own playback before hiding it, so both
+      //    VideoPlayerControllers are not active simultaneously (which is
+      //    what causes the texture conflict in the first place).
+      if (_isTrimPlaying) {
+        try {
+          await _trimmer.videoPlaybackControl(
+            startValue: _startValue,
+            endValue: _endValue,
+          );
+        } catch (_) {}
+        if (mounted) setState(() => _isTrimPlaying = false);
+      }
+
+      // 2. Start the preview player.
+      await _videoController?.play();
       if (mounted) setState(() => _isPlaying = _videoController?.value.isPlaying ?? false);
     }
 
