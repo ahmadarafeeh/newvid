@@ -30,7 +30,6 @@ class FilterAdjustments {
     final c = contrast;
     final s = saturation;
 
-    // Simplified – adjust if your actual implementation differs
     return [
       c * s,
       0,
@@ -98,7 +97,6 @@ const List<FilterInfo> kFilters = [
     1,
     0,
   ]),
-  // Add other filters as needed
 ];
 
 class DrawStroke {
@@ -386,7 +384,6 @@ class _SearchScreenState extends State<SearchScreen>
         : _SearchLightColors();
   }
 
-  // ── Safely extract video_edit_metadata ──────────────────────────────────
   Map<String, dynamic>? _extractEditMetadata(dynamic raw) {
     if (raw == null) return null;
     if (raw is Map<String, dynamic>) return raw;
@@ -394,7 +391,6 @@ class _SearchScreenState extends State<SearchScreen>
     return null;
   }
 
-  // ── Parse VideoEditResult from a post map ───────────────────────────────
   VideoEditResult? _parseEditResult(Map<String, dynamic> post) {
     final meta = _extractEditMetadata(post['video_edit_metadata']);
     if (meta == null) return null;
@@ -405,7 +401,6 @@ class _SearchScreenState extends State<SearchScreen>
     }
   }
 
-  // ── Build colour-filter matrix ──────────────────────────────────────────
   List<double> _buildColorMatrix(VideoEditResult? er) {
     if (er == null) {
       return [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
@@ -413,7 +408,6 @@ class _SearchScreenState extends State<SearchScreen>
     return er.adjustments.combinedMatrix(kFilters[er.filterIndex].matrix);
   }
 
-  // ── Overlay layer (strokes + text) scaled to the preview cell ───────────
   Widget _buildEditOverlayLayer(
       VideoEditResult editResult, BoxConstraints constraints) {
     if (editResult.strokes.isEmpty && editResult.overlays.isEmpty) {
@@ -613,7 +607,6 @@ class _SearchScreenState extends State<SearchScreen>
         l.contains('video=true');
   }
 
-  // ── UPDATED: Video player with edit support ─────────────────────────────
   Widget _buildVideoPlayer(String videoUrl, _SearchColorSet colors,
       [VideoEditResult? editResult]) {
     if (!_videoControllers.containsKey(videoUrl)) {
@@ -671,7 +664,6 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
-  // ── UPDATED: Static image with edit support ─────────────────────────────
   Widget _buildPostImage(String imageUrl, _SearchColorSet colors,
       [VideoEditResult? editResult]) {
     final List<double> matrix = _buildColorMatrix(editResult);
@@ -1409,7 +1401,6 @@ class _SearchScreenState extends State<SearchScreen>
     ]);
   }
 
-  // ========== POST ITEM — now with edit support ==========
   Widget _buildPostItem(Map<String, dynamic> post, String postUrl,
       _SearchColorSet colors, bool isTopPost) {
     final isVideo = _isVideoFile(postUrl);
