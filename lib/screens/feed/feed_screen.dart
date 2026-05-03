@@ -159,14 +159,8 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
     return res;
   }
 
-  // =========================================================================
-  // FIX 1: _pauseCurrentVideo — guard setState with mounted check
-  // =========================================================================
   void _pauseCurrentVideo() {
     VideoManager.pauseAllVideos();
-    // Only call setState if the widget is still in the tree.
-    // During dispose() the element is being torn down; calling setState there
-    // triggers the "_lifecycleState != defunct" assertion crash.
     if (mounted) {
       setState(() => _currentPlayingPostId = null);
     } else {
@@ -573,7 +567,16 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
                 throw TimeoutException('Video initialization timeout'),
           );
 
-      await controller.setVolume(0.0);
+      // ── FIX 1 ────────────────────────────────────────────────────────────
+      // Previously this was setVolume(0.0), which caused every preloaded
+      // controller to arrive at PostCard with the audio track silenced.
+      // PostCard's _isMuted defaults to false, but the actual volume was
+      // already 0, so audio never played until the user manually tapped
+      // the mute toggle.  Setting 1.0 here keeps the controller in sync
+      // with PostCard's default unmuted state.
+      await controller.setVolume(1.0);
+      // ─────────────────────────────────────────────────────────────────────
+
       await controller.pause();
       _feedVideoControllersInitialized[videoUrl] = true;
       _checkAndMarkPostReady(postId);
@@ -1286,7 +1289,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
   }
 
   // ===========================================================================
-  // FIX 2: MAIN DATA LOADER — with full debug print statements
+  // MAIN DATA LOADER
   // ===========================================================================
 
   Future<void> _loadData({bool loadMore = false}) async {
@@ -1309,7 +1312,6 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
       final excludedUsers = [..._blockedUsers, userId];
 
       if (_selectedTab == 0) {
-        // ── Following feed ──────────────────────────────────────────────
         if (_followingIds.isEmpty) {
           setState(() {
             _hasMoreFollowing = false;
@@ -1339,7 +1341,6 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
         _offsetFollowing += newPosts.length;
         _hasMoreFollowing = newPosts.isNotEmpty;
       } else {
-        // ── For You feed ────────────────────────────────────────────────
         try {
           final raw = await _supabase.rpc('get_for_you_feed_test', params: {
             'current_user_id': userId,
@@ -1533,18 +1534,14 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
   }
 
   // ===========================================================================
-  // FIX 1: dispose() — never call setState, use direct assignment
+  // DISPOSE
   // ===========================================================================
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-
-    // ✅ DO NOT call _pauseCurrentVideo() here — it calls setState which
-    // triggers the "_lifecycleState != defunct" assertion during widget teardown.
-    // Instead, pause directly without any setState call.
     VideoManager.pauseAllVideos();
-    _currentPlayingPostId = null; // direct assignment, no setState
+    _currentPlayingPostId = null;
     _firstVideoInitialized = false;
 
     _followingPageController.dispose();
