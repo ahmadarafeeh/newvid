@@ -360,8 +360,6 @@ class _SearchScreenState extends State<SearchScreen>
   Set<String> blockedUsersSet = {};
   bool _isLoading = true;
 
-  bool _showViewCount = false;
-
   int _offset = 0;
   bool _isLoadingMore = false;
   bool _hasMorePosts = true;
@@ -456,12 +454,6 @@ class _SearchScreenState extends State<SearchScreen>
         }),
       ],
     );
-  }
-
-  String _formatViewCount(int count) {
-    if (count >= 1000000) return '${(count / 1000000).toStringAsFixed(1)}M';
-    if (count >= 1000) return '${(count / 1000).toStringAsFixed(1)}K';
-    return count.toString();
   }
 
   @override
@@ -811,24 +803,9 @@ class _SearchScreenState extends State<SearchScreen>
     await Future.wait([
       _loadBlockedUsers(),
       _fetchPosts(),
-      _loadCurrentUserAbTest(),
     ]);
     _rotateSuggestedUsers();
     setState(() => _isLoading = false);
-  }
-
-  Future<void> _loadCurrentUserAbTest() async {
-    if (currentUserId == null) return;
-    try {
-      final result = await _supabase
-          .from('users')
-          .select('test')
-          .eq('uid', currentUserId!)
-          .maybeSingle();
-      if (mounted) {
-        setState(() => _showViewCount = result?['test'] == true);
-      }
-    } catch (_) {}
   }
 
   Future<void> _loadBlockedUsers() async {
@@ -1438,7 +1415,6 @@ class _SearchScreenState extends State<SearchScreen>
     final isVideo = _isVideoFile(postUrl);
     if (isVideo) _initializeVideoController(postUrl);
 
-    final int viewCount = (post['viewers_count'] as num?)?.toInt() ?? 0;
     final editResult = _parseEditResult(post);
 
     return InkWell(
@@ -1492,33 +1468,6 @@ class _SearchScreenState extends State<SearchScreen>
                     shape: BoxShape.circle),
                 child: const Icon(Icons.emoji_events,
                     color: Colors.amber, size: 16),
-              ),
-            ),
-          if (_showViewCount)
-            Positioned(
-              bottom: 4,
-              left: 4,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.55),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.visibility, size: 10, color: Colors.white),
-                    const SizedBox(width: 3),
-                    Text(
-                      _formatViewCount(viewCount),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
               ),
             ),
         ]),
