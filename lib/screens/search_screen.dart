@@ -956,20 +956,9 @@ class _SearchScreenState extends State<SearchScreen>
     }
   }
 
+  // ========== USER SEARCH DISABLED ==========
   Future<List<Map<String, dynamic>>> _searchUsers(String query) async {
-    try {
-      final response = await _supabase
-          .from('users')
-          .select()
-          .ilike('username', '$query%')
-          .limit(15);
-      return List<Map<String, dynamic>>.from(response).where((u) {
-        final id = u['uid']?.toString() ?? '';
-        return !blockedUsersSet.contains(id) && id != currentUserId;
-      }).toList();
-    } catch (_) {
-      return [];
-    }
+    return [];
   }
 
   // ========== SKELETONS ==========
@@ -1031,28 +1020,6 @@ class _SearchScreenState extends State<SearchScreen>
             color: colors.skeletonColor,
             borderRadius: BorderRadius.circular(8)),
       );
-
-  Widget _buildSuggestedUsersSkeleton(_SearchColorSet colors) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Container(
-          height: 20,
-          width: 140,
-          decoration: BoxDecoration(
-              color: colors.skeletonColor,
-              borderRadius: BorderRadius.circular(4)),
-        ),
-      ),
-      Expanded(
-        child: ListView.builder(
-          padding: const EdgeInsets.only(top: 8),
-          itemCount: 5,
-          itemBuilder: (_, __) => _buildUserSkeleton(colors),
-        ),
-      ),
-    ]);
-  }
 
   Widget _buildUserSkeleton(_SearchColorSet colors) {
     return ListTile(
@@ -1171,13 +1138,9 @@ class _SearchScreenState extends State<SearchScreen>
           : Column(children: [
               Expanded(
                 child: _isSearchFocused && searchController.text.trim().isEmpty
-                    ? Padding(
-                        padding: const EdgeInsets.only(top: 15.0),
-                        child: _buildSuggestedUsers(colors))
+                    ? _buildPostsGrid(colors)
                     : isShowUsers
-                        ? Padding(
-                            padding: const EdgeInsets.only(top: 15.0),
-                            child: _buildUserSearch(colors))
+                        ? _buildUserSearch(colors)
                         : _buildPostsGrid(colors),
               ),
             ]),
@@ -1187,111 +1150,18 @@ class _SearchScreenState extends State<SearchScreen>
   Widget _buildEnhancedSkeletonLoading(_SearchColorSet colors) {
     return Column(children: [
       Expanded(
-        child: _isSearchFocused && searchController.text.trim().isEmpty
-            ? Padding(
-                padding: const EdgeInsets.only(top: 15.0),
-                child: _buildSuggestedUsersSkeleton(colors))
-            : isShowUsers
-                ? Padding(
-                    padding: const EdgeInsets.only(top: 15.0),
-                    child: _buildUserSearchSkeleton(colors))
-                : _buildPostsGridSkeleton(colors),
+        child: _buildPostsGridSkeleton(colors),
       ),
     ]);
   }
 
-  Widget _buildSuggestedUsers(_SearchColorSet colors) {
-    if (_rotatedSuggestedUsers.isEmpty) {
-      return Center(
-          child: Text('No suggestions available.',
-              style: TextStyle(color: colors.textColor)));
-    }
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Text('Suggested users',
-            style: TextStyle(
-                color: colors.textColor.withOpacity(0.7),
-                fontSize: 16,
-                fontWeight: FontWeight.bold)),
-      ),
-      Expanded(
-        child: FutureBuilder<List<Map<String, dynamic>>>(
-          future: _fetchUsersByIds(_rotatedSuggestedUsers),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return _buildSuggestedUsersSkeleton(colors);
-            }
-            final users = snapshot.data ?? [];
-            if (users.isEmpty) {
-              return Center(
-                  child: Text('No suggestions found.',
-                      style: TextStyle(color: colors.textColor)));
-            }
-            return ListView.builder(
-              padding: const EdgeInsets.only(top: 8),
-              itemCount: users.length,
-              itemBuilder: (context, index) {
-                final user = users[index];
-                final userId = user['uid'] as String? ?? '';
-                final photoUrl = user['photoUrl']?.toString() ?? '';
-                return ListTile(
-                  onTap: () => _navigateToProfile(userId),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                  leading: _buildUserAvatar(photoUrl, colors),
-                  title: VerifiedUsernameWidget(
-                    username: user['username']?.toString() ?? 'Unknown',
-                    uid: userId,
-                    style: TextStyle(color: colors.textColor),
-                  ),
-                );
-              },
-            );
-          },
-        ),
-      ),
-    ]);
-  }
-
+  // ========== USER SEARCH DISABLED - returns no results ==========
   Widget _buildUserSearch(_SearchColorSet colors) {
-    final query = searchController.text.trim();
-    if (query.isEmpty) {
-      return Center(
-          child: Text('Please enter a username.',
-              style: TextStyle(color: colors.textColor)));
-    }
-    return FutureBuilder<List<Map<String, dynamic>>>(
-      future: _searchUsers(query),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return _buildUserSearchSkeleton(colors);
-        }
-        final users = snapshot.data ?? [];
-        if (users.isEmpty) {
-          return Center(
-              child: Text('No users found.',
-                  style: TextStyle(color: colors.textColor)));
-        }
-        return ListView.builder(
-          padding: const EdgeInsets.only(top: 8),
-          itemCount: users.length,
-          itemBuilder: (context, index) {
-            final user = users[index];
-            final userId = user['uid'] as String? ?? '';
-            final photoUrl = user['photoUrl']?.toString() ?? '';
-            return ListTile(
-              onTap: () => _navigateToProfile(userId),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-              leading: _buildUserAvatar(photoUrl, colors),
-              title: VerifiedUsernameWidget(
-                username: user['username']?.toString() ?? 'Unknown',
-                uid: userId,
-                style: TextStyle(color: colors.textColor),
-              ),
-            );
-          },
-        );
-      },
+    return Center(
+      child: Text(
+        'No users found.',
+        style: TextStyle(color: colors.textColor),
+      ),
     );
   }
 
