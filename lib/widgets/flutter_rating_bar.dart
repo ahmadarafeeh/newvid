@@ -1,32 +1,48 @@
 // lib/widgets/flutter_rating_bar.dart
 import 'dart:math' as math;
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:Ratedly/providers/user_provider.dart';
 import 'package:Ratedly/utils/theme_provider.dart';
 
 // =============================================================================
-// EMOJI THUMB SHAPE – unchanged
+// EMOJI THUMB SHAPE – scales only after 0.5 (rating 5.5) up to 1.5x at 10
 // =============================================================================
 
 class _EmojiThumbShape extends SliderComponentShape {
   final String emoji;
-  final double size;
+  final double baseSize;
   final double arrowBounce;
   final double arrowOpacity;
   final bool showArrow;
 
   const _EmojiThumbShape({
     required this.emoji,
-    this.size = 30.0,
+    this.baseSize = 30.0,
     this.arrowBounce = 0.0,
     this.arrowOpacity = 0.0,
     this.showArrow = false,
   });
 
+  // value is normalized rating 1..10 mapped to 0..1
+  static double _scaleForValue(double value) {
+    // value is in range 0..1 (0=rating1, 1=rating10)
+    if (value <= 0.5) return 1.0;
+    // Linear 1.0 -> 1.5 as value goes 0.5 -> 1.0
+    final t = (value - 0.5) / 0.5; // 0..1
+    final scale = 1.0 + t * 0.5; // max 1.5
+    if (kDebugMode) print('RatingBar scaling: norm=$value -> scale=$scale');
+    return scale;
+  }
+
   @override
-  Size getPreferredSize(bool isEnabled, bool isDiscrete) => Size(size, size);
+  Size getPreferredSize(bool isEnabled, bool isDiscrete) {
+    // Reserve enough space for the largest size (1.5 * baseSize)
+    return Size(baseSize * 1.5, baseSize * 1.5);
+  }
 
   @override
   void paint(
@@ -44,12 +60,18 @@ class _EmojiThumbShape extends SliderComponentShape {
     required Size sizeWithOverflow,
   }) {
     final canvas = context.canvas;
+    final scale = _scaleForValue(value);
+    final double emojiSize = baseSize * scale;
+
+    // Move the arrow up when the emoji grows
+    final double arrowOffsetY = (scale - 1.0) * 12;
 
     if (showArrow && arrowOpacity > 0) {
       const arrowSize = 48.0;
       const arrowScaleY = 2.2;
       final arrowH = arrowSize * arrowScaleY;
-      final arrowTop = center.dy - size / 2 - arrowH - 8 - arrowBounce;
+      final arrowTop =
+          center.dy - baseSize / 2 - arrowH - 8 - arrowBounce - arrowOffsetY;
       final arrowCenter = Offset(center.dx, arrowTop + arrowH / 2);
 
       final arrowPainter = TextPainter(
@@ -76,9 +98,10 @@ class _EmojiThumbShape extends SliderComponentShape {
       canvas.restore();
     }
 
+    // Draw the emoji with dynamic size
     final tp = TextPainter(
-      text:
-          TextSpan(text: emoji, style: TextStyle(fontSize: size, height: 1.0)),
+      text: TextSpan(
+          text: emoji, style: TextStyle(fontSize: emojiSize, height: 1.0)),
       textDirection: TextDirection.ltr,
     )..layout();
     tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
@@ -86,44 +109,8 @@ class _EmojiThumbShape extends SliderComponentShape {
 }
 
 // =============================================================================
-// TOOLTIP WIDGET – clean, minimal, with a triangle
+// TOOLTIP PAINTER (unchanged)
 // =============================================================================
-
-class _Tooltip extends StatelessWidget {
-  final String text;
-  final double xOffset; // horizontal offset from left (0..screenWidth)
-
-  const _Tooltip({required this.text, required this.xOffset});
-
-  @override
-  Widget build(BuildContext context) {
-    // Tooltip dimensions
-    const double tooltipWidth = 110;
-    const double tooltipHeight = 32;
-    const double arrowSize = 8;
-
-    // Calculate left position, clamped to screen edges
-    final screenWidth = MediaQuery.of(context).size.width;
-    double left = xOffset - tooltipWidth / 2;
-    left = left.clamp(8.0, screenWidth - tooltipWidth - 8.0);
-    final arrowCenterX = (xOffset - left).clamp(8.0, tooltipWidth - 8.0);
-
-    return Positioned(
-      left: left,
-      bottom: 50, // above the thumb (thumb height approx 30)
-      child: Container(
-        width: tooltipWidth,
-        height: tooltipHeight,
-        child: CustomPaint(
-          painter: _TooltipPainter(
-            arrowCenterX: arrowCenterX,
-            text: text,
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _TooltipPainter extends CustomPainter {
   final double arrowCenterX;
@@ -135,19 +122,17 @@ class _TooltipPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final double tooltipWidth = size.width;
     final double tooltipHeight = size.height;
-    final double arrowSize = 8;
+    const double arrowSize = 8;
 
-    // Draw rounded rectangle
     final paint = Paint()
       ..color = Colors.black87
       ..style = PaintingStyle.fill;
     final rrect = RRect.fromRectAndRadius(
       Rect.fromLTWH(0, 0, tooltipWidth, tooltipHeight),
-      Radius.circular(8),
+      const Radius.circular(8),
     );
     canvas.drawRRect(rrect, paint);
 
-    // Draw arrow (triangle pointing down)
     final Path arrowPath = Path();
     arrowPath.moveTo(arrowCenterX - arrowSize, tooltipHeight);
     arrowPath.lineTo(arrowCenterX, tooltipHeight + arrowSize);
@@ -155,7 +140,6 @@ class _TooltipPainter extends CustomPainter {
     arrowPath.close();
     canvas.drawPath(arrowPath, paint);
 
-    // Draw text
     final textPainter = TextPainter(
       text: TextSpan(
         text: text,
@@ -178,7 +162,7 @@ class _TooltipPainter extends CustomPainter {
 }
 
 // =============================================================================
-// RATING BAR - with tooltip
+// RATING BAR – with scaling thumb, tooltip, etc.
 // =============================================================================
 
 class RatingBar extends StatefulWidget {
@@ -212,6 +196,9 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
   double _currentRating = 5.0;
   bool _isDragging = false;
 
+  bool _showTooltip = false;
+  Timer? _tooltipTimer;
+
   late AnimationController _sliderEntranceController;
   late Animation<double> _sliderSlide;
   late Animation<double> _sliderFade;
@@ -236,6 +223,20 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
   static const double _nudgePeak = 8.5;
   bool get _shouldNudge =>
       !_isDragging && !_guidanceLoaded && _effectiveShowGuidance;
+
+  void _showTooltipWithTimer() {
+    if (!mounted) return;
+    if (!_isDragging && !_isNudging && widget.averageRating >= 1.0) {
+      setState(() => _showTooltip = true);
+      _tooltipTimer?.cancel();
+      _tooltipTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _showTooltip = false);
+      });
+    } else {
+      setState(() => _showTooltip = false);
+      _tooltipTimer?.cancel();
+    }
+  }
 
   @override
   void initState() {
@@ -319,6 +320,10 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
     _sliderEntranceController.forward().then((_) {
       if (mounted) _loadGuidanceFlag();
     });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showTooltipWithTimer();
+    });
   }
 
   Future<void> _loadGuidanceFlag() async {
@@ -390,6 +395,7 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
     super.didUpdateWidget(oldWidget);
     if (widget.averageRating != oldWidget.averageRating && !_isDragging) {
       setState(() => _currentRating = widget.averageRating.clamp(1.0, 10.0));
+      _showTooltipWithTimer();
     }
   }
 
@@ -421,6 +427,7 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _tooltipTimer?.cancel();
     _sliderEntranceController.dispose();
     _pulseController.dispose();
     _nudgeController.dispose();
@@ -430,7 +437,11 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  Widget _buildRatingSlider(ThemeProvider themeProvider) {
+  @override
+  Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    _updateCachedColors(themeProvider);
+
     return AnimatedBuilder(
       animation: _sliderEntranceController,
       builder: (context, child) {
@@ -442,10 +453,20 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
       },
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final bool showTooltip =
-              !_isDragging && !_isNudging && widget.averageRating >= 1.0;
           final double t = (_currentRating - 1) / 9.0;
-          final double thumbScreenX = t * constraints.maxWidth;
+          final double thumbCenterX = t * constraints.maxWidth;
+          final bool effectiveShowTooltip = _showTooltip &&
+              !_isDragging &&
+              !_isNudging &&
+              widget.averageRating >= 1.0;
+
+          const double tooltipWidth = 110;
+          const double tooltipHeight = 32;
+          final double left = (thumbCenterX - tooltipWidth / 2)
+              .clamp(8.0, constraints.maxWidth - tooltipWidth - 8.0);
+          final double arrowCenterX =
+              (thumbCenterX - left).clamp(12.0, tooltipWidth - 12.0);
+
           return Stack(
             clipBehavior: Clip.none,
             children: [
@@ -520,7 +541,7 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
                       data: SliderTheme.of(context).copyWith(
                         thumbShape: _EmojiThumbShape(
                           emoji: widget.reactionEmoji,
-                          size: 30.0,
+                          baseSize: 30.0,
                           showArrow: _isNudging && _effectiveShowGuidance,
                           arrowBounce: _arrowBounce.value,
                           arrowOpacity: (_isNudging && _effectiveShowGuidance)
@@ -568,19 +589,28 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
                   ],
                 ),
               ),
-              if (showTooltip)
-                _Tooltip(text: 'Average Reaction', xOffset: thumbScreenX),
+              if (effectiveShowTooltip)
+                Positioned(
+                  left: left,
+                  bottom: 65,
+                  child: AnimatedOpacity(
+                    opacity: _showTooltip ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Container(
+                      width: tooltipWidth,
+                      height: tooltipHeight,
+                      child: CustomPaint(
+                        painter: _TooltipPainter(
+                            arrowCenterX: arrowCenterX,
+                            text: 'Average Reaction'),
+                      ),
+                    ),
+                  ),
+                ),
             ],
           );
         },
       ),
     );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final themeProvider = Provider.of<ThemeProvider>(context);
-    _updateCachedColors(themeProvider);
-    return _buildRatingSlider(themeProvider);
   }
 }
