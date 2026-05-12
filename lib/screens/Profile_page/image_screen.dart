@@ -1356,6 +1356,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     ).then((_) => _fetchCommentsCount());
   }
 
+  // ── UPDATED: Show only voter count (no average rating) ────────────────────
   Widget _buildRatingSummary(_ImageViewColorSet colors) {
     final containerContent = Container(
       decoration: BoxDecoration(
@@ -1365,17 +1366,27 @@ class _ImageViewScreenState extends State<ImageViewScreen>
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: _isLoadingRatings
           ? Container(
-              width: 120,
+              width: 80,
               height: 20,
               color: colors.backgroundColor.withOpacity(0.3),
             )
-          : Text(
-              'Rated ${_averageRating.toStringAsFixed(1)} by $_totalRatingsCount ${_totalRatingsCount == 1 ? 'voter' : 'voters'}',
-              style: TextStyle(
-                  fontSize: 14,
-                  color: colors.textColor,
-                  fontWeight: FontWeight.w500),
-            ),
+          : _totalRatingsCount == 0
+              ? Text(
+                  'Be the first to rate',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: colors.textColor,
+                    fontWeight: FontWeight.w500,
+                  ),
+                )
+              : Text(
+                  '$_totalRatingsCount ${_totalRatingsCount == 1 ? 'voter' : 'voters'}',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: colors.textColor,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
     );
 
     if (_isCurrentUserOwner) {
@@ -1386,7 +1397,8 @@ class _ImageViewScreenState extends State<ImageViewScreen>
           Navigator.push(
             context,
             MaterialPageRoute(
-                builder: (context) => RatingListScreen(postId: widget.postId)),
+              builder: (context) => RatingListScreen(postId: widget.postId),
+            ),
           );
         },
         child: containerContent,
