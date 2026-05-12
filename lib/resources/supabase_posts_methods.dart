@@ -128,6 +128,7 @@ class SupabasePostsMethods {
     return res;
   }
 
+  // Updated: added reactionEmoji parameter and store it in the database
   Future<String> uploadPost(
     String description,
     Uint8List file,
@@ -137,6 +138,7 @@ class SupabasePostsMethods {
     String gender, {
     int boostViews = 0,
     bool isBoosted = false,
+    String? reactionEmoji, // NEW
   }) async {
     String res = "Some error occurred";
     try {
@@ -162,6 +164,7 @@ class SupabasePostsMethods {
         'boost_views': boostViews,
         'is_boosted': isBoosted,
         'viewers_count': boostViews,
+        'reaction_emoji': reactionEmoji ?? '❤️', // store emoji
       });
 
       res = "success";
@@ -183,9 +186,7 @@ class SupabasePostsMethods {
     return res;
   }
 
-  // =========================================================================
-  // MODIFIED: uploadVideoPostFromFile now accepts editMetadata and stores it
-  // =========================================================================
+  // Updated: added reactionEmoji parameter and store it, keep editMetadata
   Future<String> uploadVideoPostFromFile(
     String description,
     File videoFile,
@@ -195,7 +196,8 @@ class SupabasePostsMethods {
     String gender, {
     int boostViews = 0,
     bool isBoosted = false,
-    Map<String, dynamic>? editMetadata, // <-- NEW: serialised VideoEditResult
+    Map<String, dynamic>? editMetadata,
+    String? reactionEmoji, // NEW
   }) async {
     String res = "Some error occurred";
     try {
@@ -222,6 +224,7 @@ class SupabasePostsMethods {
         'boost_views': boostViews,
         'is_boosted': isBoosted,
         'viewers_count': boostViews,
+        'reaction_emoji': reactionEmoji ?? '❤️', // store emoji
       };
 
       // Store edit metadata if provided (for video filters, text, draw, rotation)
