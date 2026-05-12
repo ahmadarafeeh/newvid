@@ -11,7 +11,6 @@ import 'package:Ratedly/screens/Profile_page/profile_page.dart';
 import 'package:Ratedly/widgets/rating_list_screen_postcard.dart';
 import 'package:Ratedly/utils/utils.dart';
 import 'package:Ratedly/widgets/flutter_rating_bar.dart';
-import 'package:provider/provider.dart';
 import 'package:Ratedly/widgets/postshare.dart';
 import 'package:Ratedly/resources/block_firestore_methods.dart';
 import 'package:Ratedly/widgets/blocked_content_message.dart';
@@ -26,7 +25,7 @@ import 'package:Ratedly/services/ads.dart';
 import 'package:Ratedly/screens/Profile_page/edit_shared.dart';
 import 'package:Ratedly/screens/Profile_page/video_edit_screen.dart';
 
-// ── VideoManager ─────────────────────────────────────────────────────────────
+// ── VideoManager (unchanged) ────────────────────────────────────────────────
 class VideoManager {
   static final VideoManager _instance = VideoManager._internal();
   factory VideoManager() => _instance;
@@ -84,7 +83,7 @@ class VideoManager {
   }
 }
 
-// ── Color schemes ─────────────────────────────────────────────────────────────
+// ── Color schemes (unchanged) ───────────────────────────────────────────────
 class _ImageViewColorSet {
   final Color backgroundColor;
   final Color textColor;
@@ -163,7 +162,7 @@ class _ImageViewLightColors extends _ImageViewColorSet {
         );
 }
 
-// ── TikTok-style follow badge ─────────────────────────────────────────────────
+// ── Follow badge (unchanged) ────────────────────────────────────────────────
 class _FollowBadge extends StatefulWidget {
   final String ownerUid;
   final String currentUserId;
@@ -387,7 +386,7 @@ Widget _buildAvatarWithFollow({
   );
 }
 
-// ── ImageViewScreen ───────────────────────────────────────────────────────────
+// ── ImageViewScreen ─────────────────────────────────────────────────────────
 class ImageViewScreen extends StatefulWidget {
   final String imageUrl;
   final String postId;
@@ -397,10 +396,6 @@ class ImageViewScreen extends StatefulWidget {
   final String profImage;
   final dynamic datePublished;
   final VoidCallback? onPostDeleted;
-
-  /// Optional: the raw video_edit_metadata map from the post record.
-  /// When present, _buildVideoPlayer will reconstruct the creator's exact
-  /// filter, rotation, draw strokes, and text overlays for every viewer.
   final Map<String, dynamic>? videoEditMetadata;
 
   const ImageViewScreen({
@@ -426,7 +421,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
   bool _isBlocked = false;
   bool _viewRecorded = false;
   final SupabasePostsMethods _postsMethods = SupabasePostsMethods();
-  bool _showSlider = true;
   bool _isDeleting = false;
 
   BannerAd? _bannerAd;
@@ -437,9 +431,11 @@ class _ImageViewScreenState extends State<ImageViewScreen>
   double? _userRating;
   bool _isLoadingRatings = true;
   late RealtimeChannel _postChannel;
-
   late RealtimeChannel _commentsChannel;
   late RealtimeChannel _repliesChannel;
+
+  // Reaction emoji of the post (default ❤️)
+  String _reactionEmoji = '❤️';
 
   VideoPlayerController? _videoController;
   bool _isVideoInitialized = false;
@@ -452,8 +448,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
   bool _isProfileVideoMuted = true;
 
   late List<Map<String, dynamic>> _localRatings;
-
-  // Parsed once from widget.videoEditMetadata in initState.
   VideoEditResult? _editResult;
 
   final List<String> reportReasons = [
@@ -505,9 +499,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     _localRatings = [];
     _commentCount = 0;
 
-    // Parse video_edit_metadata once so _buildVideoPlayer can use it without
-    // re-parsing on every rebuild. File('') is safe — viewer path never
-    // accesses videoFile.
     if (widget.videoEditMetadata != null) {
       try {
         _editResult =
@@ -515,6 +506,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
       } catch (_) {}
     }
 
+    _fetchPostReactionEmoji();
     _fetchCommentsCount();
     _checkBlockStatus();
     _setupRealtime();
@@ -541,7 +533,26 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     }
   }
 
-  // ── Profile video ──────────────────────────────────────────────────────────
+  // ── Fetch reaction emoji from posts table ─────────────────────────────────
+  Future<void> _fetchPostReactionEmoji() async {
+    try {
+      final response = await Supabase.instance.client
+          .from('posts')
+          .select('reaction_emoji')
+          .eq('postId', widget.postId)
+          .maybeSingle();
+      if (mounted && response != null) {
+        final emoji = response['reaction_emoji']?.toString();
+        if (emoji != null && emoji.isNotEmpty) {
+          setState(() => _reactionEmoji = emoji);
+        }
+      }
+    } catch (_) {
+      // keep default emoji
+    }
+  }
+
+  // ── Profile video (unchanged) ─────────────────────────────────────────────
   Future<void> _initializeProfileVideo() async {
     if (_profileVideoController != null) {
       await _profileVideoController!.dispose();
@@ -622,7 +633,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     }
   }
 
-  // ── Comments realtime ──────────────────────────────────────────────────────
+  // ── Comments realtime ─────────────────────────────────────────────────────
   void _setupCommentsRealtime() {
     _commentsChannel =
         Supabase.instance.client.channel('comments_${widget.postId}');
@@ -665,7 +676,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     }
   }
 
-  // ── Ratings realtime ───────────────────────────────────────────────────────
+  // ── Ratings realtime (updated to not use _showSlider) ─────────────────────
   void _setupRealtime() {
     _postChannel = Supabase.instance.client.channel('post_${widget.postId}');
     _postChannel.onPostgresChanges(
@@ -696,7 +707,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
             _updateAverageRating();
             final user = Provider.of<UserProvider>(context, listen: false).user;
             if (user != null && newRecord['userid'] == user.uid) {
-              _showSlider = false;
               _userRating = (newRecord['rating'] as num).toDouble();
             }
           }
@@ -721,7 +731,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
             _updateAverageRating();
             final user = Provider.of<UserProvider>(context, listen: false).user;
             if (user != null && oldRecord['userid'] == user.uid) {
-              _showSlider = true;
               _userRating = null;
             }
           }
@@ -786,10 +795,8 @@ class _ImageViewScreenState extends State<ImageViewScreen>
 
           if (userRatingRes != null) {
             _userRating = (userRatingRes['rating'] as num).toDouble();
-            _showSlider = false;
           } else {
             _userRating = null;
-            _showSlider = true;
           }
 
           _localRatings = (allRatings as List<dynamic>)
@@ -804,6 +811,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     }
   }
 
+  // ── Rating submission (no _showSlider, no _handleEditRating) ──────────────
   void _handleRatingSubmitted(double rating) async {
     final user = Provider.of<UserProvider>(context, listen: false).user;
     if (user == null) return;
@@ -813,7 +821,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
 
     setState(() {
       _userRating = rating;
-      _showSlider = false;
       final currentTotalRating = _averageRating * _totalRatingsCount;
       if (isUpdatingExistingRating) {
         final newTotal = currentTotalRating - oldUserRating! + rating;
@@ -848,9 +855,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     }
   }
 
-  void _handleEditRating() => setState(() => _showSlider = true);
-
-  // ── Main video player ──────────────────────────────────────────────────────
+  // ── Main video player (unchanged, only fixed null-safe check) ─────────────
   void _initializeVideoPlayer() async {
     if (_isVideoLoading || _isVideoInitialized) return;
     setState(() => _isVideoLoading = true);
@@ -884,10 +889,12 @@ class _ImageViewScreenState extends State<ImageViewScreen>
         setState(() {});
       });
     }
-    if (_videoController != null &&
-        _videoController!.value.position == _videoController!.value.duration &&
-        _videoController!.value.duration != Duration.zero) {
-      _videoController!.seekTo(Duration.zero);
+    // Check safely without using ! on nullable value
+    final controller = _videoController;
+    if (controller != null &&
+        controller.value.position == controller.value.duration &&
+        controller.value.duration != Duration.zero) {
+      controller.seekTo(Duration.zero);
       if (!_isVideoPlaying) _playVideo();
     }
   }
@@ -1179,12 +1186,10 @@ class _ImageViewScreenState extends State<ImageViewScreen>
     }
   }
 
-  // ── VIDEO PLAYER — applies filter, rotation, draw strokes, text overlays ──
+  // ── Video player with filter/rotation/text overlays (unchanged) ──────────
   Widget _buildVideoPlayer(_ImageViewColorSet colors) {
     final VideoEditResult? er = _editResult;
 
-    // Combined colour matrix: filter preset × adjustment sliders.
-    // Identity (passthrough) when no edit metadata.
     final List<double> matrix = er != null
         ? er.adjustments.combinedMatrix(kFilters[er.filterIndex].matrix)
         : [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
@@ -1201,10 +1206,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // ── Base black backing ────────────────────────────────────
               Container(color: Colors.black),
-
-              // ── Video with colour filter + rotation ───────────────────
               if (_isVideoInitialized)
                 ColorFiltered(
                   colorFilter: ColorFilter.matrix(matrix),
@@ -1246,8 +1248,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                     ),
                   ),
                 ),
-
-              // ── Draw strokes overlay ──────────────────────────────────
               if (er != null && er.strokes.isNotEmpty)
                 Positioned.fill(
                   child: IgnorePointer(
@@ -1259,8 +1259,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                     ),
                   ),
                 ),
-
-              // ── Text overlays ─────────────────────────────────────────
               if (er != null && er.overlays.isNotEmpty)
                 Positioned.fill(
                   child: IgnorePointer(
@@ -1284,8 +1282,6 @@ class _ImageViewScreenState extends State<ImageViewScreen>
                     ),
                   ),
                 ),
-
-              // ── Mute button ───────────────────────────────────────────
               if (_isVideoInitialized)
                 Positioned(
                   bottom: 16,
@@ -1607,13 +1603,13 @@ class _ImageViewScreenState extends State<ImageViewScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // ── RatingBar with the post's reaction emoji ──────────────
                   RatingBar(
-                    initialRating: _userRating ?? 5.0,
-                    hasRated: _userRating != null,
-                    userRating: _userRating ?? 0.0,
+                    averageRating: _averageRating,
+                    reactionEmoji: _reactionEmoji,
+                    initialThumbPosition:
+                        _userRating == null ? 5.0 : _averageRating,
                     onRatingEnd: _handleRatingSubmitted,
-                    showSlider: _showSlider,
-                    onEditRating: _handleEditRating,
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
