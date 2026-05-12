@@ -89,6 +89,21 @@ class _AddPostScreenState extends State<AddPostScreen>
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
 
+  // ── Emoji reaction picker ──────────────────────────────────────────────────
+  static const List<String> _availableEmojis = [
+    '❤️',
+    '😂',
+    '😍',
+    '🔥',
+    '😎',
+    '🥰',
+    '😮',
+    '👏',
+    '💯',
+    '😡',
+  ];
+  String _selectedEmoji = '❤️';
+
   // ===========================================================================
   // ERROR LOGGING
   // ===========================================================================
@@ -461,13 +476,6 @@ class _AddPostScreenState extends State<AddPostScreen>
   // POST UPLOAD
   // ===========================================================================
 
-  /// Uploads the selected media.
-  ///
-  /// For video posts the full [VideoEditResult] is serialised via [toJson]
-  /// and forwarded to [SupabasePostsMethods.uploadVideoPostFromFile] as
-  /// [editMetadata]. The server stores it in the `video_edit_metadata`
-  /// column so every viewer can reconstruct the same colour filter,
-  /// rotation, draw strokes, and text overlays on playback.
   void postMedia(AppUser user) async {
     if (_descriptionController.text.length > 250) {
       if (context.mounted) {
@@ -505,10 +513,6 @@ class _AddPostScreenState extends State<AddPostScreen>
       final String res;
 
       if (_isVideo) {
-        // Serialise every edit parameter so the server can store and later
-        // return it. Null-safe: if the user picked a gallery video without
-        // going through VideoEditScreen, editResult will be null and we
-        // pass null — the server treats that as "no edits".
         final Map<String, dynamic>? editJson = widget.editResult?.toJson();
 
         res = await SupabasePostsMethods().uploadVideoPostFromFile(
@@ -519,6 +523,7 @@ class _AddPostScreenState extends State<AddPostScreen>
           user.photoUrl ?? '',
           user.gender ?? '',
           editMetadata: editJson,
+          reactionEmoji: _selectedEmoji,
         );
       } else {
         res = await SupabasePostsMethods().uploadPost(
@@ -528,6 +533,7 @@ class _AddPostScreenState extends State<AddPostScreen>
           user.username ?? '',
           user.photoUrl ?? '',
           user.gender ?? '',
+          reactionEmoji: _selectedEmoji,
         );
       }
 
@@ -562,6 +568,7 @@ class _AddPostScreenState extends State<AddPostScreen>
       _isPlaying = false;
       _isVideo = false;
       isLoading = false;
+      _selectedEmoji = '❤️';
       _descriptionController.clear();
     });
   }
@@ -579,8 +586,6 @@ class _AddPostScreenState extends State<AddPostScreen>
 
   // ===========================================================================
   // VIDEO PREVIEW
-  // Applies colour filter, rotation, draw strokes, and text overlays from
-  // widget.editResult so the composer sees an exact replica of the edit.
   // ===========================================================================
   Widget _buildVideoPreview() {
     final VideoEditResult? er = widget.editResult;
@@ -599,10 +604,7 @@ class _AddPostScreenState extends State<AddPostScreen>
             return Stack(
               alignment: Alignment.center,
               children: [
-                // Black backing so there are no white gaps.
                 Positioned.fill(child: Container(color: Colors.black)),
-
-                // ── Video with colour filter + rotation ──────────────────
                 if (_isVideoInitialized && _videoController != null)
                   ColorFiltered(
                     colorFilter: ColorFilter.matrix(_colorMatrix),
@@ -618,8 +620,6 @@ class _AddPostScreenState extends State<AddPostScreen>
                   )
                 else
                   const CircularProgressIndicator(color: Colors.white),
-
-                // ── Draw strokes ─────────────────────────────────────────
                 if (er != null && er.strokes.isNotEmpty)
                   Positioned.fill(
                     child: IgnorePointer(
@@ -631,11 +631,7 @@ class _AddPostScreenState extends State<AddPostScreen>
                       ),
                     ),
                   ),
-
-                // ── Text overlays ────────────────────────────────────────
                 if (er != null) ..._buildTextOverlays(er, w, h),
-
-                // ── Paused indicator ─────────────────────────────────────
                 if (_isVideoInitialized && !_isPlaying)
                   IgnorePointer(
                     child: Container(
@@ -687,6 +683,69 @@ class _AddPostScreenState extends State<AddPostScreen>
         fit: BoxFit.cover,
         width: double.infinity,
         height: double.infinity,
+      ),
+    );
+  }
+
+  // ===========================================================================
+  // EMOJI PICKER
+  // ===========================================================================
+
+  Widget _buildEmojiPicker() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Reaction',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.45),
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.2,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _availableEmojis.map((emoji) {
+                final isSelected = emoji == _selectedEmoji;
+                return GestureDetector(
+                  onTap: () => setState(() => _selectedEmoji = emoji),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    curve: Curves.easeOut,
+                    margin: const EdgeInsets.only(right: 8),
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? Colors.white.withOpacity(0.14)
+                          : Colors.white.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isSelected
+                            ? Colors.white.withOpacity(0.55)
+                            : Colors.transparent,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Center(
+                      child: Text(
+                        emoji,
+                        style: TextStyle(
+                          fontSize: isSelected ? 24 : 20,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -933,6 +992,7 @@ class _AddPostScreenState extends State<AddPostScreen>
                     ),
                   if (!_isVideo && _file != null) _buildImagePreview(),
                   if (_isVideo && _videoFile != null) _buildVideoPreview(),
+                  _buildEmojiPicker(),
                   _buildCaptionInput(user),
                 ],
               ),
