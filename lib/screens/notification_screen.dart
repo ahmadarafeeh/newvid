@@ -648,7 +648,7 @@ class _NotificationScreenState extends State<NotificationScreen>
               title: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Ratedly',
+                  'Reactly',
                   style: TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
