@@ -189,8 +189,7 @@ class _PostCardState extends State<PostCard>
 
   int _totalRatingsCount = 0;
   double _averageRating = 0.0;
-  double? _userRating;
-  bool _showSlider = true;
+  double? _userRating; // kept for internal use, not displayed
   late List<Map<String, dynamic>> _localRatings;
 
   String? _resolvedProfImage;
@@ -219,7 +218,6 @@ class _PostCardState extends State<PostCard>
   bool _isProfileVideoInitialized = false;
   bool _isProfileVideoMuted = true;
 
-  // Parsed once in initState from widget.snap['video_edit_metadata']
   VideoEditResult? _editResult;
 
   final ApiService _apiService = ApiService();
@@ -239,6 +237,9 @@ class _PostCardState extends State<PostCard>
   ];
 
   String get _postId => widget.snap['postId']?.toString() ?? '';
+
+  // Reaction emoji – fetched from DB, default ❤️
+  String _reactionEmoji = '❤️';
 
   bool get _isVideo {
     final url = (widget.snap['postUrl']?.toString() ?? '').toLowerCase();
@@ -273,10 +274,6 @@ class _PostCardState extends State<PostCard>
 
   @override
   bool get wantKeepAlive => true;
-
-  // =========================================================================
-  // EDIT METADATA HELPER
-  // =========================================================================
 
   VideoEditResult? _parseEditResult() {
     final raw = widget.snap['video_edit_metadata'];
@@ -322,19 +319,13 @@ class _PostCardState extends State<PostCard>
     _setupRealtime();
     _recordView();
     _loadPostCardData();
+    _fetchReactionEmoji();
 
     if (_isVideo) {
       if (widget.preloadedVideoController != null && widget.isVideoPreloaded) {
         _videoController = widget.preloadedVideoController;
         _isVideoInitialized = true;
-
-        // ── FIX 2a ──────────────────────────────────────────────────────────
-        // The preloaded controller may have been created with any volume level.
-        // Immediately sync it to the card's own _isMuted state (default: false)
-        // so audio is on from the very first frame without any user interaction.
         _videoController!.setVolume(_isMuted ? 0.0 : 1.0);
-        // ────────────────────────────────────────────────────────────────────
-
         _videoController!.addListener(_videoListener);
         _videoController!.addListener(() {
           if (_videoController != null &&
@@ -377,6 +368,33 @@ class _PostCardState extends State<PostCard>
   }
 
   // =========================================================================
+  // FETCH REACTION EMOJI FROM DATABASE
+  // =========================================================================
+  Future<void> _fetchReactionEmoji() async {
+    // If snap already contains a non‑default emoji, trust it
+    final existing = widget.snap['reaction_emoji']?.toString();
+    if (existing != null && existing.isNotEmpty && existing != '❤️') {
+      setState(() => _reactionEmoji = existing);
+      return;
+    }
+    try {
+      final response = await Supabase.instance.client
+          .from('posts')
+          .select('reaction_emoji')
+          .eq('postId', _postId)
+          .maybeSingle();
+      if (mounted && response != null) {
+        final emoji = response['reaction_emoji']?.toString();
+        if (emoji != null && emoji.isNotEmpty) {
+          setState(() => _reactionEmoji = emoji);
+        }
+      }
+    } catch (_) {
+      // keep current (default ❤️)
+    }
+  }
+
+  // =========================================================================
   // RPC DATA LOADING
   // =========================================================================
   Future<void> _loadPostCardData() async {
@@ -406,7 +424,6 @@ class _PostCardState extends State<PostCard>
         _totalRatingsCount = data['ratingsCount'] ?? 0;
         _averageRating = (data['averageRating'] ?? 0.0).toDouble();
         _userRating = data['userRating']?.toDouble();
-        _showSlider = _userRating == null;
 
         final allRatings = data['allRatings'] as List? ?? [];
         _localRatings = allRatings
@@ -498,7 +515,6 @@ class _PostCardState extends State<PostCard>
             _updateAverageRating();
             final user = Provider.of<UserProvider>(context, listen: false).user;
             if (user != null && newRecord['userid'] == user.uid) {
-              _showSlider = false;
               _userRating = (newRecord['rating'] as num).toDouble();
             }
           }
@@ -523,7 +539,6 @@ class _PostCardState extends State<PostCard>
             _updateAverageRating();
             final user = Provider.of<UserProvider>(context, listen: false).user;
             if (user != null && oldRecord['userid'] == user.uid) {
-              _showSlider = true;
               _userRating = null;
             }
           }
@@ -539,7 +554,6 @@ class _PostCardState extends State<PostCard>
         'averageRating': _averageRating,
         'totalRatingsCount': _totalRatingsCount,
         'ratings': _localRatings,
-        'showSlider': _showSlider,
       });
     }
   }
@@ -555,7 +569,7 @@ class _PostCardState extends State<PostCard>
   }
 
   // =========================================================================
-  // RATING UI METHODS
+  // RATING SUBMISSION
   // =========================================================================
   void _handleRatingSubmitted(double rating) async {
     final user = Provider.of<UserProvider>(context, listen: false).user;
@@ -564,7 +578,6 @@ class _PostCardState extends State<PostCard>
     final bool isUpdating = oldUserRating != null;
     setState(() {
       _userRating = rating;
-      _showSlider = false;
       final currentTotal = _averageRating * _totalRatingsCount;
       if (isUpdating) {
         _averageRating =
@@ -593,7 +606,6 @@ class _PostCardState extends State<PostCard>
         'averageRating': _averageRating,
         'totalRatingsCount': _totalRatingsCount,
         'ratings': _localRatings,
-        'showSlider': false,
       });
     }
     try {
@@ -604,8 +616,6 @@ class _PostCardState extends State<PostCard>
       if (mounted) _loadPostCardData();
     }
   }
-
-  void _handleEditRating() => setState(() => _showSlider = true);
 
   // =========================================================================
   // FOLLOW HANDLER
@@ -783,13 +793,7 @@ class _PostCardState extends State<PostCard>
         _isVideoInitialized &&
         mounted &&
         widget.isVisible) {
-      // ── FIX 2b ────────────────────────────────────────────────────────────
-      // Always enforce the correct volume before starting playback.
-      // This ensures that even if the controller was handed in from the
-      // feed-level preloader (which previously set volume to 0), audio
-      // is always restored to the expected level without user interaction.
       _videoController!.setVolume(_isMuted ? 0.0 : 1.0);
-      // ──────────────────────────────────────────────────────────────────────
       _videoManager.playVideo(_videoController!, _postId);
       if (mounted) setState(() {});
     }
@@ -1333,74 +1337,76 @@ class _PostCardState extends State<PostCard>
     );
   }
 
+  // =========================================================================
+  // BOTTOM OVERLAY – shows voter count and the updated RatingBar
+  // =========================================================================
   Widget _buildBottomOverlay(model.AppUser user, _ColorSet colors) {
+    // Determine initial thumb position:
+    // - If user has not rated yet -> centre (5.0)
+    // - If user has already rated -> community average
+    final double initialPos = _userRating == null ? 5.0 : _averageRating;
+
     return Container(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           RatingBar(
-            initialRating: _userRating ?? 5.0,
-            hasRated: _userRating != null,
-            userRating: _userRating ?? 0.0,
+            averageRating: _averageRating,
+            reactionEmoji: _reactionEmoji,
+            initialThumbPosition: initialPos,
             onRatingEnd: _handleRatingSubmitted,
-            showSlider: _showSlider,
-            onEditRating: _handleEditRating,
           ),
           const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    GestureDetector(
-                      onTap: _navigateToProfile,
-                      child: VerifiedUsernameWidget(
-                        username: _ownerUsername ??
-                            widget.snap['username']?.toString() ??
-                            'Unknown',
-                        uid: widget.snap['uid']?.toString() ?? '',
-                        countryCode: widget.snap['country']?.toString(),
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontFamily: 'Inter',
-                          shadows: [
-                            Shadow(
-                              offset: const Offset(1.0, 1.0),
-                              blurRadius: 3.0,
-                              color: Colors.black.withOpacity(0.8),
-                            ),
-                          ],
+                child: GestureDetector(
+                  onTap: _navigateToProfile,
+                  child: VerifiedUsernameWidget(
+                    username: _ownerUsername ??
+                        widget.snap['username']?.toString() ??
+                        'Unknown',
+                    uid: widget.snap['uid']?.toString() ?? '',
+                    countryCode: widget.snap['country']?.toString(),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontFamily: 'Inter',
+                      shadows: [
+                        Shadow(
+                          offset: const Offset(1.0, 1.0),
+                          blurRadius: 3.0,
+                          color: Colors.black.withOpacity(0.8),
                         ),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
               Container(
                 decoration: BoxDecoration(
                   color: Colors.black54,
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(20),
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                 child: _totalRatingsCount == 0
                     ? Text(
                         _isTestUser
                             ? 'Start the Rating'
                             : 'Be the first to rate',
                         style: const TextStyle(
-                          fontSize: 14,
+                          fontSize: 13,
                           color: Colors.white,
                           fontWeight: FontWeight.w500,
                         ),
                       )
                     : Text(
-                        'Rated ${_averageRating.toStringAsFixed(1)} by $_totalRatingsCount ${_totalRatingsCount == 1 ? 'voter' : 'voters'}',
+                        '${_totalRatingsCount} ${_totalRatingsCount == 1 ? 'voter' : 'voters'}',
                         style: const TextStyle(
-                          fontSize: 14,
+                          fontSize: 13,
                           color: Colors.white,
                           fontWeight: FontWeight.w500,
                         ),
@@ -1425,7 +1431,7 @@ class _PostCardState extends State<PostCard>
   }
 
   // =========================================================================
-  // VIDEO PLAYER — applies filter, rotation, draw strokes, text overlays
+  // VIDEO PLAYER (applies filter, rotation, draw strokes, text overlays)
   // =========================================================================
   Widget _buildVideoPlayer(_ColorSet colors) {
     final VideoEditResult? er = _editResult;
