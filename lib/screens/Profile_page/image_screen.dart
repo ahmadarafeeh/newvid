@@ -1372,7 +1372,7 @@ class _ImageViewScreenState extends State<ImageViewScreen>
             )
           : _totalRatingsCount == 0
               ? Text(
-                  'Be the first to rate',
+                  'Be the first to react',
                   style: TextStyle(
                     fontSize: 13,
                     color: colors.textColor,
