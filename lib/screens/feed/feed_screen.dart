@@ -85,8 +85,12 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
   List<Map<String, dynamic>> _forYouPosts = [];
   bool _isLoading = true;
   bool _isLoadingMore = false;
+
+  // FIX 3 — _offsetForYou is no longer used for For You pagination;
+  // user_post_views handles exclusion server-side.  We keep _offsetFollowing
+  // for the Following tab which still uses cursor-based pagination.
   int _offsetFollowing = 0;
-  int _offsetForYou = 0;
+
   bool _hasMoreFollowing = true;
   bool _hasMoreForYou = true;
 
@@ -116,6 +120,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
 
   List<Map<String, dynamic>> _nextForYouBatch = [];
   bool _nextBatchLoaded = false;
+  Timer? _prefetchTimer; // FIX 2 — delayed prefetch timer
 
   static const int _mediaPreloadAhead = 4;
   static const int _mediaPreloadBehind = 2;
@@ -147,6 +152,10 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
   bool _followingIdsLoaded = false;
   bool _immediatePostsCached = false;
   DateTime? _appStartTime;
+
+  // ---------------------------------------------------------------------------
+  // HELPERS
+  // ---------------------------------------------------------------------------
 
   _ColorSet _getColors(ThemeProvider themeProvider) {
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
@@ -342,7 +351,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
           await _initializeFeedVideoController(postUrl, postId);
           checkCompletion();
         }
-      } catch (e, stack) {
+      } catch (e) {
         checkCompletion();
       }
     }
@@ -353,7 +362,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
         mediaToPreload++;
         _preloadImage(imageUrl, postId).then((_) {
           checkCompletion();
-        }).catchError((e, stack) async {
+        }).catchError((e) async {
           checkCompletion();
         });
       }
@@ -393,7 +402,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
         await _preloadRegularImage(imageUrl, postId);
       }
       _checkAndMarkPostReady(postId);
-    } catch (e, stack) {
+    } catch (e) {
       _imagePreloaded[imageUrl] = false;
       _checkAndMarkPostReady(postId);
     }
@@ -413,7 +422,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
       } else {
         throw Exception('Firebase SDK returned null or empty bytes');
       }
-    } catch (e, stack) {
+    } catch (e) {
       await _preloadFirebaseImageAlternative(imageUrl, postId);
     }
   }
@@ -567,21 +576,14 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
                 throw TimeoutException('Video initialization timeout'),
           );
 
-      // ── FIX 1 ────────────────────────────────────────────────────────────
-      // Previously this was setVolume(0.0), which caused every preloaded
-      // controller to arrive at PostCard with the audio track silenced.
-      // PostCard's _isMuted defaults to false, but the actual volume was
-      // already 0, so audio never played until the user manually tapped
-      // the mute toggle.  Setting 1.0 here keeps the controller in sync
-      // with PostCard's default unmuted state.
+      // Volume stays at 1.0 so PostCard's default unmuted state is in sync.
       await controller.setVolume(1.0);
-      // ─────────────────────────────────────────────────────────────────────
-
       await controller.pause();
+
       _feedVideoControllersInitialized[videoUrl] = true;
       _checkAndMarkPostReady(postId);
       completer.complete();
-    } catch (e, stack) {
+    } catch (e) {
       try {
         _feedVideoControllers.remove(videoUrl)?.dispose();
       } catch (_) {}
@@ -733,7 +735,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
         _showInterstitialAd();
         _postViewCount = 0;
       }
-    } catch (e, stack) {
+    } catch (e) {
       // Ignore error
     } finally {
       _viewRecordingScheduled = false;
@@ -870,13 +872,25 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
                 _updateVisiblePosts(0);
               }
             }
+
+            // FIX 4 — Flush cached posts into user_post_views immediately so
+            // the DB-side seen filter stays in sync even if the app was killed
+            // before the previous session's view records were committed.
+            final userId = currentUserId;
+            if (userId != null && userId.isNotEmpty) {
+              for (final p in posts.take(3)) {
+                final id = p['postId']?.toString() ?? '';
+                if (id.isNotEmpty) _pendingViews.add(id);
+              }
+              unawaited(_recordPendingViews());
+            }
           });
         }
       } else {
         _essentialUiReady = true;
         if (mounted) setState(() {});
       }
-    } catch (e, stack) {
+    } catch (e) {
       _essentialUiReady = true;
       if (mounted) setState(() {});
     }
@@ -904,7 +918,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
         if (!(_unreadCountController?.isClosed ?? true)) {
           _unreadCountController!.add(count);
         }
-      } catch (e, stack) {
+      } catch (e) {
         if (!(_unreadCountController?.isClosed ?? true)) {
           _unreadCountController!.add(0);
         }
@@ -922,7 +936,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
         if (!(_unreadCountController?.isClosed ?? true)) {
           _unreadCountController!.add(count);
         }
-      } catch (e, stack) {
+      } catch (e) {
         if (!(_unreadCountController?.isClosed ?? true)) {
           _unreadCountController!.add(0);
         }
@@ -948,7 +962,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
         final m = Map<String, dynamic>.from(user);
         _userCache[m['uid']] = m;
       }
-    } catch (e, stack) {
+    } catch (e) {
       // Ignore error
     }
   }
@@ -1144,7 +1158,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
       }
       _blockedUsersCache[userId] = _blockedUsers;
       _lastBlockedUsersCacheTime = now;
-    } catch (e, stack) {
+    } catch (e) {
       _blockedUsers = [];
     }
   }
@@ -1167,7 +1181,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
       } else {
         _followingIds = [];
       }
-    } catch (e, stack) {
+    } catch (e) {
       _followingIds = [];
     }
   }
@@ -1186,10 +1200,9 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
       }
 
       if (_cacheLoaded && _forYouPosts.isNotEmpty) {
-        unawaited(() async {
-          _nextForYouBatch = await _loadNextForYouBatch();
-          _nextBatchLoaded = true;
-        }());
+        // FIX 2 — schedule the prefetch with a delay so in-flight view records
+        // have time to commit to user_post_views before we query the DB.
+        _schedulePrefetch();
         if (currentUserId == null || currentUserId!.isEmpty) {
           _blockedUsers = [];
         } else {
@@ -1206,7 +1219,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
         await _loadBlockedUsers();
       }
       await _loadData();
-    } catch (e, stack) {
+    } catch (e) {
       if (mounted) setState(() => _isLoading = false);
     } finally {
       if (mounted) {
@@ -1218,6 +1231,24 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
     }
   }
 
+  // FIX 2 — Prefetch helper: waits 3 seconds before firing so that the views
+  // recorded for the current batch have time to land in user_post_views.  This
+  // prevents the prefetch RPC from seeing posts that are about to be marked as
+  // seen, which was the root cause of seen posts reappearing.
+  void _schedulePrefetch() {
+    _prefetchTimer?.cancel();
+    _prefetchTimer = Timer(const Duration(seconds: 3), () async {
+      if (!mounted) return;
+      _nextForYouBatch = await _loadNextForYouBatch();
+      _nextBatchLoaded = true;
+    });
+  }
+
+  // FIX 1 — The next batch now uses the same offset as the current feed
+  // position (not _offsetForYou + _initialBatchSize), because _offsetForYou
+  // is no longer used for For You pagination.  The SQL relies on
+  // user_post_views for exclusion, so passing offset 0 is correct: every call
+  // will naturally skip already-seen posts server-side.
   Future<List<Map<String, dynamic>>> _loadNextForYouBatch() async {
     final userId = currentUserId;
     if (userId == null || userId.isEmpty) return [];
@@ -1226,7 +1257,8 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
       final raw = await _supabase.rpc('get_for_you_feed_test', params: {
         'current_user_id': userId,
         'excluded_users': excludedUsers,
-        'page_offset': _offsetForYou + _initialBatchSize,
+        // FIX 3 — always offset 0; user_post_views handles deduplication.
+        'page_offset': 0,
         'page_limit': _initialBatchSize,
       });
       final res = _unwrapResponse(raw);
@@ -1245,7 +1277,9 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
         }).toList();
         return await _enrichPostsWithEditMetadata(rawPosts);
       }
-    } catch (e, stack) {}
+    } catch (e) {
+      // Error loading next batch
+    }
     return [];
   }
 
@@ -1299,6 +1333,12 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
       return;
     }
 
+    // FIX 2 — Flush any pending view records before fetching more posts so
+    // the DB exclusion filter sees the most up-to-date seen set.
+    if (loadMore && _pendingViews.isNotEmpty) {
+      await _recordPendingViews();
+    }
+
     if (mounted) setState(() => _isLoadingMore = true);
 
     try {
@@ -1312,6 +1352,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
       final excludedUsers = [..._blockedUsers, userId];
 
       if (_selectedTab == 0) {
+        // ── Following tab: uses cursor-based offset pagination ──────────────
         if (_followingIds.isEmpty) {
           setState(() {
             _hasMoreFollowing = false;
@@ -1337,15 +1378,19 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
             }).toList();
             newPosts = await _enrichPostsWithEditMetadata(rawPosts);
           }
-        } catch (rpcErr, rpcStack) {}
+        } catch (rpcErr) {}
         _offsetFollowing += newPosts.length;
         _hasMoreFollowing = newPosts.isNotEmpty;
       } else {
+        // ── For You tab: offset is always 0; SQL uses user_post_views ────────
         try {
           final raw = await _supabase.rpc('get_for_you_feed_test', params: {
             'current_user_id': userId,
             'excluded_users': excludedUsers,
-            'page_offset': _offsetForYou,
+            // FIX 3 — offset always 0 for For You; the SQL OFFSET clauses have
+            // been removed from the stored function; exclusion is handled
+            // entirely by the LEFT JOIN on user_post_views.
+            'page_offset': 0,
             'page_limit': _initialBatchSize,
           });
           final res = _unwrapResponse(raw);
@@ -1365,15 +1410,15 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
             }).toList();
             newPosts = await _enrichPostsWithEditMetadata(rawPosts);
           }
-        } catch (rpcErr, rpcStack) {}
+        } catch (rpcErr) {
+          // RPC error
+        }
 
-        _offsetForYou += newPosts.length;
         _hasMoreForYou = newPosts.isNotEmpty;
 
-        unawaited(() async {
-          _nextForYouBatch = await _loadNextForYouBatch();
-          _nextBatchLoaded = true;
-        }());
+        // FIX 2 — Replace the immediate unawaited prefetch with a delayed one
+        // so view records have time to commit before the next RPC call.
+        _schedulePrefetch();
       }
 
       if (!loadMore) {
@@ -1395,7 +1440,15 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
                 loadMore ? [..._followingPosts, ...newPosts] : newPosts;
           } else {
             if (loadMore) {
-              _forYouPosts = [..._forYouPosts, ...newPosts];
+              // Dedupe by postId to guard against any overlap between batches.
+              final existingIds = _forYouPosts
+                  .map((p) => p['postId']?.toString())
+                  .whereType<String>()
+                  .toSet();
+              final dedupedNew = newPosts
+                  .where((p) => !existingIds.contains(p['postId']?.toString()))
+                  .toList();
+              _forYouPosts = [..._forYouPosts, ...dedupedNew];
             } else if (_cacheLoaded && _forYouPosts.isNotEmpty) {
               final existingIds = _forYouPosts
                   .map((p) => p['postId']?.toString())
@@ -1467,7 +1520,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
           _updatePostVisibility(currentPage, currentPosts, _selectedTab == 1);
         });
       }
-    } catch (e, stack) {
+    } catch (e) {
       if (mounted) {
         setState(() {
           _isLoadingMore = false;
@@ -1486,6 +1539,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
     _pauseCurrentVideo();
     _currentPlayingPostId = null;
     _firstVideoInitialized = false;
+    _prefetchTimer?.cancel();
 
     for (final controller in _feedVideoControllers.values) {
       controller.dispose();
@@ -1523,10 +1577,11 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
         });
       }
     } else {
-      _offsetForYou = 0;
       _forYouPosts.clear();
       _hasMoreForYou = true;
       _currentForYouPage = 0;
+      _nextForYouBatch = [];
+      _nextBatchLoaded = false;
       _loadData().then((_) {
         if (mounted) setState(() => _isLoading = false);
       });
@@ -1550,6 +1605,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
     _unreadCountTimer?.cancel();
     _unreadCountController?.close();
     _delayedCacheUpdateTimer?.cancel();
+    _prefetchTimer?.cancel();
 
     for (final controller in _feedVideoControllers.values) {
       try {
