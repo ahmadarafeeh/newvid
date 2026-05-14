@@ -1,13 +1,15 @@
 import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart' as firebase_messaging;
+import 'package:firebase_messaging/firebase_messaging.dart'
+    as firebase_messaging;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class NotificationService {
-  final firebase_messaging.FirebaseMessaging _firebaseMessaging = firebase_messaging.FirebaseMessaging.instance;
+  final firebase_messaging.FirebaseMessaging _firebaseMessaging =
+      firebase_messaging.FirebaseMessaging.instance;
   static final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
 
@@ -19,6 +21,7 @@ class NotificationService {
     return DateTime.now().millisecondsSinceEpoch % 2147483647;
   }
 
+  // ─── INIT ────────────────────────────────────────────────────────────────
   Future<void> init() async {
     try {
       await _firebaseMessaging.requestPermission(
@@ -36,10 +39,13 @@ class NotificationService {
         sound: false,
       );
 
-      firebase_messaging.FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
-      firebase_messaging.FirebaseMessaging.onMessageOpenedApp.listen(_handleBackgroundMessage);
+      firebase_messaging.FirebaseMessaging.onMessage
+          .listen(_handleForegroundMessage);
+      firebase_messaging.FirebaseMessaging.onMessageOpenedApp
+          .listen(_handleBackgroundMessage);
 
       await _handleTokenRetrieval();
+
       _firebaseMessaging.onTokenRefresh.listen((newToken) async {
         await _saveToken(newToken);
       });
@@ -64,8 +70,11 @@ class NotificationService {
     } catch (e) {}
   }
 
+  // ─── AUTH LISTENER ───────────────────────────────────────────────────────
   Future<void> _setupAuthListener() async {
-    firebase_auth.FirebaseAuth.instance.authStateChanges().listen((firebase_auth.User? user) async {
+    firebase_auth.FirebaseAuth.instance
+        .authStateChanges()
+        .listen((firebase_auth.User? user) async {
       if (user != null) {
         final token = await _firebaseMessaging.getToken();
         if (token != null) {
@@ -75,6 +84,7 @@ class NotificationService {
     });
   }
 
+  // ─── TOKEN RETRIEVAL ─────────────────────────────────────────────────────
   Future<void> _handleTokenRetrieval() async {
     try {
       final token = await _firebaseMessaging.getToken();
@@ -98,10 +108,7 @@ class NotificationService {
     } catch (e) {}
   }
 
-  // ─── UNIFIED TOKEN SAVER ────────────────────────────────────────────────
-  // Saves to BOTH Supabase (primary) and Firestore (fallback).
-  // This ensures the Cloud Function can always find the token regardless
-  // of whether the user authenticated via Firebase or Supabase.
+  // ─── UNIFIED TOKEN SAVER ─────────────────────────────────────────────────
   Future<void> _saveToken(String token) async {
     await Future.wait([
       _saveTokenToSupabase(token),
@@ -109,55 +116,61 @@ class NotificationService {
     ]);
   }
 
+  /// Saves the FCM token to Supabase.
+  ///
+  /// KEY FIX: Always saves by the `uid` column (text primary key), which is
+  /// always populated for every user — both Firebase and Supabase auth users.
+  ///
+  /// The previous bug saved Supabase-auth users by `supabase_uid`, which is
+  /// a nullable column. If it was null the UPDATE matched zero rows, the token
+  /// was never stored, and the Cloud Function silently skipped those users.
   Future<void> _saveTokenToSupabase(String token) async {
     try {
       final supabase = Supabase.instance.client;
-
-      // Try Supabase auth session first
-      final supabaseUser = supabase.auth.currentUser;
-      if (supabaseUser != null) {
-        await supabase
-            .from('users')
-            .update({'fcmToken': token})
-            .eq('supabase_uid', supabaseUser.id);
-        print('[NotificationService] FCM token saved to Supabase via supabase_uid');
-        return;
-      }
-
-      // Fall back to Firebase UID
       final firebaseUser = firebase_auth.FirebaseAuth.instance.currentUser;
+      final supabaseUser = supabase.auth.currentUser;
+
+      // ── Firebase auth user ───────────────────────────────────────────────
+      // uid column stores the Firebase UID directly.
       if (firebaseUser != null) {
         await supabase
             .from('users')
-            .update({'fcmToken': token})
-            .eq('uid', firebaseUser.uid);
-        print('[NotificationService] FCM token saved to Supabase via firebase uid');
+            .update({'fcmToken': token}).eq('uid', firebaseUser.uid);
         return;
       }
 
-      print('[NotificationService] No auth session — storing token as pending');
+      // ── Supabase auth user ───────────────────────────────────────────────
+      // uid column stores the Supabase auth UUID as text (set at registration).
+      // Do NOT use supabase_uid here — that column is nullable and will silently
+      // match zero rows if it hasn't been populated yet (e.g. migrated accounts).
+      if (supabaseUser != null) {
+        await supabase
+            .from('users')
+            .update({'fcmToken': token}).eq('uid', supabaseUser.id);
+        return;
+      }
+
       await _storePendingToken(token);
-    } catch (e) {
-      print('[NotificationService] Supabase token save error: $e');
-    }
+    } catch (e) {}
   }
 
   Future<void> _saveTokenToFirestore(String token) async {
     try {
       final user = firebase_auth.FirebaseAuth.instance.currentUser;
-      if (user == null) return; // Firestore only for Firebase users
+      if (user == null) {
+        return;
+      }
 
       await user.reload();
-      if (!user.emailVerified) return;
+      if (!user.emailVerified) {
+        return;
+      }
 
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .set({'fcmToken': token}, SetOptions(merge: true));
-      print('[NotificationService] FCM token saved to Firestore');
-    } catch (e) {
-      print('[NotificationService] Firestore token save error: $e');
-    }
+    } catch (e) {}
   }
 
   Future<void> _storePendingToken(String token) async {
@@ -173,11 +186,12 @@ class NotificationService {
     } catch (e) {}
   }
 
-  Future<void> _handleForegroundMessage(firebase_messaging.RemoteMessage message) async {
-    // Foreground notifications disabled
-  }
+  // ─── MESSAGE HANDLERS ────────────────────────────────────────────────────
+  Future<void> _handleForegroundMessage(
+      firebase_messaging.RemoteMessage message) async {}
 
-  static Future<void> _handleBackgroundMessage(firebase_messaging.RemoteMessage message) async {
+  static Future<void> _handleBackgroundMessage(
+      firebase_messaging.RemoteMessage message) async {
     try {
       await Firebase.initializeApp();
       final title = message.data['title'] ?? message.notification?.title ?? '';
@@ -221,6 +235,7 @@ class NotificationService {
     );
   }
 
+  // ─── TRIGGER SERVER NOTIFICATION ─────────────────────────────────────────
   Future<void> triggerServerNotification({
     required String type,
     required String targetUserId,
