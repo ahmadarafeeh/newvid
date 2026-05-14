@@ -576,6 +576,7 @@ class _PostCardState extends State<PostCard>
     if (user == null) return;
     final double? oldUserRating = _userRating;
     final bool isUpdating = oldUserRating != null;
+
     setState(() {
       _userRating = rating;
       final currentTotal = _averageRating * _totalRatingsCount;
@@ -1356,6 +1357,8 @@ class _PostCardState extends State<PostCard>
             reactionEmoji: _reactionEmoji,
             initialThumbPosition: initialPos,
             onRatingEnd: _handleRatingSubmitted,
+            hasUserRated:
+                _userRating != null, // <-- CHANGED: pass whether user has rated
           ),
           const SizedBox(height: 8),
           Row(
@@ -1395,8 +1398,8 @@ class _PostCardState extends State<PostCard>
                 child: _totalRatingsCount == 0
                     ? Text(
                         _isTestUser
-                            ? 'Start the Rating'
-                            : 'Be the first to rate',
+                            ? 'Start the Reaction'
+                            : 'Be the first to react',
                         style: const TextStyle(
                           fontSize: 13,
                           color: Colors.white,
