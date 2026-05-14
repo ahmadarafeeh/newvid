@@ -34,7 +34,6 @@ class _EmojiThumbShape extends SliderComponentShape {
     // Linear 1.0 -> 1.5 as value goes 0.5 -> 1.0
     final t = (value - 0.5) / 0.5; // 0..1
     final scale = 1.0 + t * 0.5; // max 1.5
-    if (kDebugMode) print('RatingBar scaling: norm=$value -> scale=$scale');
     return scale;
   }
 
@@ -172,6 +171,7 @@ class RatingBar extends StatefulWidget {
   final ValueChanged<double>? onRatingUpdate;
   final ValueChanged<double> onRatingEnd;
   final bool? showGuidance;
+  final bool hasUserRated; // whether the current user has already rated
 
   const RatingBar({
     Key? key,
@@ -181,6 +181,7 @@ class RatingBar extends StatefulWidget {
     this.onRatingUpdate,
     required this.onRatingEnd,
     this.showGuidance,
+    this.hasUserRated = false,
   }) : super(key: key);
 
   @override
@@ -226,7 +227,13 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
 
   void _showTooltipWithTimer() {
     if (!mounted) return;
-    if (!_isDragging && !_isNudging && widget.averageRating >= 1.0) {
+    // Only show tooltip if user has already rated this post
+    final bool shouldShow = widget.hasUserRated &&
+        !_isDragging &&
+        !_isNudging &&
+        widget.averageRating >= 1.0;
+
+    if (shouldShow) {
       setState(() => _showTooltip = true);
       _tooltipTimer?.cancel();
       _tooltipTimer = Timer(const Duration(seconds: 3), () {
@@ -241,7 +248,11 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _currentRating = widget.initialThumbPosition.clamp(1.0, 10.0);
+
+    // If user has already rated, start at the average; otherwise neutral centre.
+    _currentRating = widget.hasUserRated
+        ? widget.averageRating.clamp(1.0, 10.0)
+        : widget.initialThumbPosition.clamp(1.0, 10.0);
 
     _sliderEntranceController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 300));
@@ -249,10 +260,12 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
         parent: _sliderEntranceController, curve: Curves.easeOut));
     _sliderFade = CurvedAnimation(
         parent: _sliderEntranceController, curve: Curves.easeIn);
+
     _pulseController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 120));
     _pulseScale = Tween<double>(begin: 1.0, end: 1.18).animate(
         CurvedAnimation(parent: _pulseController, curve: Curves.easeOut));
+
     _nudgeController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1800));
     _nudgeRating = TweenSequence<double>([
@@ -293,15 +306,18 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
       if (_isNudging && mounted && !_isDragging)
         setState(() => _currentRating = _nudgeRating.value);
     });
+
     _arrowBounceController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 500))
       ..repeat(reverse: true);
     _arrowBounce = Tween<double>(begin: 0.0, end: 10.0).animate(CurvedAnimation(
         parent: _arrowBounceController, curve: Curves.easeInOut));
+
     _nudgeGlowController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 600));
     _nudgeGlow = Tween<double>(begin: 0.0, end: 1.0).animate(
         CurvedAnimation(parent: _nudgeGlowController, curve: Curves.easeInOut));
+
     _iconWiggleController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1800));
     _iconWiggle = TweenSequence<double>([
@@ -390,11 +406,34 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
     if (mounted) setState(() => _isNudging = false);
   }
 
+  // ---------------------------------------------------------------------------
+  // FIX: only move the thumb to the community average when the user has rated.
+  // ---------------------------------------------------------------------------
   @override
   void didUpdateWidget(covariant RatingBar oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    // ── Average rating changed ───────────────────────────────────────────────
     if (widget.averageRating != oldWidget.averageRating && !_isDragging) {
-      setState(() => _currentRating = widget.averageRating.clamp(1.0, 10.0));
+      // Only snap the thumb to the community average when the current user
+      // has already submitted a rating.  Before rating, the thumb must stay
+      // at the neutral centre (5.0 / initialThumbPosition) so the bar never
+      // reveals the community average to an unrated viewer.
+      if (widget.hasUserRated) {
+        setState(() => _currentRating = widget.averageRating.clamp(1.0, 10.0));
+      }
+      _showTooltipWithTimer();
+    }
+
+    // ── hasUserRated flipped ─────────────────────────────────────────────────
+    if (widget.hasUserRated != oldWidget.hasUserRated) {
+      if (widget.hasUserRated) {
+        // User just submitted their first rating – move thumb to community avg.
+        setState(() => _currentRating = widget.averageRating.clamp(1.0, 10.0));
+      } else {
+        // Rating was removed – reset thumb to neutral centre.
+        setState(() => _currentRating = 5.0);
+      }
       _showTooltipWithTimer();
     }
   }
@@ -454,10 +493,20 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final double t = (_currentRating - 1) / 9.0;
-          final double thumbCenterX = t * constraints.maxWidth;
+
+          // Flutter's Slider reserves padding on each side equal to the thumb's
+          // preferred half-width so the thumb never overflows the widget edges.
+          // We must mirror that same offset here so the tooltip centres exactly
+          // over the middle of the emoji, not over the raw normalised position.
+          const double thumbHalfWidth =
+              30.0 * 1.5 / 2; // baseSize * maxScale / 2 = 22.5
+          final double trackWidth = constraints.maxWidth - 2 * thumbHalfWidth;
+          final double thumbCenterX = thumbHalfWidth + t * trackWidth;
+
           final bool effectiveShowTooltip = _showTooltip &&
               !_isDragging &&
               !_isNudging &&
+              widget.hasUserRated && // extra guard: never show without a rating
               widget.averageRating >= 1.0;
 
           const double tooltipWidth = 110;
@@ -596,7 +645,7 @@ class _RatingBarState extends State<RatingBar> with TickerProviderStateMixin {
                   child: AnimatedOpacity(
                     opacity: _showTooltip ? 1.0 : 0.0,
                     duration: const Duration(milliseconds: 200),
-                    child: Container(
+                    child: SizedBox(
                       width: tooltipWidth,
                       height: tooltipHeight,
                       child: CustomPaint(
