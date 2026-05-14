@@ -317,6 +317,7 @@ class SupabaseProfileMethods {
 
   Future<void> followUser(String uid, String followId) async {
     try {
+      // Check if already following
       final existingFollowing = await _supabase
           .from('user_following')
           .select()
@@ -329,6 +330,7 @@ class SupabaseProfileMethods {
         return;
       }
 
+      // Check if target account is private
       final targetSel = await _supabase
           .from('users')
           .select('isPrivate')
@@ -346,7 +348,9 @@ class SupabaseProfileMethods {
             .eq('requester_id', uid)
             .maybeSingle();
 
-        if (existingRequest != null) return;
+        if (existingRequest != null) {
+          return;
+        }
 
         await _supabase.from('user_follow_request').insert({
           'user_id': followId,
@@ -576,18 +580,6 @@ class SupabaseProfileMethods {
     } catch (e) {}
   }
 
-  // =============================================
-  // DELETE ENTIRE USER ACCOUNT
-  //
-  // Data-retention policy: all user content
-  // (posts, comments, ratings, follows, messages,
-  // notifications, profile record) is kept intact
-  // in deleted_users (inserted by the caller before
-  // this method is invoked).
-  // The users row is removed here, after auth
-  // cleanup succeeds, so the account can no longer
-  // be signed into and the live users table stays clean.
-  // =============================================
   Future<String> deleteEntireUserAccount(
       String uid, firebase_auth.AuthCredential? credential) async {
     String res = "Some error occurred";
@@ -611,24 +603,18 @@ class SupabaseProfileMethods {
         throw Exception("User not authenticated or UID mismatch");
       }
 
-      // Re-authenticate Firebase user if a credential was supplied
       if (isFirebaseUser && credential != null) {
         await firebaseUser!.reauthenticateWithCredential(credential);
       }
 
-      // Delete Firebase Auth user (sign-in credentials only — data is kept)
       if (isFirebaseUser && firebaseUser != null) {
         await firebaseUser.delete();
       }
 
-      // Sign out of Supabase Auth (session only — data is kept)
       if (isSupabaseUser) {
         await _supabase.auth.signOut();
       }
 
-      // Remove the users row now that it has been preserved in deleted_users
-      // by the caller (settings_screen._logDeletionData), and auth accounts
-      // have been successfully cleaned up above.
       await _supabase.from('users').delete().eq('uid', uid);
 
       res = "success";
