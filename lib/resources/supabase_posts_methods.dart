@@ -1,4 +1,3 @@
-// lib/resources/supabase_posts_methods.dart
 import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
@@ -128,7 +127,6 @@ class SupabasePostsMethods {
     return res;
   }
 
-  // Updated: added reactionEmoji parameter and store it in the database
   Future<String> uploadPost(
     String description,
     Uint8List file,
@@ -138,7 +136,7 @@ class SupabasePostsMethods {
     String gender, {
     int boostViews = 0,
     bool isBoosted = false,
-    String? reactionEmoji, // NEW
+    String? reactionEmoji,
   }) async {
     String res = "Some error occurred";
     try {
@@ -164,7 +162,7 @@ class SupabasePostsMethods {
         'boost_views': boostViews,
         'is_boosted': isBoosted,
         'viewers_count': boostViews,
-        'reaction_emoji': reactionEmoji ?? '❤️', // store emoji
+        'reaction_emoji': reactionEmoji ?? '❤️',
       });
 
       res = "success";
@@ -186,7 +184,6 @@ class SupabasePostsMethods {
     return res;
   }
 
-  // Updated: added reactionEmoji parameter and store it, keep editMetadata
   Future<String> uploadVideoPostFromFile(
     String description,
     File videoFile,
@@ -197,7 +194,7 @@ class SupabasePostsMethods {
     int boostViews = 0,
     bool isBoosted = false,
     Map<String, dynamic>? editMetadata,
-    String? reactionEmoji, // NEW
+    String? reactionEmoji,
   }) async {
     String res = "Some error occurred";
     try {
@@ -210,7 +207,6 @@ class SupabasePostsMethods {
         useUserFolder: true,
       );
 
-      // Build insert payload
       final Map<String, dynamic> payload = {
         'postId': postId,
         'description': description,
@@ -224,10 +220,9 @@ class SupabasePostsMethods {
         'boost_views': boostViews,
         'is_boosted': isBoosted,
         'viewers_count': boostViews,
-        'reaction_emoji': reactionEmoji ?? '❤️', // store emoji
+        'reaction_emoji': reactionEmoji ?? '❤️',
       };
 
-      // Store edit metadata if provided (for video filters, text, draw, rotation)
       if (editMetadata != null) {
         payload['video_edit_metadata'] = editMetadata;
       }
@@ -505,7 +500,7 @@ class SupabasePostsMethods {
   }
 
   // ----------------------
-  // Create rating notification
+  // Create reaction notification (previously rating)
   // ----------------------
   Future<void> createNotification({
     required String postId,
@@ -517,7 +512,7 @@ class SupabasePostsMethods {
       if (raterUid == postOwnerUid) return;
 
       await _supabase.from('notifications').insert({
-        'type': 'post_rating',
+        'type': 'post_reaction',
         'target_user_id': postOwnerUid,
         'custom_data': {
           'postId': postId,
@@ -536,10 +531,10 @@ class SupabasePostsMethods {
       final String raterUsername = raterData?['username'] ?? 'Someone';
 
       _notificationService.triggerServerNotification(
-        type: 'rating',
+        type: 'reaction',
         targetUserId: postOwnerUid,
-        title: 'New Rating',
-        body: '$raterUsername rated your post: ${rating.toStringAsFixed(1)}/10',
+        title: 'New Reaction',
+        body: '$raterUsername reacted to your post',
         customData: {'raterId': raterUid, 'postId': postId},
       );
     } catch (e) {
@@ -552,6 +547,28 @@ class SupabasePostsMethods {
           'postOwnerUid': postOwnerUid,
           'rating': rating,
         },
+      );
+    }
+  }
+
+  // ----------------------
+  // Delete previous reaction notification
+  // ----------------------
+  Future<void> _deletePreviousReactionNotification(
+      String postId, String raterUid) async {
+    try {
+      await _supabase
+          .from('notifications')
+          .delete()
+          .eq('type', 'post_reaction')
+          .eq('custom_data->>postId', postId)
+          .eq('custom_data->>raterUid', raterUid);
+    } catch (e) {
+      await _logPostError(
+        operationType: 'delete_previous_reaction_notification',
+        userId: raterUid,
+        error: e,
+        additionalData: {'postId': postId},
       );
     }
   }
@@ -633,7 +650,7 @@ class SupabasePostsMethods {
   }
 
   // ----------------------
-  // Rate a post
+  // Rate a post (now: react to a post)
   // ----------------------
   Future<String> ratePost(String postId, String uid, double rating) async {
     String res = "Some error occurred";
@@ -668,7 +685,7 @@ class SupabasePostsMethods {
 
       if (uid != postOwnerUid) {
         if (isUpdate) {
-          await _deletePreviousRatingNotification(postId, uid);
+          await _deletePreviousReactionNotification(postId, uid);
         }
         await createNotification(
           postId: postId,
@@ -689,25 +706,6 @@ class SupabasePostsMethods {
       );
     }
     return res;
-  }
-
-  Future<void> _deletePreviousRatingNotification(
-      String postId, String raterUid) async {
-    try {
-      await _supabase
-          .from('notifications')
-          .delete()
-          .eq('type', 'post_rating')
-          .eq('custom_data->>postId', postId)
-          .eq('custom_data->>raterUid', raterUid);
-    } catch (e) {
-      await _logPostError(
-        operationType: 'delete_previous_rating_notification',
-        userId: raterUid,
-        error: e,
-        additionalData: {'postId': postId},
-      );
-    }
   }
 
   // ----------------------
