@@ -32,10 +32,17 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // ── Read the persisted userId from disk BEFORE the first frame ────────────
-  // This takes ~2 ms and means FeedCacheService.getLastUserIdSync() returns a
-  // non-null value for returning users on the very first frame – before auth
-  // resolves (which takes 677–2800 ms).
   await FeedCacheService.warmUserIdCache();
+
+  // ── Initialize MobileAds BEFORE runApp so it is ready when the feed
+  // screen mounts and calls _loadInterstitialAd() in initState.
+  // This prevents the silent race condition where the ad load fires before
+  // MobileAds is initialized, causing a blank ad unit ID and no fill. ────────
+  if (!kIsWeb) {
+    try {
+      await MobileAds.instance.initialize();
+    } catch (_) {}
+  }
 
   runApp(
     ChangeNotifierProvider(
@@ -49,7 +56,6 @@ void main() async {
       _initializeFirebase(),
       _initializeSupabase(),
     ]);
-
     _appInitState.value = _InitState.ready;
   } catch (_) {
     _appInitState.value = _InitState.error;
@@ -85,18 +91,10 @@ Future<void> _initializeSupabase() async {
 }
 
 Future<void> _initializeNonEssentialServicesInBackground() async {
+  // Note: MobileAds is already initialized before runApp above.
+  // Only analytics and notifications remain here.
   try {
-    await Future.wait([
-      _initializeMobileAdsInBackground(),
-      _initializeOtherServicesInBackground(),
-    ], eagerError: false);
-  } catch (_) {}
-}
-
-Future<void> _initializeMobileAdsInBackground() async {
-  try {
-    if (kIsWeb) return;
-    await MobileAds.instance.initialize();
+    await _initializeOtherServicesInBackground();
   } catch (_) {}
 }
 
