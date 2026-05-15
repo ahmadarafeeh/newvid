@@ -2,22 +2,48 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 class AdHelper {
-  // App ID (same for both platforms)
+  // ── App ID ──────────────────────────────────────────────────────────────────
   static String get appId {
-    if (kIsWeb) return ''; // Return empty for web
-
+    if (kIsWeb) return '';
     if (Platform.isAndroid) {
       return 'ca-app-pub-8139457472126187~2544639689';
     } else if (Platform.isIOS) {
-      return 'ca-app-pub-8139457472126187~8421574907'; // Replace with your iOS app ID if different
+      return 'ca-app-pub-8139457472126187~8421574907';
     } else {
       throw UnsupportedError('Unsupported platform');
     }
   }
 
-  static String get feedNativeAdUnitId {
-    if (kIsWeb) return ''; // Return empty for web
+  // ── Feed Screen Interstitial (the only active ad) ───────────────────────────
+  // Using Google test IDs so the ad shows immediately on a real device.
+  // Once confirmed working, swap these back to your real IDs below.
+  static String get feedInterstitialAdUnitId {
+    if (kIsWeb) return '';
+    if (Platform.isAndroid) {
+      return 'ca-app-pub-3940256099942544/1033173712'; // Google test ID — Android
+    } else if (Platform.isIOS) {
+      return 'ca-app-pub-3940256099942544/4411468910'; // Google test ID — iOS
+    } else {
+      throw UnsupportedError('Unsupported platform');
+    }
+  }
 
+  // ── Real IDs (swap back in after confirming the test ad works) ──────────────
+  //
+  // static String get feedInterstitialAdUnitId {
+  //   if (kIsWeb) return '';
+  //   if (Platform.isAndroid) {
+  //     return 'ca-app-pub-8139457472126187/8507251108';
+  //   } else if (Platform.isIOS) {
+  //     return 'ca-app-pub-8139457472126187/9238960415';
+  //   } else {
+  //     throw UnsupportedError('Unsupported platform');
+  //   }
+  // }
+
+  // ── All other ad units (disabled — kept for future use) ────────────────────
+  static String get feedNativeAdUnitId {
+    if (kIsWeb) return '';
     if (Platform.isAndroid) {
       return 'ca-app-pub-8139457472126187/8603894968';
     } else if (Platform.isIOS) {
@@ -27,10 +53,8 @@ class AdHelper {
     }
   }
 
-  // Feed Screen Ads
   static String get feedBannerAdUnitId {
-    if (kIsWeb) return ''; // Return empty for web
-
+    if (kIsWeb) return '';
     if (Platform.isAndroid) {
       return 'ca-app-pub-8139457472126187/4547507566';
     } else if (Platform.isIOS) {
@@ -40,24 +64,10 @@ class AdHelper {
     }
   }
 
-  static String get feedInterstitialAdUnitId {
-    if (kIsWeb) return ''; // Return empty for web
-
-    if (Platform.isAndroid) {
-      return 'ca-app-pub-8139457472126187/8507251108';
-    } else if (Platform.isIOS) {
-      return 'ca-app-pub-8139457472126187/9238960415';
-    } else {
-      throw UnsupportedError('Unsupported platform');
-    }
-  }
-
-  // Search Screen Ads
   static String get searchBannerAdUnitId {
-    if (kIsWeb) return ''; // Return empty for web
-
+    if (kIsWeb) return '';
     if (Platform.isAndroid) {
-      return 'ca-app-pub-8139457472126187/4547507566'; // Same as feed banner for Android
+      return 'ca-app-pub-8139457472126187/4547507566';
     } else if (Platform.isIOS) {
       return 'ca-app-pub-8139457472126187/6093976226';
     } else {
@@ -65,12 +75,10 @@ class AdHelper {
     }
   }
 
-  // Current User Profile Screen Ads
   static String get currentProfileBannerAdUnitId {
-    if (kIsWeb) return ''; // Return empty for web
-
+    if (kIsWeb) return '';
     if (Platform.isAndroid) {
-      return 'ca-app-pub-8139457472126187/4547507566'; // Same as feed banner for Android
+      return 'ca-app-pub-8139457472126187/4547507566';
     } else if (Platform.isIOS) {
       return 'ca-app-pub-8139457472126187/1392313888';
     } else {
@@ -78,12 +86,10 @@ class AdHelper {
     }
   }
 
-  // Other User Profile Screen Ads
   static String get otherProfileBannerAdUnitId {
-    if (kIsWeb) return ''; // Return empty for web
-
+    if (kIsWeb) return '';
     if (Platform.isAndroid) {
-      return 'ca-app-pub-8139457472126187/4547507566'; // Same as feed banner for Android
+      return 'ca-app-pub-8139457472126187/4547507566';
     } else if (Platform.isIOS) {
       return 'ca-app-pub-8139457472126187/4840604309';
     } else {
@@ -91,12 +97,10 @@ class AdHelper {
     }
   }
 
-  // Notification Screen Ads
   static String get notificationBannerAdUnitId {
-    if (kIsWeb) return ''; // Return empty for web
-
+    if (kIsWeb) return '';
     if (Platform.isAndroid) {
-      return 'ca-app-pub-8139457472126187/4547507566'; // Same as feed banner for Android
+      return 'ca-app-pub-8139457472126187/4547507566';
     } else if (Platform.isIOS) {
       return 'ca-app-pub-8139457472126187/9079232213';
     } else {
@@ -104,12 +108,10 @@ class AdHelper {
     }
   }
 
-  // Image viw screen
   static String get imagescreenAdUnitId {
-    if (kIsWeb) return ''; // Return empty for web
-
+    if (kIsWeb) return '';
     if (Platform.isAndroid) {
-      return 'ca-app-pub-8139457472126187/4547507566'; // Same as feed banner for Android
+      return 'ca-app-pub-8139457472126187/4547507566';
     } else if (Platform.isIOS) {
       return 'ca-app-pub-8139457472126187/1008637673';
     } else {
@@ -117,7 +119,7 @@ class AdHelper {
     }
   }
 
-  // Generic fallback methods
+  // ── Generic fallbacks ───────────────────────────────────────────────────────
   static String get bannerAdUnitId => feedBannerAdUnitId;
   static String get interstitialAdUnitId => feedInterstitialAdUnitId;
 }
