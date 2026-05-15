@@ -316,6 +316,13 @@ class SupabaseProfileMethods {
   }
 
   Future<void> followUser(String uid, String followId) async {
+    print('');
+    print('┌─────────────────────────────────────────────────┐');
+    print('│  [PROFILE:follow] followUser() called           │');
+    print('└─────────────────────────────────────────────────┘');
+    print('[PROFILE:follow] uid (follower):  $uid');
+    print('[PROFILE:follow] followId (target): $followId');
+
     try {
       // Check if already following
       final existingFollowing = await _supabase
@@ -326,6 +333,8 @@ class SupabaseProfileMethods {
           .maybeSingle();
 
       if (existingFollowing != null) {
+        print(
+            '[PROFILE:follow] Already following — calling unfollowUser() instead');
         await unfollowUser(uid, followId);
         return;
       }
@@ -340,7 +349,11 @@ class SupabaseProfileMethods {
       final isPrivate = targetUser?['isPrivate'] ?? false;
       final timestamp = DateTime.now();
 
+      print('[PROFILE:follow] Target account isPrivate: $isPrivate');
+
       if (isPrivate) {
+        print('[PROFILE:follow] ▶ Private account — sending follow REQUEST');
+
         final existingRequest = await _supabase
             .from('user_follow_request')
             .select()
@@ -349,6 +362,7 @@ class SupabaseProfileMethods {
             .maybeSingle();
 
         if (existingRequest != null) {
+          print('[PROFILE:follow] Request already exists — skipping');
           return;
         }
 
@@ -357,6 +371,8 @@ class SupabaseProfileMethods {
           'requester_id': uid,
           'requested_at': timestamp.toIso8601String(),
         });
+        print(
+            '[PROFILE:follow] ✅ Follow request inserted to user_follow_request');
 
         final requesterSel = await _supabase
             .from('users')
@@ -367,6 +383,10 @@ class SupabaseProfileMethods {
         final String requesterUsername =
             requesterData?['username'] ?? 'Someone';
 
+        print('[PROFILE:follow] Requester username: $requesterUsername');
+        print(
+            '[PROFILE:follow] ▶ Calling triggerServerNotification(follow_request)...');
+
         _notificationService.triggerServerNotification(
           type: 'follow_request',
           targetUserId: followId,
@@ -375,19 +395,27 @@ class SupabaseProfileMethods {
           customData: {'requesterId': uid},
         );
 
+        print(
+            '[PROFILE:follow] ▶ Writing follow_request to Supabase notifications...');
         await _createFollowRequestNotification(uid, followId);
+        print(
+            '[PROFILE:follow] ✅ follow_request notification saved to Supabase');
       } else {
+        print('[PROFILE:follow] ▶ Public account — following directly');
+
         await _supabase.from('user_followers').insert({
           'user_id': followId,
           'follower_id': uid,
           'followed_at': timestamp.toIso8601String(),
         });
+        print('[PROFILE:follow] ✅ Inserted into user_followers');
 
         await _supabase.from('user_following').insert({
           'user_id': uid,
           'following_id': followId,
           'followed_at': timestamp.toIso8601String(),
         });
+        print('[PROFILE:follow] ✅ Inserted into user_following');
 
         final followerSel = await _supabase
             .from('users')
@@ -397,6 +425,10 @@ class SupabaseProfileMethods {
         final followerData = _unwrap(followerSel) ?? followerSel;
         final String followerUsername = followerData?['username'] ?? 'Someone';
 
+        print('[PROFILE:follow] Follower username: $followerUsername');
+        print(
+            '[PROFILE:follow] ▶ Calling triggerServerNotification(follow)...');
+
         _notificationService.triggerServerNotification(
           type: 'follow',
           targetUserId: followId,
@@ -405,31 +437,42 @@ class SupabaseProfileMethods {
           customData: {'followerId': uid},
         );
 
+        print('[PROFILE:follow] ▶ Writing follow notification to Supabase...');
         await createFollowNotification(uid, followId);
+        print('[PROFILE:follow] ✅ Follow notification saved to Supabase');
       }
     } catch (e) {
+      print('[PROFILE:follow] ❌ EXCEPTION in followUser(): $e');
       rethrow;
     }
+    print('');
   }
 
   Future<void> _createFollowRequestNotification(
       String requesterUid, String targetUid) async {
+    print('[PROFILE:notif] Writing follow_request notification to Supabase...');
     await _supabase.from('notifications').insert({
       'target_user_id': targetUid,
       'type': 'follow_request',
       'custom_data': {'requesterId': requesterUid},
       'created_at': DateTime.now().toUtc().toIso8601String(),
     });
+    print(
+        '[PROFILE:notif] ✅ follow_request inserted to Supabase notifications');
   }
 
   Future<void> acceptFollowRequest(
       String targetUid, String requesterUid) async {
+    print('[PROFILE:accept] ▶ acceptFollowRequest() called');
+    print(
+        '[PROFILE:accept] targetUid: $targetUid, requesterUid: $requesterUid');
     try {
       await _supabase
           .from('user_follow_request')
           .delete()
           .eq('user_id', targetUid)
           .eq('requester_id', requesterUid);
+      print('[PROFILE:accept] ✅ Deleted from user_follow_request');
 
       await _supabase
           .from('notifications')
@@ -437,6 +480,8 @@ class SupabaseProfileMethods {
           .eq('target_user_id', targetUid)
           .eq('type', 'follow_request')
           .eq('custom_data->>requesterId', requesterUid);
+      print(
+          '[PROFILE:accept] ✅ Deleted follow_request notification from Supabase');
 
       final timestamp = DateTime.now();
       await _supabase.from('user_followers').upsert({
@@ -450,6 +495,7 @@ class SupabaseProfileMethods {
         'following_id': targetUid,
         'followed_at': timestamp.toIso8601String(),
       });
+      print('[PROFILE:accept] ✅ Upserted followers/following tables');
 
       final targetSel = await _supabase
           .from('users')
@@ -465,7 +511,11 @@ class SupabaseProfileMethods {
         'custom_data': {'approverId': targetUid},
         'created_at': DateTime.now().toUtc().toIso8601String(),
       });
+      print(
+          '[PROFILE:accept] ✅ follow_request_accepted written to Supabase notifications');
 
+      print(
+          '[PROFILE:accept] ▶ Calling triggerServerNotification(follow_request_accepted)...');
       _notificationService.triggerServerNotification(
         type: 'follow_request_accepted',
         targetUserId: requesterUid,
@@ -475,7 +525,9 @@ class SupabaseProfileMethods {
       );
 
       await createFollowNotification(requesterUid, targetUid);
+      print('[PROFILE:accept] ✅ acceptFollowRequest() complete');
     } catch (e) {
+      print('[PROFILE:accept] ❌ EXCEPTION in acceptFollowRequest(): $e');
       rethrow;
     }
   }
@@ -540,12 +592,15 @@ class SupabaseProfileMethods {
     String followerUid,
     String followedUid,
   ) async {
+    print(
+        '[PROFILE:notif] Writing follow notification to Supabase notifications...');
     await _supabase.from('notifications').insert({
       'target_user_id': followedUid,
       'type': 'follow',
       'custom_data': {'followerId': followerUid},
       'created_at': DateTime.now().toUtc().toIso8601String(),
     });
+    print('[PROFILE:notif] ✅ Follow notification inserted');
   }
 
   Future<void> _deleteUserActorNotifications(String uid) async {
