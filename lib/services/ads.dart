@@ -15,31 +15,16 @@ class AdHelper {
   }
 
   // ── Feed Screen Interstitial (the only active ad) ───────────────────────────
-  // Using Google test IDs so the ad shows immediately on a real device.
-  // Once confirmed working, swap these back to your real IDs below.
   static String get feedInterstitialAdUnitId {
     if (kIsWeb) return '';
     if (Platform.isAndroid) {
-      return 'ca-app-pub-3940256099942544/1033173712'; // Google test ID — Android
+      return 'ca-app-pub-8139457472126187/8507251108';
     } else if (Platform.isIOS) {
-      return 'ca-app-pub-3940256099942544/4411468910'; // Google test ID — iOS
+      return 'ca-app-pub-8139457472126187/9238960415';
     } else {
       throw UnsupportedError('Unsupported platform');
     }
   }
-
-  // ── Real IDs (swap back in after confirming the test ad works) ──────────────
-  //
-  // static String get feedInterstitialAdUnitId {
-  //   if (kIsWeb) return '';
-  //   if (Platform.isAndroid) {
-  //     return 'ca-app-pub-8139457472126187/8507251108';
-  //   } else if (Platform.isIOS) {
-  //     return 'ca-app-pub-8139457472126187/9238960415';
-  //   } else {
-  //     throw UnsupportedError('Unsupported platform');
-  //   }
-  // }
 
   // ── All other ad units (disabled — kept for future use) ────────────────────
   static String get feedNativeAdUnitId {
