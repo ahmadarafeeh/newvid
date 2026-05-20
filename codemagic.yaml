@@ -10,8 +10,6 @@ workflows:
         bundle_identifier: com.ios.ratedly
       vars:
         BUNDLE_ID: "com.ios.ratedly"
-        XCODE_WORKSPACE: "ios/Runner.xcworkspace"
-        XCODE_SCHEME: "Runner"
       flutter: 3.27.4
       xcode: latest
       cocoapods: default
@@ -34,21 +32,22 @@ workflows:
 
       - name: Install CocoaPods
         script: |
-          find . -name "Podfile" -execdir pod install \;
-        working_directory: ios
+          cd ios && pod install
 
       - name: Build iOS IPA
         script: |
           flutter build ipa --release \
-            --build-number=$(($(app-store-connect get-latest-testflight-build-number "$BUNDLE_ID") + 1)) \
+            --build-number=$BUILD_NUMBER \
             --export-options-plist=/Users/builder/export_options.plist
 
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
-      - flutter_drive.log
 
     publishing:
-      app_store_connect:
-        auth: integration
-        submit_to_testflight: true
+      email:
+        recipients:
+          - ahmadarafeh9@gmail.com
+        notify:
+          success: true
+          failure: true
