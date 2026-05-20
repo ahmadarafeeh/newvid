@@ -39,7 +39,12 @@ workflows:
         script: |
           flutter build ipa --release \
             --build-number=$BUILD_NUMBER \
-            --export-options-plist=/Users/builder/export_options.plist
+            --export-options-plist=/Users/builder/export_options.plist \
+            --no-codesign
+          
+          xcode-project build-ipa \
+            --workspace "ios/Runner.xcworkspace" \
+            --scheme "Runner"
 
     artifacts:
       - build/ios/ipa/*.ipa
