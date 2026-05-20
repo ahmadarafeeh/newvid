@@ -38,7 +38,6 @@ dependencies:
   permission_handler: ^11.0.0
   camera: ^0.10.5+9
   photo_manager: ^3.3.0
-  in_app_purchase: ^3.0.5
 
 
 dev_dependencies:
