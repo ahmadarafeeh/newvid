@@ -13,8 +13,7 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.ios.ratedly
-        certificates:
-          - iOS Distribution Certificate   # Make sure this matches the name in Codemagic UI
+        # certificates line removed – Codemagic will auto-fetch from Apple Developer Portal
 
     triggering:
       events:
