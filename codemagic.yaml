@@ -31,6 +31,10 @@ workflows:
         script: |
           xcode-project use-profiles
 
+      - name: Pod repo update
+        script: |
+          cd ios && pod repo update
+
       - name: Build iOS IPA
         script: |
           flutter build ipa --release \
