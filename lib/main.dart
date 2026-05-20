@@ -17,6 +17,7 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:Ratedly/services/country_service.dart';
 import 'package:Ratedly/screens/feed/feed_skeleton.dart';
 import 'package:Ratedly/services/feed_cache_service.dart';
+import 'package:Ratedly/services/iap_service.dart'; // ✅ ADDED
 
 const bool useDebugHome = false;
 
@@ -43,6 +44,9 @@ void main() async {
       await MobileAds.instance.initialize();
     } catch (_) {}
   }
+
+  // ✅ Initialize IAP service
+  await IAPService().init();
 
   runApp(
     ChangeNotifierProvider(
