@@ -38,6 +38,7 @@ dependencies:
   permission_handler: ^11.0.0
   camera: ^0.10.5+9
   photo_manager: ^3.3.0
+  purchases_flutter: ^8.0.0   
 
 
 dev_dependencies:
