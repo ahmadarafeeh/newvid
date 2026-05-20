@@ -10,15 +10,12 @@ workflows:
       flutter: 3.27.4
       xcode: latest
       cocoapods: default
-      # This block is REQUIRED even with automatic signing.
-      # It tells Codemagic which profile to fetch.
       ios_signing:
-        distribution_type: app_store      # 'app_store' for App Store distribution
+        distribution_type: app_store
         bundle_identifier: com.ios.ratedly
 
     integrations:
-      # The name must exactly match the API key name in Codemagic UI → Team → Integrations
-      app_store_connect: Codemagic Full Access
+      app_store_connect: Codemagic Full Access   # or whatever you named it
 
     triggering:
       events:
@@ -40,15 +37,22 @@ workflows:
         script: |
           cd ios && pod repo update
 
+      - name: Force automatic signing in Xcode project
+        script: |
+          cd ios
+          # Add CODE_SIGN_STYLE = Automatic to Release config
+          sed -i '' '/97C147071CF9000F007C117D \/\* Release \*\//,/^[[:space:]]*};/ s/\(buildSettings = {\)/\1\n\t\t\t\tCODE_SIGN_STYLE = Automatic;/' Runner.xcodeproj/project.pbxproj
+          # Add CODE_SIGN_STYLE = Automatic to Profile config
+          sed -i '' '/249021D4217E4FDB00AE95B9 \/\* Profile \*\//,/^[[:space:]]*};/ s/\(buildSettings = {\)/\1\n\t\t\t\tCODE_SIGN_STYLE = Automatic;/' Runner.xcodeproj/project.pbxproj
+          cd ..
+
       - name: Set up code signing
         script: |
-          # This will now fetch the App Store profile using your API key
           xcode-project use-profiles --project ios/Runner.xcodeproj
 
       - name: Build IPA for App Store
         script: |
-          flutter build ipa --release \
-            --build-number=$BUILD_NUMBER
+          flutter build ipa --release --build-number=$BUILD_NUMBER
 
     artifacts:
       - build/ios/ipa/*.ipa
