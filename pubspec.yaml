@@ -42,7 +42,7 @@ dependencies:
   country_flags: ^4.1.0
 
   # Monetization
-  google_mobile_ads: ^6.0.0
+  google_mobile_ads: ^8.0.0
   in_app_purchase: ^3.2.3
 
   # Utilities
