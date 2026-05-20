@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show TargetPlatform;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide User;
@@ -13,6 +14,7 @@ import 'package:Ratedly/resources/block_firestore_methods.dart';
 import 'package:Ratedly/widgets/blue_verification_screen.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:Ratedly/providers/user_provider.dart';
+import 'package:Ratedly/screens/reactly_plus_screen.dart'; // ✅ ADDED
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -830,6 +832,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     }
 
+    // ✅ Determine if we should show Reactly+ (only on iOS / iPhone)
+    final bool showReactlyPlus =
+        Theme.of(context).platform == TargetPlatform.iOS;
+
     return Scaffold(
       backgroundColor: colors.backgroundColor,
       appBar: AppBar(
@@ -846,6 +852,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
                   children: [
+                    // ✅ Conditionally show Reactly+ button (only on iOS)
+                    if (showReactlyPlus)
+                      _buildOptionTile(
+                        title: 'Reactly+',
+                        icon: Icons.star,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const ReactlyPlusScreen()),
+                        ),
+                      ),
                     _buildOptionTile(
                       title: 'Blue Verification',
                       icon: Icons.verified,
