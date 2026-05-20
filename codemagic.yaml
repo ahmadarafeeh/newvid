@@ -35,7 +35,8 @@ workflows:
 
       - name: Set up code signing
         script: |
-          xcode-project use-profiles
+          xcode-project use-profiles --project ios/Runner.xcodeproj
+
 
       - name: Pod repo update
         script: |
