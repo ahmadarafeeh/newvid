@@ -1,7 +1,7 @@
 workflows:
   ios-release:
     name: iOS Release
-    max_build_duration: 59
+    max_build_duration: 60
     instance_type: mac_mini_m2
 
     environment:
@@ -13,7 +13,9 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.ios.ratedly
-        # certificates line removed – Codemagic will auto-fetch from Apple Developer Portal
+
+    integrations:
+      app_store_connect: YOUR_APP_STORE_CONNECT_KEY_NAME  # set up in Codemagic UI
 
     triggering:
       events:
@@ -31,24 +33,13 @@ workflows:
         script: |
           flutter packages pub get
 
+      - name: Set up code signing
+        script: |
+          xcode-project use-profiles
+
       - name: Pod repo update
         script: |
           cd ios && pod repo update
-
-      - name: Create export_options.plist
-        script: |
-          cat > /Users/builder/export_options.plist <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>app-store</string>
-              <key>teamID</key>
-              <string>R97R49L336</string>
-          </dict>
-          </plist>
-          EOF
 
       - name: Build iOS IPA
         script: |
