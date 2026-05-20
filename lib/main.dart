@@ -17,7 +17,7 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:Ratedly/services/country_service.dart';
 import 'package:Ratedly/screens/feed/feed_skeleton.dart';
 import 'package:Ratedly/services/feed_cache_service.dart';
-import 'package:Ratedly/services/iap_service.dart'; // ✅ ADDED
+import 'package:Ratedly/services/iap_service.dart';
 
 const bool useDebugHome = false;
 
@@ -32,21 +32,16 @@ final _appInitState = ValueNotifier<_InitState>(_InitState.loading);
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ── Read the persisted userId from disk BEFORE the first frame ────────────
   await FeedCacheService.warmUserIdCache();
 
-  // ── Initialize MobileAds BEFORE runApp so it is ready when the feed
-  // screen mounts and calls _loadInterstitialAd() in initState.
-  // This prevents the silent race condition where the ad load fires before
-  // MobileAds is initialized, causing a blank ad unit ID and no fill. ────────
   if (!kIsWeb) {
     try {
       await MobileAds.instance.initialize();
     } catch (_) {}
   }
 
-  // ✅ Initialize IAP service
-  await IAPService().init();
+  // ✅ RevenueCat init — replaces the old IAPService().init()
+  await IAPService.init();
 
   runApp(
     ChangeNotifierProvider(
@@ -95,8 +90,6 @@ Future<void> _initializeSupabase() async {
 }
 
 Future<void> _initializeNonEssentialServicesInBackground() async {
-  // Note: MobileAds is already initialized before runApp above.
-  // Only analytics and notifications remain here.
   try {
     await _initializeOtherServicesInBackground();
   } catch (_) {}
@@ -152,9 +145,9 @@ class _AppBootstrap extends StatelessWidget {
           valueListenable: stateNotifier,
           builder: (context, state, _) {
             if (state == _InitState.error) {
-              return MaterialApp(
+              return const MaterialApp(
                 debugShowCheckedModeBanner: false,
-                home: const ErrorApp(),
+                home: ErrorApp(),
               );
             }
 
@@ -358,9 +351,11 @@ class _DebugHomeState extends State<DebugHome> {
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(16.0),
-          child: Text(_msg,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 16)),
+          child: Text(
+            _msg,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 16),
+          ),
         ),
       ),
     );
