@@ -5,31 +5,29 @@ workflows:
       flutter: stable
       xcode: latest
     scripts:
-      # We'll run these commands in the pre-build phase
-      - name: Run pre-build cleanup commands
+      - name: Disable Swift Package Manager globally
         script: |
-          # 1. Disable SPM via Flutter config
           flutter config --no-enable-swift-package-manager
+          # Verify it's disabled
+          flutter config | grep "enable-swift-package-manager" || true
 
-          # 2. Clean the project
+      - name: Clean and remove SPM artifacts
+        script: |
           flutter clean
+          rm -rf ios/Pods ios/Podfile.lock
+          rm -rf ios/Runner.xcworkspace/xcshareddata/swiftpm
+          rm -rf ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+          find . -name "Package.resolved" -type f -delete
 
-          # 3. Get the latest packages
+      - name: Get dependencies and install CocoaPods
+        script: |
           flutter pub get
-
-          # 4. Navigate to iOS folder
           cd ios
-
-          # 5. Remove Pods and Podfile.lock
-          rm -rf Pods Podfile.lock
-
-          # 6. Reinstall pods
           pod install --repo-update
-
-          # Go back to project root
           cd ..
 
-      # This is your standard build command
       - name: Build IPA for distribution
-        script: flutter build ipa --release
-        # --release flag builds in release mode
+        script: |
+          flutter build ipa --release \
+            --export-options-plist /Users/builder/export_options.plist \
+            --build-number=$BUILD_NUMBER
