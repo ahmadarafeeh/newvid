@@ -10,12 +10,11 @@ workflows:
       flutter: 3.27.4
       xcode: latest
       cocoapods: default
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.ios.ratedly
+      # ios_signing block removed – it's for manual signing only.
+      # Since you're using integrations.app_store_connect, Codemagic will auto-fetch profiles.
 
     integrations:
-      app_store_connect: Codemagic  # set up in Codemagic UI
+      app_store_connect: Codemagic   # This name must match exactly what you set in Codemagic UI → Teams → Integrations
 
     triggering:
       events:
@@ -35,8 +34,8 @@ workflows:
 
       - name: Set up code signing
         script: |
-          xcode-project use-profiles --project ios/Runner.xcodeproj
-
+          # Explicitly point to the Xcode project and enable verbose logging to debug profile issues
+          xcode-project use-profiles --project ios/Runner.xcodeproj --code-signing-setup-verbose-logging
 
       - name: Pod repo update
         script: |
