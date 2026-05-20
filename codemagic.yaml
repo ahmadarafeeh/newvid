@@ -1,0 +1,35 @@
+workflows:
+  ios-build:
+    name: iOS Build
+    environment:
+      flutter: stable
+      xcode: latest
+    scripts:
+      # We'll run these commands in the pre-build phase
+      - name: Run pre-build cleanup commands
+        script: |
+          # 1. Disable SPM via Flutter config
+          flutter config --no-enable-swift-package-manager
+
+          # 2. Clean the project
+          flutter clean
+
+          # 3. Get the latest packages
+          flutter pub get
+
+          # 4. Navigate to iOS folder
+          cd ios
+
+          # 5. Remove Pods and Podfile.lock
+          rm -rf Pods Podfile.lock
+
+          # 6. Reinstall pods
+          pod install --repo-update
+
+          # Go back to project root
+          cd ..
+
+      # This is your standard build command
+      - name: Build IPA for distribution
+        script: flutter build ipa --release
+        # --release flag builds in release mode
