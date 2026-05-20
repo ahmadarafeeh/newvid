@@ -15,7 +15,7 @@ workflows:
         bundle_identifier: com.ios.ratedly
 
     integrations:
-      app_store_connect: YOUR_APP_STORE_CONNECT_KEY_NAME  # set up in Codemagic UI
+      app_store_connect: Codemagic  # set up in Codemagic UI
 
     triggering:
       events:
