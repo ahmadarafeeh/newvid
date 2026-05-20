@@ -18,7 +18,7 @@ workflows:
 
     integrations:
       # The name must exactly match the API key name in Codemagic UI → Team → Integrations
-      app_store_connect: Codemagic
+      app_store_connect: Codemagic Full Access
 
     triggering:
       events:
