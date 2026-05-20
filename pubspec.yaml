@@ -9,7 +9,7 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # ── Firebase (all pinned to firebase_core 3.12.x) ──
+  # ── Firebase ──
   firebase_core: ^3.12.0
   firebase_auth: ^5.3.4
   cloud_firestore: ^5.5.0
@@ -67,6 +67,11 @@ dev_dependencies:
 
 dependency_overrides:
   path: ^1.9.1
+  firebase_core: 3.12.1
+  cloud_firestore: 5.5.4
+  firebase_analytics: 11.3.0
+  cloud_firestore_platform_interface: 6.4.0
+  firebase_core_platform_interface: 5.3.0
 
 flutter:
   uses-material-design: true
