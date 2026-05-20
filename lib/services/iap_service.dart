@@ -1,4 +1,5 @@
-import 'package:in_app_purchase/in_app_purchase.dart';
+// lib/services/iap_service.dart
+import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class IAPService {
@@ -6,67 +7,83 @@ class IAPService {
   factory IAPService() => _instance;
   IAPService._internal();
 
-  static const String productId =
-      'ratedly_plus_1'; // <-- Change to your real Product ID
-  static const String purchaseStatusKey = 'reactly_plus_purchased';
+  static const String productId = 'ratedly_plus_1'; // your App Store product ID
+  static const String _purchaseKey = 'reactly_plus_purchased';
 
-  final InAppPurchase _inAppPurchase = InAppPurchase.instance;
-  bool _isAvailable = false;
-
-  // Stream of purchase updates
-  Stream<List<PurchaseDetails>> get purchaseStream =>
-      _inAppPurchase.purchaseStream;
-
-  Future<void> init() async {
-    final bool isAvailable = await _inAppPurchase.isAvailable();
-    _isAvailable = isAvailable;
-    if (!isAvailable) {
-      print('In-App Purchases not available');
-    }
+  // ─── Call once at app startup (in main.dart) ────────────────────────────────
+  static Future<void> init() async {
+    await Purchases.setLogLevel(LogLevel.debug); // remove in production
+    await Purchases.configure(
+      PurchasesConfiguration(
+          'test_LCYdlOePnZHXQokJfTjkJLzytyK'), // iOS key from RC dashboard
+    );
   }
 
-  // Load product details from App Store
-  Future<ProductDetails?> getProduct() async {
-    if (!_isAvailable) return null;
-    final Set<String> ids = {productId};
-    final ProductDetailsResponse response =
-        await _inAppPurchase.queryProductDetails(ids);
-    if (response.notFoundIDs.isNotEmpty) {
-      print('Product not found: ${response.notFoundIDs}');
+  // ─── Fetch the product from App Store via RevenueCat ────────────────────────
+  Future<StoreProduct?> getProduct() async {
+    try {
+      final offerings = await Purchases.getOfferings();
+      // Uses your "current" offering in RevenueCat dashboard
+      final package = offerings.current?.availablePackages.firstWhere(
+          (p) => p.storeProduct.identifier == productId,
+          orElse: () => offerings.current!.availablePackages.first);
+      return package?.storeProduct;
+    } catch (e) {
+      print('Failed to fetch product: $e');
       return null;
     }
-    return response.productDetails.firstWhere(
-      (details) => details.id == productId,
-      orElse: () => throw Exception('Product not found'),
-    );
   }
 
-  // Buy the product
-  Future<void> buyProduct(ProductDetails productDetails) async {
-    if (!_isAvailable) return;
-    final PurchaseParam purchaseParam = PurchaseParam(
-      productDetails: productDetails,
-    );
-    await _inAppPurchase.buyNonConsumable(
-      purchaseParam: purchaseParam,
-    );
+  // ─── Purchase ────────────────────────────────────────────────────────────────
+  Future<bool> buyProduct(StoreProduct product) async {
+    try {
+      final customerInfo = await Purchases.purchaseStoreProduct(product);
+      final purchased = _isEntitled(customerInfo);
+      if (purchased) await setPurchased(true);
+      return purchased;
+    } on PurchasesErrorCode catch (e) {
+      if (e == PurchasesErrorCode.purchaseCancelledError) {
+        return false; // user cancelled — not an error
+      }
+      rethrow;
+    }
   }
 
-  // Restore previous purchases
-  Future<void> restorePurchases() async {
-    if (!_isAvailable) return;
-    await _inAppPurchase.restorePurchases();
+  // ─── Restore ─────────────────────────────────────────────────────────────────
+  Future<bool> restorePurchases() async {
+    try {
+      final customerInfo = await Purchases.restorePurchases();
+      final purchased = _isEntitled(customerInfo);
+      if (purchased) await setPurchased(true);
+      return purchased;
+    } catch (e) {
+      print('Restore failed: $e');
+      return false;
+    }
   }
 
-  // Check if already purchased (from local storage)
+  // ─── Check entitlement (use RC entitlement ID you set in dashboard) ──────────
+  bool _isEntitled(CustomerInfo info) {
+    return info.entitlements.active
+        .containsKey('premium'); // your entitlement ID
+  }
+
+  // ─── Local cache (fast UI, no network on every open) ─────────────────────────
   Future<bool> isPurchased() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(purchaseStatusKey) ?? false;
+    // First check RC (source of truth), fall back to local cache
+    try {
+      final info = await Purchases.getCustomerInfo();
+      final purchased = _isEntitled(info);
+      await setPurchased(purchased); // keep cache in sync
+      return purchased;
+    } catch (_) {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_purchaseKey) ?? false;
+    }
   }
 
-  // Save purchase status (called after successful verification)
   Future<void> setPurchased(bool value) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(purchaseStatusKey, value);
+    await prefs.setBool(_purchaseKey, value);
   }
 }
