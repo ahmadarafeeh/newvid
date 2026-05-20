@@ -31,10 +31,6 @@ workflows:
         script: |
           xcode-project use-profiles
 
-      - name: Install CocoaPods
-        script: |
-          cd ios && pod install --repo-update
-
       - name: Build iOS IPA
         script: |
           flutter build ipa --release \
