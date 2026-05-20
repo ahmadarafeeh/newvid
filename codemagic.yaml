@@ -10,15 +10,11 @@ workflows:
       flutter: 3.27.4
       xcode: latest
       cocoapods: default
-      # Optional: If you have certificates stored in Codemagic, you can reference them.
-      # For automatic signing, you don't need to list provisioning profiles.
       ios_signing:
-        distribution_type: app_store          # or "development"
+        distribution_type: app_store
         bundle_identifier: com.ios.ratedly
-        # No 'provisioning_profiles' needed – Codemagic will create/manage them automatically.
-        # If you have a distribution certificate stored in Codemagic, reference it:
         certificates:
-          - iOS Distribution Certificate       # Replace with your certificate's reference name
+          - iOS Distribution Certificate   # Make sure this matches the name in Codemagic UI
 
     triggering:
       events:
@@ -36,11 +32,24 @@ workflows:
         script: |
           flutter packages pub get
 
-      # No 'xcode-project use-profiles' needed – automatic signing handles it.
-
       - name: Pod repo update
         script: |
           cd ios && pod repo update
+
+      - name: Create export_options.plist
+        script: |
+          cat > /Users/builder/export_options.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store</string>
+              <key>teamID</key>
+              <string>R97R49L336</string>
+          </dict>
+          </plist>
+          EOF
 
       - name: Build iOS IPA
         script: |
