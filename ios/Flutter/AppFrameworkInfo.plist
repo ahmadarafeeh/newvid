@@ -20,5 +20,8 @@
   <string>????</string>
   <key>CFBundleVersion</key>
   <string>1.0</string>
+  <!-- ADD THE MISSING KEY HERE -->
+  <key>MinimumOSVersion</key>
+  <string>13.0</string>
 </dict>
 </plist>
