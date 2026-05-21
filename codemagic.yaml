@@ -8,6 +8,8 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.ios.ratedly
+      groups:
+        - app_store_credentials
       vars:
         BUNDLE_ID: "com.ios.ratedly"
       flutter: 3.27.4
