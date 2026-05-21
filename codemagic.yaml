@@ -10,13 +10,6 @@ workflows:
       flutter: 3.27.4
       xcode: latest
       cocoapods: default
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.ios.ratedly
-        provisioning_profile: "Ratedly ios_app_store 1753890624"   # specify the valid profile
-
-    integrations:
-      app_store_connect: Codemagic Full Access
 
     triggering:
       events:
@@ -34,24 +27,19 @@ workflows:
         script: |
           flutter packages pub get
 
-      - name: Update CocoaPods repository
+      - name: Set up code signing
+        script: |
+          xcode-project use-profiles
+
+      - name: Pod repo update
         script: |
           cd ios && pod repo update
 
-      - name: Force automatic signing in Xcode project
+      - name: Build iOS IPA
         script: |
-          cd ios
-          sed -i '' '/97C147071CF9000F007C117D \/\* Release \*\//,/^[[:space:]]*};/ s/\(buildSettings = {\)/\1\n\t\t\t\tCODE_SIGN_STYLE = Automatic;/' Runner.xcodeproj/project.pbxproj
-          sed -i '' '/249021D4217E4FDB00AE95B9 \/\* Profile \*\//,/^[[:space:]]*};/ s/\(buildSettings = {\)/\1\n\t\t\t\tCODE_SIGN_STYLE = Automatic;/' Runner.xcodeproj/project.pbxproj
-          cd ..
-
-      - name: Set up code signing with verbose logging
-        script: |
-          xcode-project use-profiles --project ios/Runner.xcodeproj --code-signing-setup-verbose-logging
-
-      - name: Build IPA for App Store
-        script: |
-          flutter build ipa --release --build-number=$BUILD_NUMBER
+          flutter build ipa --release \
+            --build-number=$BUILD_NUMBER \
+            --export-options-plist=/Users/builder/export_options.plist
 
     artifacts:
       - build/ios/ipa/*.ipa
