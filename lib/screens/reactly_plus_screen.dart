@@ -51,8 +51,7 @@ class _ReactlyPlusScreenState extends State<ReactlyPlusScreen> {
     if (_isProcessing) return;
     if (_product == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Product not available. Try again later.')),
+        const SnackBar(content: Text('Product not available. Try again later.')),
       );
       return;
     }
@@ -62,9 +61,7 @@ class _ReactlyPlusScreenState extends State<ReactlyPlusScreen> {
       if (mounted) {
         setState(() => _isPurchased = success);
         if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Reactly+ activated! Thank you 🎉')),
-          );
+          _showSuccessDialog();
         }
       }
     } catch (e) {
@@ -76,6 +73,83 @@ class _ReactlyPlusScreenState extends State<ReactlyPlusScreen> {
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
+  }
+
+  void _showSuccessDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.amber.withOpacity(0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.workspace_premium,
+                  color: Colors.amber, size: 48),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Reactly+ Activated!',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'You now enjoy an ad-free experience.',
+              style: TextStyle(fontSize: 15),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.blue.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: const [
+                  Icon(Icons.verified, color: Colors.blue, size: 22),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Our team will reach out to you through Reactly within 2 hours to verify your account.',
+                      style: TextStyle(fontSize: 13, color: Colors.blue),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                ),
+                child: const Text(
+                  'Got it!',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _handleRestore() async {
@@ -123,7 +197,7 @@ class _ReactlyPlusScreenState extends State<ReactlyPlusScreen> {
         foregroundColor: textColor,
       ),
       body: _isLoading
-          ? Center(child: CircularProgressIndicator(color: textColor))
+          ? Center(child: CircularProgressIndicator(color: Colors.amber))
           : SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: Column(
@@ -156,17 +230,10 @@ class _ReactlyPlusScreenState extends State<ReactlyPlusScreen> {
                     cardColor: cardColor,
                   ),
                   _buildBenefitTile(
-                    icon: Icons.public,
-                    title: 'Change Your Country',
-                    description: 'Update your country setting anytime',
-                    textColor: textColor,
-                    cardColor: cardColor,
-                  ),
-                  _buildBenefitTile(
                     icon: Icons.verified,
                     title: 'Apply for Verification',
                     description:
-                        'Get the blue checkmark (reviewed by our team)',
+                        'Get the blue checkmark — our team will reach out within 2 hours',
                     textColor: textColor,
                     cardColor: cardColor,
                   ),
@@ -186,7 +253,7 @@ class _ReactlyPlusScreenState extends State<ReactlyPlusScreen> {
                   ],
                   const SizedBox(height: 32),
                   Text(
-                    'Subscriptions are managed by Apple.\nPayment will be charged to your Apple ID.',
+                    'Payment will be charged to your Apple ID.\nManaged through the App Store.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 12,
@@ -245,9 +312,7 @@ class _ReactlyPlusScreenState extends State<ReactlyPlusScreen> {
                 height: 22,
                 width: 22,
                 child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  color: Colors.black,
-                ),
+                    strokeWidth: 2.5, color: Colors.black),
               )
             : Text(
                 _product != null
