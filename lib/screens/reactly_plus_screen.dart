@@ -215,7 +215,7 @@ class _ReactlyPlusScreenState extends State<ReactlyPlusScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'One-time payment · Lifetime access',
+                    'Monthly subscription · Full feature access',
                     style: TextStyle(
                       fontSize: 14,
                       color: textColor.withOpacity(0.5),
