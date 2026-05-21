@@ -49,6 +49,12 @@ workflows:
       - /tmp/xcodebuild_logs/*.log
 
     publishing:
+      app_store_connect:
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+        submit_to_testflight: true
+        cancel_previous_submissions: true
       email:
         recipients:
           - ahmadarafeh9@gmail.com
