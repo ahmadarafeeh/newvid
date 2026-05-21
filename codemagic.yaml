@@ -9,7 +9,7 @@ workflows:
         distribution_type: app_store
         bundle_identifier: com.ios.ratedly
       groups:
-        - app_store_credentials
+        - app_store_credentials          # Stores APP_STORE_CONNECT_PRIVATE_KEY, KEY_ID, ISSUER_ID
       vars:
         BUNDLE_ID: "com.ios.ratedly"
       flutter: 3.27.4
@@ -45,6 +45,33 @@ workflows:
           flutter build ipa --release \
             --build-number=$BUILD_NUMBER \
             --export-options-plist=/Users/builder/export_options.plist
+
+      - name: Fix missing MinimumOSVersion in App.framework
+        script: |
+          IPA_PATH="build/ios/ipa/Ratedly.ipa"
+          if [ ! -f "$IPA_PATH" ]; then
+            echo "❌ IPA not found at $IPA_PATH – aborting fix"
+            exit 1
+          fi
+
+          # Unpack the IPA
+          unzip -q "$IPA_PATH" -d /tmp/ipa_fix
+          # Find App.framework/Info.plist
+          INFO_PLIST=$(find /tmp/ipa_fix/Payload -name "App.framework" -type d | head -1)/Info.plist
+          if [ ! -f "$INFO_PLIST" ]; then
+            echo "⚠️ App.framework/Info.plist not found – nothing to fix"
+          else
+            # Add or set MinimumOSVersion to 13.0 (match your deployment target)
+            /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string 13.0" "$INFO_PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 13.0" "$INFO_PLIST"
+            echo "✅ Fixed MinimumOSVersion in $INFO_PLIST"
+
+            # Repack the IPA
+            cd /tmp/ipa_fix
+            zip -qr "$OLDPWD/$IPA_PATH" Payload
+            cd "$OLDPWD"
+          fi
+          rm -rf /tmp/ipa_fix
 
     artifacts:
       - build/ios/ipa/*.ipa
