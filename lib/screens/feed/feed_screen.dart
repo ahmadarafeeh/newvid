@@ -22,6 +22,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:Ratedly/providers/user_provider.dart';
 import 'package:Ratedly/screens/feed/feed_skeleton.dart';
+import 'package:Ratedly/services/iap_service.dart';   // ADDED for premium check
 
 class _ColorSet {
   final Color textColor;
@@ -1077,7 +1078,14 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _loadInterstitialAd() {
+  // ===========================================================================
+  // MODIFIED: premium check added to prevent loading ads for premium users
+  // ===========================================================================
+  void _loadInterstitialAd() async {
+    // Don't load ads for premium users
+    final isPremium = await IAPService().isPurchased();
+    if (isPremium) return;
+
     InterstitialAd.load(
       adUnitId: AdHelper.feedInterstitialAdUnitId,
       request: const AdRequest(),
@@ -1103,7 +1111,14 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _showInterstitialAd() {
+  // ===========================================================================
+  // MODIFIED: premium check added to prevent showing ads for premium users
+  // ===========================================================================
+  void _showInterstitialAd() async {
+    // Don't show ads for premium users
+    final isPremium = await IAPService().isPurchased();
+    if (isPremium) return;
+
     final now = DateTime.now();
     if (_lastInterstitialAdTime != null &&
         now.difference(_lastInterstitialAdTime!) <
