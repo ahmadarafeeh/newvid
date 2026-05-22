@@ -59,8 +59,8 @@ class IAPService {
 
   // ─── DB read/write ────────────────────────────────────────────────────────────
 
-  /// Writes the premium status to the `users` table row matching the current
-  /// Firebase UID. Silently swallows errors so it never breaks the purchase flow.
+  /// Writes isPremium to the users table row matching the current Firebase UID.
+  /// This is account-scoped — only THIS account's row is updated.
   Future<void> setPurchased(bool value) async {
     final uid = _firebaseUid;
     if (uid == null) {
@@ -78,8 +78,8 @@ class IAPService {
     }
   }
 
-  /// Reads premium status directly from the `users` table.
-  /// Returns `false` when the row is missing or the column is null.
+  /// Reads isPremium directly from the users table for the current Firebase UID.
+  /// Returns false if the row is missing, the column is null, or a DB error occurs.
   Future<bool> _getPurchasedFromDB() async {
     final uid = _firebaseUid;
     if (uid == null) return false;
@@ -207,12 +207,15 @@ class IAPService {
       final purchased = _isEntitled(customerInfo);
 
       if (purchased) {
-        await setPurchased(true); // ← writes to DB
+        // Writes only to this account's DB row — other accounts on the same
+        // Apple ID are unaffected
+        await setPurchased(true);
         await _log(
           step: 'buy_product',
           status: 'success',
           userId: userId,
           productId: product.identifier,
+          extraInfo: 'isPremium set for uid=${_firebaseUid}',
         );
       } else {
         await _log(
@@ -261,25 +264,36 @@ class IAPService {
 
   // ─── Restore ──────────────────────────────────────────────────────────────────
 
+  /// Checks RevenueCat for a valid prior purchase on this Apple ID.
+  /// If found, grants premium to THIS account only (the currently signed-in
+  /// Firebase UID). The user must explicitly restore on each account they want
+  /// to enable premium for — it is never automatic.
   Future<bool> restorePurchases() async {
-    await _log(step: 'restore_purchases', status: 'started');
+    await _log(
+      step: 'restore_purchases',
+      status: 'started',
+      userId: _firebaseUid,
+    );
     try {
       final customerInfo = await Purchases.restorePurchases();
-      final purchased = _isEntitled(customerInfo);
+      final entitled = _isEntitled(customerInfo);
 
       await _log(
         step: 'restore_purchases',
-        status: purchased ? 'success' : 'no_purchases_found',
+        status: entitled ? 'success' : 'no_purchases_found',
+        userId: _firebaseUid,
         extraInfo:
             'Active entitlements: ${customerInfo.entitlements.active.keys.join(', ')}',
       );
 
-      if (purchased) await setPurchased(true); // ← writes to DB
-      return purchased;
+      // Only grants premium to THIS account's DB row
+      if (entitled) await setPurchased(true);
+      return entitled;
     } catch (e) {
       await _log(
         step: 'restore_purchases',
         status: 'exception',
+        userId: _firebaseUid,
         errorMessage: e.toString(),
         errorCode: e.runtimeType.toString(),
       );
@@ -296,34 +310,18 @@ class IAPService {
 
   // ─── isPurchased ──────────────────────────────────────────────────────────────
 
-  /// Source of truth: RevenueCat (live entitlement check).
-  /// On success the DB is updated to stay in sync.
-  /// On RevenueCat failure: falls back to the `users.isPremium` DB value
-  /// so the user isn't locked out due to a network hiccup.
+  /// Source of truth: users.isPremium in the database.
+  /// RevenueCat is never consulted here — premium is per account, not per
+  /// Apple ID. A user with multiple accounts must explicitly restore purchases
+  /// on each account they want to grant premium to.
   Future<bool> isPurchased() async {
-    try {
-      final info = await Purchases.getCustomerInfo();
-      final purchased = _isEntitled(info);
-
-      await _log(
-        step: 'is_purchased_check',
-        status: purchased ? 'premium_active' : 'not_premium',
-        userId: info.originalAppUserId,
-        extraInfo:
-            'Active entitlements: ${info.entitlements.active.keys.join(', ')}',
-      );
-
-      // Keep DB in sync with the live RevenueCat result
-      await setPurchased(purchased);
-      return purchased;
-    } catch (e) {
-      await _log(
-        step: 'is_purchased_check',
-        status: 'exception_using_db_fallback',
-        errorMessage: e.toString(),
-      );
-      // Fallback: read directly from the database (no local cache)
-      return _getPurchasedFromDB();
-    }
+    final purchased = await _getPurchasedFromDB();
+    await _log(
+      step: 'is_purchased_check',
+      status: purchased ? 'premium_active' : 'not_premium',
+      userId: _firebaseUid,
+      extraInfo: 'Read from DB only — account-scoped, no RevenueCat call',
+    );
+    return purchased;
   }
 }
