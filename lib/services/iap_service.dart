@@ -1,5 +1,5 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class IAPService {
@@ -8,9 +8,15 @@ class IAPService {
   IAPService._internal();
 
   static const String productId = 'ratedly_plus';
-  static const String _purchaseKey = 'reactly_plus_purchased';
 
-  // ─── Supabase logger ────────────────────────────────────────────────────────
+  final SupabaseClient _supabase = Supabase.instance.client;
+
+  // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+  String? get _firebaseUid => FirebaseAuth.instance.currentUser?.uid;
+
+  // ─── Supabase logger ─────────────────────────────────────────────────────────
+
   Future<void> _log({
     required String step,
     required String status,
@@ -22,7 +28,7 @@ class IAPService {
     String? extraInfo,
   }) async {
     try {
-      await Supabase.instance.client.from('purchase_logs').insert({
+      await _supabase.from('purchase_logs').insert({
         'user_id': userId,
         'step': step,
         'status': status,
@@ -37,7 +43,8 @@ class IAPService {
     }
   }
 
-  // ─── Init ────────────────────────────────────────────────────────────────────
+  // ─── Init ─────────────────────────────────────────────────────────────────────
+
   static Future<void> init() async {
     try {
       await Purchases.setLogLevel(LogLevel.debug);
@@ -50,7 +57,47 @@ class IAPService {
     }
   }
 
-  // ─── Get Product ─────────────────────────────────────────────────────────────
+  // ─── DB read/write ────────────────────────────────────────────────────────────
+
+  /// Writes the premium status to the `users` table row matching the current
+  /// Firebase UID. Silently swallows errors so it never breaks the purchase flow.
+  Future<void> setPurchased(bool value) async {
+    final uid = _firebaseUid;
+    if (uid == null) {
+      print('[IAP] setPurchased: no Firebase UID — skipping DB write');
+      return;
+    }
+    try {
+      await _supabase
+          .from('users')
+          .update({'isPremium': value})
+          .eq('uid', uid);
+      print('[IAP] isPremium=$value written to users table for uid=$uid');
+    } catch (e) {
+      print('[IAP] Failed to update isPremium in DB: $e');
+    }
+  }
+
+  /// Reads premium status directly from the `users` table.
+  /// Returns `false` when the row is missing or the column is null.
+  Future<bool> _getPurchasedFromDB() async {
+    final uid = _firebaseUid;
+    if (uid == null) return false;
+    try {
+      final row = await _supabase
+          .from('users')
+          .select('isPremium')
+          .eq('uid', uid)
+          .maybeSingle();
+      return (row?['isPremium'] as bool?) ?? false;
+    } catch (e) {
+      print('[IAP] Failed to read isPremium from DB: $e');
+      return false;
+    }
+  }
+
+  // ─── Get Product ──────────────────────────────────────────────────────────────
+
   Future<StoreProduct?> getProduct() async {
     await _log(step: 'get_product', status: 'started');
     try {
@@ -61,7 +108,8 @@ class IAPService {
         await _log(
           step: 'get_offerings',
           status: 'failed',
-          errorMessage: 'offerings.current is null — no current offering set in RevenueCat dashboard',
+          errorMessage:
+              'offerings.current is null — no current offering set in RevenueCat dashboard',
           extraInfo: 'All offerings: ${offerings.all.keys.join(', ')}',
         );
         return null;
@@ -71,7 +119,8 @@ class IAPService {
         step: 'get_offerings',
         status: 'success',
         offeringId: offerings.current!.identifier,
-        extraInfo: 'Packages: ${offerings.current!.availablePackages.map((p) => p.storeProduct.identifier).join(', ')}',
+        extraInfo:
+            'Packages: ${offerings.current!.availablePackages.map((p) => p.storeProduct.identifier).join(', ')}',
       );
 
       if (offerings.current!.availablePackages.isEmpty) {
@@ -84,7 +133,6 @@ class IAPService {
         return null;
       }
 
-      // Try to find exact product match
       Package? package;
       try {
         package = offerings.current!.availablePackages.firstWhere(
@@ -97,13 +145,13 @@ class IAPService {
           extraInfo: 'Price: ${package.storeProduct.priceString}',
         );
       } catch (_) {
-        // Fallback to first package
         package = offerings.current!.availablePackages.first;
         await _log(
           step: 'get_product',
           status: 'using_fallback_product',
           productId: package.storeProduct.identifier,
-          extraInfo: 'Expected $productId but used fallback. Price: ${package.storeProduct.priceString}',
+          extraInfo:
+              'Expected $productId but used fallback. Price: ${package.storeProduct.priceString}',
         );
       }
 
@@ -120,7 +168,8 @@ class IAPService {
     }
   }
 
-  // ─── Purchase ────────────────────────────────────────────────────────────────
+  // ─── Purchase ─────────────────────────────────────────────────────────────────
+
   Future<bool> buyProduct(StoreProduct product) async {
     String? userId;
     try {
@@ -151,13 +200,14 @@ class IAPService {
         status: 'apple_returned',
         userId: userId,
         productId: product.identifier,
-        extraInfo: 'Active entitlements: ${customerInfo.entitlements.active.keys.join(', ')}',
+        extraInfo:
+            'Active entitlements: ${customerInfo.entitlements.active.keys.join(', ')}',
       );
 
       final purchased = _isEntitled(customerInfo);
 
       if (purchased) {
-        await setPurchased(true);
+        await setPurchased(true); // ← writes to DB
         await _log(
           step: 'buy_product',
           status: 'success',
@@ -170,7 +220,9 @@ class IAPService {
           status: 'entitlement_not_found',
           userId: userId,
           productId: product.identifier,
-          errorMessage: 'Purchase went through but premium entitlement not found. Active: ${customerInfo.entitlements.active.keys.join(', ')}',
+          errorMessage:
+              'Purchase went through but premium entitlement not found. '
+              'Active: ${customerInfo.entitlements.active.keys.join(', ')}',
         );
       }
 
@@ -207,7 +259,8 @@ class IAPService {
     }
   }
 
-  // ─── Restore ─────────────────────────────────────────────────────────────────
+  // ─── Restore ──────────────────────────────────────────────────────────────────
+
   Future<bool> restorePurchases() async {
     await _log(step: 'restore_purchases', status: 'started');
     try {
@@ -217,10 +270,11 @@ class IAPService {
       await _log(
         step: 'restore_purchases',
         status: purchased ? 'success' : 'no_purchases_found',
-        extraInfo: 'Active entitlements: ${customerInfo.entitlements.active.keys.join(', ')}',
+        extraInfo:
+            'Active entitlements: ${customerInfo.entitlements.active.keys.join(', ')}',
       );
 
-      if (purchased) await setPurchased(true);
+      if (purchased) await setPurchased(true); // ← writes to DB
       return purchased;
     } catch (e) {
       await _log(
@@ -234,12 +288,18 @@ class IAPService {
     }
   }
 
-  // ─── Entitlement check ───────────────────────────────────────────────────────
+  // ─── Entitlement check ────────────────────────────────────────────────────────
+
   bool _isEntitled(CustomerInfo info) {
     return info.entitlements.active.containsKey('Reactly: Share & React Pro');
   }
 
-  // ─── isPurchased ─────────────────────────────────────────────────────────────
+  // ─── isPurchased ──────────────────────────────────────────────────────────────
+
+  /// Source of truth: RevenueCat (live entitlement check).
+  /// On success the DB is updated to stay in sync.
+  /// On RevenueCat failure: falls back to the `users.isPremium` DB value
+  /// so the user isn't locked out due to a network hiccup.
   Future<bool> isPurchased() async {
     try {
       final info = await Purchases.getCustomerInfo();
@@ -249,24 +309,21 @@ class IAPService {
         step: 'is_purchased_check',
         status: purchased ? 'premium_active' : 'not_premium',
         userId: info.originalAppUserId,
-        extraInfo: 'Active entitlements: ${info.entitlements.active.keys.join(', ')}',
+        extraInfo:
+            'Active entitlements: ${info.entitlements.active.keys.join(', ')}',
       );
 
+      // Keep DB in sync with the live RevenueCat result
       await setPurchased(purchased);
       return purchased;
     } catch (e) {
       await _log(
         step: 'is_purchased_check',
-        status: 'exception_using_cache',
+        status: 'exception_using_db_fallback',
         errorMessage: e.toString(),
       );
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getBool(_purchaseKey) ?? false;
+      // Fallback: read directly from the database (no local cache)
+      return _getPurchasedFromDB();
     }
-  }
-
-  Future<void> setPurchased(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_purchaseKey, value);
   }
 }
