@@ -863,16 +863,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               builder: (_) => const ReactlyPlusScreen()),
                         ),
                       ),
-                    _buildOptionTile(
-                      title: 'Blue Verification',
-                      icon: Icons.verified,
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (context) =>
-                                const BlueVerificationScreen()),
-                      ),
-                    ),
+                    // Blue Verification button removed
                     _buildOptionTile(
                       title: 'Invite a Friend',
                       icon: Icons.person_add_alt_1,
