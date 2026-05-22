@@ -7,7 +7,7 @@ class IAPService {
   factory IAPService() => _instance;
   IAPService._internal();
 
-  static const String productId = 'ratedly_plus_1';
+  static const String productId = 'ratedly_plus';
   static const String _purchaseKey = 'reactly_plus_purchased';
 
   // ─── Supabase logger ────────────────────────────────────────────────────────
@@ -236,7 +236,7 @@ class IAPService {
 
   // ─── Entitlement check ───────────────────────────────────────────────────────
   bool _isEntitled(CustomerInfo info) {
-    return info.entitlements.active.containsKey('premium');
+    return info.entitlements.active.containsKey('Reactly: Share & React Pro');
   }
 
   // ─── isPurchased ─────────────────────────────────────────────────────────────
